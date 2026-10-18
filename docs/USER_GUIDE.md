@@ -19,7 +19,7 @@ The default bundled screenshot model supports varied shaded pieces, board textur
 1. Display a genuine standard starting position with all pieces on their original squares.
 2. Start capture and choose **Calibrate piece set**.
 3. Confirm White or Black at the bottom. Do not confirm this on a midgame board.
-4. Verify the reconstructed preview. Calibration stays local under `custom-templates.npz`. Return to **Settings → Piece recognition → Bundled screenshot model** to leave template mode. Calibration files from version 1.0 are not automatically activated by version 1.1.
+4. Verify the reconstructed preview. Calibration stays local under `custom-templates.npz`. Return to **Settings → Piece recognition → Bundled screenshot model** to leave template mode. Calibration files from version 1.0 are not automatically activated by later versions.
 
 Choose **Flip orientation** if automatic detection is wrong. Settings can lock White/Black at the bottom or restore Auto. Automatic mode compares both orientations to the existing position and handles a board flip without adding chess moves.
 
@@ -51,13 +51,19 @@ If several sequences fit, the move panel shows competing SAN lines. Later frames
 
 Known earlier positions are treated as likely review/rewind when a short live continuation does not explain them. Temporary menus, advertisements or a hidden board do not overwrite the current game. Legal analysis can be indistinguishable from play; pause recording during known analysis or off-board browsing.
 
-After a nonterminal reset to the standard position, the app waits for an opening continuation different from the previous game before separating a likely new game. Identical opening replay remains uncertain. **New game from visible board** explicitly archives the current game and starts another if you know the stream changed games. A terminal game followed by the initial position separates automatically.
+After a nonterminal reset to the standard position, the app waits for an opening continuation different from the previous game before separating a likely new game. Identical opening replay remains uncertain. **Start PGN from visible FEN** saves the current PGN as its own game, then begins another from the currently displayed board. Earlier moves are not added to the new PGN. Standard starting boards use the normal PGN headers; a midgame uses `SetUp` and `FEN`. Its side to move is inferred from the next legal continuation. Castling rights and en passant history are not visible and are left unset. A terminal game followed by the initial position separates automatically.
 
 ## Starting in the middle
 
 You can begin at a valid midgame position. The app records from that position and infers the turn from subsequent evidence under its shortest-gap assumption. Earlier moves are unavailable. It assumes no castling rights or en passant target because those facts are not visible in a screenshot. If known, enter the exact full FEN in Settings **before** beginning a new recording. This includes turn, rights, target and counters.
 
-PGN export uses standard `SetUp` and `FEN` headers. A game awaiting initial-turn inference is provisional and annotated. Do not treat that provisional initial FEN as a verified history. Select the correct turn from the competing options or wait for the next clear move.
+PGN export uses standard `SetUp` and `FEN` headers. A game awaiting initial-turn inference is provisional and annotated. Use **Copy visible FEN** to send the captured board to Nibbler or another tool. If the board matches a known game position, the app preserves its known turn and rights; otherwise it asks whether White or Black moves and assumes no castling rights or en passant target. The FEN begins the new PGN; moves from before that position are not reconstructed.
+
+## Unmatched positions and automatic recovery
+
+When a resumed video jumps beyond the saved position, the current PGN may not have a legal path to the visible board within the search limit. If a clear unmatched, rewind or still ambiguous position stays unchanged for the configured time (**15 seconds** by default), ChessStream keeps the earlier game and starts a separate PGN from the visible board FEN. A countdown appears in the live status. The new PGN records moves from this FEN onward; it does not guess the unseen moves. The side to move is inferred from the next legal continuation. Set **Start a FEN segment after unresolved position** to **Off** to disable automatic recovery. The **Start PGN from visible FEN** button starts the same kind of segment immediately.
+
+A single legal move waiting for the opponent remains provisional and is excluded from this timeout so a dragged piece does not become a move just because it sat still. **Copy visible FEN** lets you use the displayed position before the reply arrives.
 
 ## Library and PGN export
 

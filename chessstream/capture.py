@@ -158,6 +158,7 @@ class RecordingWorker(QThread):
                         except Exception as e:
                             self.problem.emit(str(e))
                     if self.paused.is_set():
+                        self.manager.clear_position_recovery()
                         self.stopping.wait(.1)
                         continue
                     configuration=(settings.onnx_model,settings.recognition_mode)
@@ -257,6 +258,7 @@ class RecordingWorker(QThread):
                                         uncertain_squares=obs.uncertain_squares(max(.80,settings.min_confidence)),
                                         recognition_mode=settings.recognition_mode)
                     else:
+                        self.manager.clear_position_recovery()
                         self.frame.emit(image)
                         snapshot.update(status="Board hidden / not found • game preserved",confidence=0)
                     # Position-mode storage never suppresses recognition, search

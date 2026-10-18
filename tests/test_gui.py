@@ -2,6 +2,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QInputDialog
 from chessstream.gui import MainWindow
 from chessstream.domain import Observation
 import chess
@@ -61,4 +62,24 @@ def test_provisional_san_is_visible_but_excluded_from_verified_pgn(tmp_path):
     assert window.screenshot_mode.currentData()=='positions' and not window.interval.isEnabled()
     window.screenshot_mode.setCurrentIndex(1)
     assert window.settings.screenshot_mode=='interval' and window.interval.isEnabled()
+    window.close();window.deleteLater();app.processEvents()
+
+
+def test_copy_visible_fen_copies_known_and_user_selected_side_to_move(tmp_path,monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(tmp_path)
+    board=chess.Board()
+    for san in 'e4 e5 Nf3 Nc6 Bc4'.split():board.push_san(san)
+    window.manager.process(Observation.from_board(board))
+
+    choices={}
+    def choose_side(parent,title,prompt,items,current,editable):
+        choices['items']=items
+        return items[1],True
+    monkeypatch.setattr(QInputDialog,'getItem',choose_side)
+    window.copy_visible_fen()
+    copied=app.clipboard().text()
+    assert chess.Board(copied).board_fen()==board.board_fen()
+    assert chess.Board(copied).turn is chess.BLACK
+    assert len(choices['items'])==2
     window.close();window.deleteLater();app.processEvents()

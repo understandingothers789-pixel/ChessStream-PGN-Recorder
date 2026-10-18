@@ -5,6 +5,7 @@ from pathlib import Path
 import io
 import json
 import threading
+import time
 import uuid
 import chess
 import chess.pgn
@@ -57,6 +58,10 @@ class GameManager:
         self.last_message = "Select a board and start recording"
         self._persisted_fingerprint=None
         self._last_evidence_signature=None
+        self._unresolved_position=None
+        self._unresolved_since=None
+        self._unresolved_timestamp=None
+        self._clock=time.monotonic
 
     def searcher(self):
         s = self.settings
@@ -111,6 +116,41 @@ class GameManager:
                 "Castling rights and en passant history were not visible; no rights were assumed. Set an exact initial FEN if needed.")
         self._create(chess.Board(roots[0]), obs.timestamp, roots, note)
         return True
+
+    def _visible_roots(self, obs):
+        threshold=max(.80,self.settings.min_confidence)
+        if obs.confidence<threshold or obs.uncertain_squares(threshold):
+            raise ValueError("Wait for a clear, stable board before starting from its FEN")
+        if obs.placement()==chess.Board().board_fen():
+            return chess.Board(),None,""
+        roots=[]
+        for turn in ["w","b"]:
+            board=chess.Board(f"{obs.placement()} {turn} - - 0 1")
+            if board.is_valid():roots.append(board.fen())
+        if not roots:
+            raise ValueError("The visible pieces do not form a valid chess position")
+        note=("Recording started from a visible midgame FEN. Earlier moves are not included. "
+              "Side to move is inferred from the next legal continuation. Castling rights and en passant history "
+              "are not visible in the image and were not assumed.")
+        return chess.Board(roots[0]),roots,note
+
+    def _start_from_visible(self, obs, reason, since=None):
+        board,roots,note=self._visible_roots(obs)
+        previous_id=self.current_id
+        if self.rec:
+            self.note += " A separate PGN segment was started from the visible board FEN; this game's saved moves remain unchanged."
+            self.finish("preserved • continued from visible FEN")
+        self.rec=None
+        self.reset_candidate=None
+        self._create(board,obs.timestamp,roots,note)
+        self.last_message="New PGN started from the visible board position"
+        self.clear_position_recovery()
+        self.store.audit("visible FEN checkpoint",{"previous_game_id":previous_id,"game_id":self.current_id,
+            "reason":reason,"fen":board.fen(),"side_to_move":"inferred" if roots and len(roots)>1 else ("white" if board.turn else "black")})
+        start=since or obs.timestamp
+        self.store.associate_screenshots(self.session_id,self.current_id,since=start)
+        with self.store.transaction() as db:
+            db.execute("UPDATE observations SET game_id=? WHERE session_id=? AND timestamp>=?",(self.current_id,self.session_id,start))
 
     def process(self, obs: Observation) -> dict:
         with self.lock:
@@ -181,6 +221,7 @@ class GameManager:
                         self.store.audit("transient candidate replaced",{"game_id":self.current_id,
                             "placement":obs.placement(),"reason":"clear shorter legal continuation from the verified board; no verified moves rewritten"})
                     self.last_message = update.status
+                    self._track_unresolved_position(obs,update.status)
                     outcome = self.rec.board.outcome(claim_draw=False)
                     if outcome and not self.result_override:
                         self.headers["Result"] = outcome.result()
@@ -195,6 +236,32 @@ class GameManager:
                      "orientation":obs.orientation})
                 self._last_evidence_signature=signature
             return self.snapshot()
+
+    def _track_unresolved_position(self,obs,status):
+        """Checkpoint an unchanged, clear unmatched board as a fresh FEN PGN."""
+        seconds=float(self.settings.unresolved_fen_seconds)
+        eligible=(seconds>0 and self.rec is not None
+                  and status.startswith(("unmatched position","search limit","uncertain","review / rewind"))
+                  and obs.placement()!=self.rec.board.board_fen()
+                  and obs.confidence>=max(.80,self.settings.min_confidence)
+                  and not obs.uncertain_squares(max(.80,self.settings.min_confidence)))
+        if not eligible:
+            self.clear_position_recovery()
+            return
+        now=self._clock()
+        if self._unresolved_position!=obs.placement():
+            self._unresolved_position=obs.placement()
+            self._unresolved_since=now
+            self._unresolved_timestamp=obs.timestamp
+        elapsed=now-self._unresolved_since
+        if elapsed>=seconds:
+            self._start_from_visible(obs,"stable board remained unresolved for configured timeout",self._unresolved_timestamp)
+        else:
+            remaining=max(1,int(seconds-elapsed+.999))
+            self.last_message=f"{status} • will start a new FEN recording in {remaining}s if this clear position remains unresolved"
+
+    def clear_position_recovery(self):
+        self._unresolved_position=self._unresolved_since=self._unresolved_timestamp=None
 
     def persist(self):
         if not self.rec:
@@ -255,10 +322,29 @@ class GameManager:
         with self.lock:
             if not self.last_observation:
                 raise ValueError("Capture a clear board first")
-            self.finish("archived • new game confirmed")
-            self.rec = None
-            self.reset_candidate = None
-            self._initialize(self.last_observation)
+            self._start_from_visible(self.last_observation,"started manually from visible board")
+
+    def visible_fens(self):
+        """FEN candidates for the last screen position, preserving known rights if available."""
+        with self.lock:
+            if not self.last_observation:return []
+            threshold=max(.80,self.settings.min_confidence)
+            if self.last_observation.confidence<threshold or self.last_observation.uncertain_squares(threshold):return []
+            placement=self.last_observation.placement();boards=[]
+            if self.rec:
+                board=chess.Board(self.rec.initial_fen)
+                boards.append(board.copy())
+                for uci in self.rec.verified:
+                    board.push_uci(uci);boards.append(board.copy())
+                boards.extend(branch.board() for branch in self.rec.branches)
+            candidates=[]
+            for board in boards:
+                if board.board_fen()==placement and board.fen() not in candidates:candidates.append(board.fen())
+            if not candidates:
+                for turn in ["w","b"]:
+                    board=chess.Board(f"{placement} {turn} - - 0 1")
+                    if board.is_valid():candidates.append(board.fen())
+            return candidates
 
     def recover(self, gid):
         with self.lock:
@@ -274,6 +360,7 @@ class GameManager:
             self.result_override=state.get('result_override',False)
             self.rec = Reconstructor.restore(state,self.searcher())
             self.rec.confirmation_plies=int(self.settings.confirm_on_reply)
+            self.clear_position_recovery()
             self.rec.status = "recovered • ready to resume"
             self.last_message = self.rec.status
             self.persist()

@@ -55,6 +55,7 @@ class Settings:
     deduplicate: bool = False
     screenshot_mode: str = "positions"
     confirm_on_reply: bool = True
+    unresolved_fen_seconds: float = 15.0
     orientation: str = "auto"
     detect_board: bool = True
     max_plies: int = 4
@@ -82,6 +83,7 @@ class Settings:
             result.interval = max(0.1, min(60, float(result.interval)))
             result.adaptive_fps = max(2, min(15, int(result.adaptive_fps)))
             result.max_plies = max(1, min(6, int(result.max_plies)))
+            result.unresolved_fen_seconds = max(0.0, min(600.0, float(result.unresolved_fen_seconds)))
             result.search_ms = max(50, min(5000, int(result.search_ms)))
             result.search_nodes = max(1000, min(1000000, int(result.search_nodes)))
             return result

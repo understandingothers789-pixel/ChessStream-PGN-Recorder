@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.2.0"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.3.0"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
@@ -120,12 +120,13 @@ class MainWindow(QMainWindow):
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
         self.choose_path=button("Confirm selected sequence",self.choose_sequence);self.choose_path.hide();moves_card.box.addWidget(self.choose_path)
-        moves_card.box.addWidget(button("Correct moves…",self.correct_moves));moves_card.box.addWidget(button("New game from visible board",self.new_game))
+        moves_card.box.addWidget(button("Start PGN from visible FEN",self.new_game))
+        moves_card.box.addWidget(button("Correct moves…",self.correct_moves))
         for card in [capture_card,internal,moves_card]:splitter.addWidget(card)
         splitter.setSizes([430,430,265]);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
         self.recovery=muted("Search uses the shortest legal gap. Unseen repetitions and identical transpositions may need review.");box.addWidget(self.recovery)
-        footer=QHBoxLayout();footer.addWidget(button("Export current PGN",self.export_current,primary=True));footer.addWidget(button("Copy PGN",self.copy_current));footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
+        footer=QHBoxLayout();footer.addWidget(button("Export current PGN",self.export_current,primary=True));footer.addWidget(button("Copy PGN",self.copy_current));footer.addWidget(button("Copy visible FEN",self.copy_visible_fen));footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
 
     def region_text(self):
         r=self.region
@@ -315,11 +316,24 @@ class MainWindow(QMainWindow):
             except Exception as e:self.error(str(e))
 
     def new_game(self):
-        if QMessageBox.question(self,"Start separate game?","Archive the current game and begin a separate game from the latest observed board? All screenshots and prior moves are kept.")!=QMessageBox.Yes:return
+        if QMessageBox.question(self,"Start PGN from visible FEN?","Save the current PGN and start a new PGN from the visible board as its starting FEN? Moves before this position are not added to the new PGN. All existing game data and screenshots are kept.")!=QMessageBox.Yes:return
         try:
             if self.worker and self.worker.isRunning():self.worker.commands.put(("new",None))
             else:self.manager.force_new();self.on_update(self.manager.snapshot())
         except Exception as e:self.error(str(e))
+
+    def copy_visible_fen(self):
+        candidates=self.manager.visible_fens()
+        if not candidates:
+            self.error("Capture a clear, stable board first.");return
+        fen=candidates[0]
+        if len(candidates)>1:
+            labels=[("White to move" if chess.Board(value).turn else "Black to move")+"  •  "+value for value in candidates]
+            choice,ok=QInputDialog.getItem(self,"Copy visible FEN","The board image cannot show whose turn it is. Choose the side to move:",labels,0,False)
+            if not ok:return
+            fen=candidates[labels.index(choice)]
+        QApplication.clipboard().setText(fen)
+        self.statusBar().showMessage("Visible position FEN copied",6000)
 
     def build_library(self):
         page,box=self.page("Your game library","Every game is saved locally. Screenshot deletion leaves these games and PGNs intact.")
@@ -534,6 +548,8 @@ class MainWindow(QMainWindow):
         self.adaptive=QCheckBox('Analyze additional temporary frames for fast games');self.adaptive.setChecked(self.settings.adaptive);capture.addRow('Adaptive recognition',self.adaptive)
         self.confirm_reply=QCheckBox('Keep the latest move provisional until the opponent responds');self.confirm_reply.setChecked(self.settings.confirm_on_reply);capture.addRow('Protect against dragged pieces',self.confirm_reply)
         capture.addRow(muted('Recommended for blitz and rapid: a stable hover is not proof of a drop. The last move stays amber and out of PGN until a reply or explicit final-move confirmation.'))
+        self.unresolved_fen=QDoubleSpinBox();self.unresolved_fen.setRange(0,600);self.unresolved_fen.setDecimals(0);self.unresolved_fen.setSuffix(' seconds');self.unresolved_fen.setSpecialValueText('Off');self.unresolved_fen.setValue(self.settings.unresolved_fen_seconds);capture.addRow('Start a FEN segment after unresolved position',self.unresolved_fen)
+        capture.addRow(muted('If a clear board cannot be linked to the saved game for this long, keep the old PGN and continue in a new PGN from the displayed position. Side to move is inferred from later evidence. The latest legal hover is excluded from this timer. Set Off to disable automatic FEN recovery.'))
         self.fps=QSpinBox();self.fps.setRange(2,15);self.fps.setValue(self.settings.adaptive_fps);self.fps.setSuffix(' frames/s');capture.addRow('Adaptive target rate',self.fps)
         self.detect_setting=QCheckBox('Find the board inside the selected area');self.detect_setting.setChecked(self.settings.detect_board);capture.addRow('Board detection',self.detect_setting)
         self.orientation_setting=QComboBox();self.orientation_setting.addItems(['auto','white','black']);self.orientation_setting.setCurrentText(self.settings.orientation);capture.addRow('Color at the bottom',self.orientation_setting)
@@ -570,7 +586,7 @@ class MainWindow(QMainWindow):
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
-            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
+            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))
         except Exception as e:self.error(str(e))
 
