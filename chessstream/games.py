@@ -1,0 +1,341 @@
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+import io
+import json
+import threading
+import uuid
+import chess
+import chess.pgn
+from .domain import Settings, Observation, utcnow, atomic_text
+from .reconstruction import Reconstructor, LegalSearcher
+from .storage import Store
+
+
+def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="") -> str:
+    game = chess.pgn.Game()
+    initial = chess.Board(initial_fen)
+    game.setup(initial)
+    for key, value in headers.items():
+        # PGN values cannot contain newlines or unescaped quotes. Exporter does not escape them.
+        key = str(key)
+        if key.replace("_", "").isalnum():
+            game.headers[key] = str(value).replace("\n"," ").replace("\r"," ").replace('"', "'").replace("\\", "/")
+    if initial.fen() != chess.STARTING_FEN:
+        game.headers["SetUp"] = "1"
+        game.headers["FEN"] = initial.fen()
+    if comment:
+        game.comment = comment
+    node = game
+    board = initial.copy()
+    for uci in moves:
+        move = chess.Move.from_uci(uci)
+        if move not in board.legal_moves:
+            raise ValueError(f"Cannot export illegal move {uci}")
+        node = node.add_variation(move)
+        board.push(move)
+    return game.accept(chess.pgn.StringExporter(headers=True, variations=False, comments=True))
+
+
+class GameManager:
+    def __init__(self, store: Store, settings: Settings, session_id: str | None = None):
+        self.store, self.settings = store, settings
+        self.session_id = session_id or store.session()
+        self.lock = threading.RLock()
+        self.current_id: str | None = None
+        self.rec: Reconstructor | None = None
+        self.headers: dict = {}
+        self.name = ""
+        self.started = ""
+        self.ended: str | None = None
+        self.note = ""
+        self.result_override=False
+        self.reset_candidate: Reconstructor | None = None
+        self.reset_started: str | None = None
+        self.last_observation: Observation | None = None
+        self.last_message = "Select a board and start recording"
+        self._persisted_fingerprint=None
+        self._last_evidence_signature=None
+
+    def searcher(self):
+        s = self.settings
+        return LegalSearcher(s.max_plies, s.search_nodes, s.search_ms, s.min_confidence)
+
+    def _create(self, board, timestamp, roots=None, note=""):
+        self.current_id = uuid.uuid4().hex
+        self.started = timestamp
+        self.ended = None
+        self.result_override=False
+        self.name = "Game " + datetime.fromisoformat(timestamp).astimezone().strftime("%H:%M:%S")
+        self.headers = {"Event":"YouTube Chess Recording","Site":"YouTube",
+                        "Date":timestamp[:10].replace("-","."),"Round":"?",
+                        "White":"Unknown","Black":"Unknown","Result":"*"}
+        self.rec = Reconstructor(board, self.searcher(), roots)
+        self.note = note
+        self.last_message = self.rec.status
+        self.persist()
+        self.store.associate_screenshots(self.session_id,self.current_id,initial_placement=board.board_fen())
+
+    def _initialize(self, obs):
+        if obs.confidence < self.settings.min_confidence:
+            self.last_message = "Waiting for a clear, stable board"
+            return False
+        if self.settings.initial_fen:
+            b = chess.Board(self.settings.initial_fen)
+            if not obs.matches(b, self.settings.min_confidence):
+                self.last_message = "Observed board does not match the configured initial FEN"
+                return False
+            self._create(b, obs.timestamp)
+            return True
+        if obs.placement() == chess.Board().board_fen():
+            self._create(chess.Board(), obs.timestamp)
+            return True
+        roots = []
+        for turn in ["w", "b"]:
+            b = chess.Board(f"{obs.placement()} {turn} - - 0 1")
+            if b.is_valid():
+                roots.append(b.fen())
+        if not roots:
+            self.last_message = "Position is not a valid chessboard • check region, orientation or calibrate"
+            return False
+        note = ("Recording began midgame. Earlier moves are unavailable. Side to move is inferred from later evidence. "
+                "Castling rights and en passant history were not visible; no rights were assumed. Set an exact initial FEN if needed.")
+        self._create(chess.Board(roots[0]), obs.timestamp, roots, note)
+        return True
+
+    def process(self, obs: Observation) -> dict:
+        with self.lock:
+            self.last_observation = obs
+            if not self.rec:
+                self._initialize(obs)
+            else:
+                # A manual orientation correction on the initial, unplayed board
+                # must repair its provisional FEN rather than appear to be moves.
+                if (not self.settings.initial_fen and not self.rec.verified
+                        and all(not branch.moves for branch in self.rec.branches)
+                        and obs.confidence>=self.settings.min_confidence
+                        and obs.placement()!=self.rec.board.board_fen()):
+                    rotated=self.rec.board.transform(chess.flip_vertical).transform(chess.flip_horizontal)
+                    if obs.placement()==rotated.board_fen():
+                        previous=self.rec.initial_fen
+                        if obs.placement()==chess.Board().board_fen():
+                            self.rec=Reconstructor(chess.Board(),self.searcher());self.note=''
+                        else:
+                            roots=[]
+                            for turn in ['w','b']:
+                                initial=chess.Board(f'{obs.placement()} {turn} - - 0 1')
+                                if initial.is_valid():roots.append(initial.fen())
+                            if roots:self.rec=Reconstructor(chess.Board(roots[0]),self.searcher(),roots)
+                        if self.rec.initial_fen!=previous:
+                            if not self.result_override:self.headers['Result']='*';self.ended=None
+                            self.store.audit('initial orientation correction',{'game_id':self.current_id,'previous_fen':previous,'corrected_fen':self.rec.initial_fen})
+                self.rec.searcher = self.searcher()
+                is_start = obs.placement() == chess.Board().board_fen()
+                if is_start and self.rec.verified and self.rec.board.board_fen() != obs.placement():
+                    if self.rec.board.is_game_over(claim_draw=False) or self.headers["Result"] != "*":
+                        self.finish("complete")
+                        self._create(chess.Board(), obs.timestamp)
+                    else:
+                        if not self.reset_candidate:
+                            self.reset_candidate = Reconstructor(chess.Board(), self.searcher())
+                            self.reset_started = obs.timestamp
+                        self.last_message = "Board reset • checking for a new game or opening review"
+                elif self.ended and self.headers['Result']!='*':
+                    self.last_message='Game complete • waiting for a new game'
+                elif self.reset_candidate:
+                    if obs.matches(self.rec.board):
+                        self.reset_candidate = None
+                        self.last_message = "Live position restored"
+                    else:
+                        self.reset_candidate.observe(obs)
+                        candidate = self.reset_candidate
+                        # A known opening replay is ambiguous; a different legal continuation
+                        # from a witnessed reset is evidence of a separate game.
+                        diverges = any(a != b for a,b in zip(candidate.verified, self.rec.verified))
+                        if candidate.verified and (diverges or len(candidate.verified)>len(self.rec.verified)):
+                            stamp = self.reset_started
+                            self.finish("transitioned • result unknown")
+                            self._create(chess.Board(), stamp)
+                            self.rec = candidate
+                            self.reset_candidate = None
+                            # Screenshots taken while awaiting reset classification belong to the new game.
+                            self.store.associate_screenshots(self.session_id,self.current_id,since=stamp)
+                            with self.store.transaction() as db:
+                                db.execute("UPDATE observations SET game_id=? WHERE session_id=? AND timestamp>=?", (self.current_id,self.session_id,stamp))
+                            self.last_message = "New game detected after board reset"
+                        else:
+                            self.last_message = "Opening review / possible new game • previous PGN preserved"
+                else:
+                    update = self.rec.observe(obs)
+                    self.last_message = update.status
+                    outcome = self.rec.board.outcome(claim_draw=False)
+                    if outcome and not self.result_override:
+                        self.headers["Result"] = outcome.result()
+                        self.ended = self.ended or obs.timestamp
+                        self.last_message = "Complete • " + outcome.termination.name.replace("_"," ").lower()
+            if self.rec:
+                self.persist()
+            signature=(self.current_id,obs.placement(),self.last_message,obs.orientation)
+            if signature!=self._last_evidence_signature:
+                self.store.save_observation(self.session_id, self.current_id, obs, self.last_message,
+                    {"labels":obs.labels.tolist(), "confidence":[round(float(v),3) for v in obs.probabilities.max(axis=1)],
+                     "orientation":obs.orientation})
+                self._last_evidence_signature=signature
+            return self.snapshot()
+
+    def persist(self):
+        if not self.rec:
+            return
+        comment = self.note
+        pending = any(b.moves for b in self.rec.branches) or len(self.rec.branches)>1 or self.rec.incomplete
+        if pending:
+            comment += " Unresolved observations exist; only the verified prefix is exported."
+        status = "complete" if self.ended and self.headers["Result"] != "*" else self.rec.status
+        if pending:status+=' • unresolved'
+        data = self.rec.serialize()
+        data["note"] = self.note
+        data['result_override']=self.result_override
+        fingerprint=json.dumps([self.current_id,self.name,self.headers,data,self.ended,self.settings.export_dir,self.settings.auto_export],sort_keys=True)
+        if fingerprint==self._persisted_fingerprint:return
+        pgn = export_pgn(self.rec.initial_fen, self.rec.verified, self.headers, comment)
+        self.store.save_game(self.current_id,self.session_id,self.name,self.started,status,self.headers,data,pgn,self.ended)
+        if self.settings.export_dir and self.settings.auto_export:
+            atomic_text(Path(self.settings.export_dir)/(self.current_id+".pgn"),pgn+"\n")
+        self._persisted_fingerprint=fingerprint
+
+    def snapshot(self):
+        with self.lock:
+            if not self.rec:
+                return {"status":self.last_message,"game_id":None,"fen":None,"moves":[],"alternatives":[]}
+            b = chess.Board(self.rec.initial_fen)
+            san = []
+            for uci in self.rec.verified:
+                san.append(b.san(chess.Move.from_uci(uci)))
+                b.push_uci(uci)
+            alternatives = []
+            for branch in self.rec.branches:
+                if branch.moves or len(self.rec.branches)>1:
+                    leaf = chess.Board(branch.root_fen)
+                    line = []
+                    for uci in branch.moves:
+                        line.append(leaf.san(chess.Move.from_uci(uci)))
+                        leaf.push_uci(uci)
+                    alternatives.append(" ".join(line) or ("White to move" if leaf.turn else "Black to move"))
+            return {"status":self.last_message,"game_id":self.current_id,"name":self.name,
+                    "fen":self.rec.board.fen(),"initial_fen":self.rec.initial_fen,"moves":san,
+                    "plies":len(san),"last_move":self.rec.verified[-1] if san else None,
+                    "alternatives":alternatives,"incomplete":self.rec.incomplete,"note":self.note}
+
+    def finish(self, status="stopped"):
+        with self.lock:
+            if self.rec:
+                self.rec.status = status
+                self.ended = self.ended or utcnow()
+                self.persist()
+
+    def force_new(self):
+        with self.lock:
+            if not self.last_observation:
+                raise ValueError("Capture a clear board first")
+            self.finish("archived • new game confirmed")
+            self.rec = None
+            self.reset_candidate = None
+            self._initialize(self.last_observation)
+
+    def recover(self, gid):
+        with self.lock:
+            row = self.store.game(gid)
+            if not row:
+                raise ValueError("Recording not found")
+            self.current_id, self.session_id = gid, row["session_id"]
+            self.name, self.started, self.ended = row["name"],row["started"],None
+            self.headers = json.loads(row["headers"])
+            self.ended=(row['ended'] or utcnow()) if self.headers.get('Result','*')!='*' else None
+            state = json.loads(row["state"])
+            self.note = state.get("note", "")
+            self.result_override=state.get('result_override',False)
+            self.rec = Reconstructor.restore(state,self.searcher())
+            self.rec.status = "recovered • ready to resume"
+            self.last_message = self.rec.status
+            self.persist()
+
+    def choose(self, index):
+        with self.lock:
+            if not self.rec:
+                return
+            self.rec.choose(index)
+            self.last_message = self.rec.status
+            self.store.audit("manual reconstruction choice",{"game_id":self.current_id,"index":index})
+            self.persist()
+
+    def correct_line(self, san_text: str, undo: int = 0, expected_plies: int | None = None):
+        """Append explicitly entered legal SAN to the verified prefix, never fabricate a gap."""
+        with self.lock:
+            if not self.rec:
+                raise ValueError("No game to correct")
+            if expected_plies is not None and expected_plies!=len(self.rec.verified):
+                raise ValueError('The game advanced while you edited. Pause capture and reopen the correction dialog.')
+            if not 0<=undo<=len(self.rec.verified):raise ValueError('Invalid number of plies to undo')
+            prefix=self.rec.verified[:len(self.rec.verified)-undo] if undo else self.rec.verified[:]
+            trial = chess.Board(self.rec.initial_fen)
+            for uci in prefix:trial.push_uci(uci)
+            moves = []
+            for token in san_text.split():
+                move = trial.parse_san(token)
+                moves.append(move.uci())
+                trial.push(move)
+            if not moves and not undo:
+                return
+            previous=self.rec.serialize()
+            self.rec.board=chess.Board(self.rec.initial_fen)
+            self.rec.verified=prefix+moves
+            self.rec.history=[self.rec.board.board_fen()]
+            for uci in self.rec.verified:
+                self.rec.board.push_uci(uci);self.rec.history.append(self.rec.board.board_fen())
+            from .reconstruction import Branch
+            self.rec.branches = [Branch(self.rec.board.fen(), ())]
+            self.rec.incomplete = False
+            self.note += " A move sequence was confirmed manually."
+            self.rec.status = "recording"
+            if not self.result_override:
+                self.headers['Result']='*';self.ended=None
+            self.store.audit("manual legal SAN correction",{"game_id":self.current_id,"moves":moves,"undone_plies":undo,"previous_state":previous})
+            self.persist()
+
+    def edit(self, gid, name, headers):
+        with self.lock:
+            row = self.store.game(gid)
+            if not row:
+                return
+            if gid == self.current_id:
+                if headers.get('Result','*')!=self.headers.get('Result','*'):
+                    self.result_override=True
+                    self.ended=utcnow() if headers.get('Result','*')!='*' else None
+                self.name, self.headers = name,headers
+                self.persist()
+            else:
+                state = json.loads(row["state"])
+                if headers.get('Result','*')!=json.loads(row['headers']).get('Result','*'):state['result_override']=True
+                pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""))
+                self.store.save_game(gid,row["session_id"],name,row["started"],row["status"],headers,state,pgn,row["ended"])
+
+    def import_pgn(self, path: Path) -> int:
+        count = 0
+        with path.open(encoding="utf-8-sig", errors="strict") as f:
+            while (game := chess.pgn.read_game(f)) is not None:
+                if game.errors:
+                    raise ValueError(f"Invalid PGN: {game.errors[0]}")
+                r = Reconstructor(game.board(), self.searcher())
+                for move in game.mainline_moves():
+                    r.board.push(move)
+                    r.verified.append(move.uci())
+                    r.history.append(r.board.board_fen())
+                from .reconstruction import Branch
+                r.branches = [Branch(r.board.fen(), ())]
+                gid = uuid.uuid4().hex
+                pgn = game.accept(chess.pgn.StringExporter(headers=True, variations=True, comments=True))
+                self.store.save_game(gid,self.session_id,f"{game.headers.get('White','Unknown')} — {game.headers.get('Black','Unknown')}",
+                    utcnow(),"imported",dict(game.headers),r.serialize(),pgn,utcnow())
+                count += 1
+        return count

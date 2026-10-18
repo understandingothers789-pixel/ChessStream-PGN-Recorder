@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+*.egg-info/
+.cache/
+test-results/
+!test-results/evaluation.json
+
+# Generated installers and build reports
+dist/

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chessstream-recorder"
+version = "1.0.0"
+description = "Local screen-to-PGN recorder for Windows 11"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+dependencies = [
+  "numpy==2.2.6", "opencv-python-headless==4.11.0.86", "chess==1.11.2",
+  "PySide6-Essentials==6.8.3", "mss==10.0.0", "platformdirs==4.3.7",
+  "Pillow==11.2.1", "psutil==7.0.0"
+]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.19,<2"]
+dev = ["pytest>=8,<10", "cairosvg>=2.7,<3", "playwright>=1.50,<2", "pyinstaller>=6.12,<7"]
+
+[project.scripts]
+chessstream = "chessstream.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["chessstream*"]
+
+[tool.setuptools.package-data]
+chessstream = ["assets/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

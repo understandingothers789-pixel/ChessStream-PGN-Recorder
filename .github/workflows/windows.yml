@@ -1,0 +1,28 @@
+name: Windows validation and installer
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -e . pytest
+      - run: python -m pytest -q
+      - name: Desktop smoke test
+        run: python -m chessstream --data-dir build/smoke-data --smoke build/desktop.png
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+      - name: Build Windows installer
+        run: python scripts/build_windows.py --makensis 'C:/Program Files (x86)/NSIS/makensis.exe'
+      - name: Test packaged runtime imports and GUI
+        run: |
+          build/windows-portable/runtime/python.exe -c "import chess, cv2, numpy, mss, psutil; from PySide6.QtWidgets import QApplication; from chessstream.vision import TemplateRecognizer; TemplateRecognizer(); print('Bundled imports passed')"
+          build/windows-portable/runtime/python.exe -m chessstream --data-dir build/bundle-smoke --smoke build/bundle-desktop.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChessStream-Windows
+          path: |
+            dist/*.exe
+            build/*desktop.png

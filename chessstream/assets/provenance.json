@@ -1,0 +1,306 @@
+{
+  "repository": "https://github.com/lichess-org/lila",
+  "revision": "49fca53ebe4c1466b0ce723bbdf5ee4165d96c39",
+  "files": [
+    {
+      "set": "cburnett",
+      "file": "wP.svg",
+      "sha256": "a8bd79f344ea69a577cdd7b11cbab7bbebfc157cce01c6d29b8f2edf1c44068e"
+    },
+    {
+      "set": "cburnett",
+      "file": "wN.svg",
+      "sha256": "43d8bed9cd40836335072a20f52d30237e6e2cbe304ffb13e258fa1d576c156a"
+    },
+    {
+      "set": "cburnett",
+      "file": "wB.svg",
+      "sha256": "8bf4f38cc170686775f81158934301942b07e3f1162e76c6305e76d66aaa0910"
+    },
+    {
+      "set": "cburnett",
+      "file": "wR.svg",
+      "sha256": "05746153e11de3ff4a43d6725f704e226e5d5b49c6ff170ed598d3e9883f2cd5"
+    },
+    {
+      "set": "cburnett",
+      "file": "wQ.svg",
+      "sha256": "9c0a960b360e08cea48eedab54e852107145de289b81a82fe27942045e2ab665"
+    },
+    {
+      "set": "cburnett",
+      "file": "wK.svg",
+      "sha256": "09837f1f99dae2d05c2a0bfb5ce0fb9f37a95b124de44f428a08ae18d7b7c557"
+    },
+    {
+      "set": "cburnett",
+      "file": "bP.svg",
+      "sha256": "93e11e46deceff0768211a28df3e39c6d3427aa172bdb5e3928b025bd2858587"
+    },
+    {
+      "set": "cburnett",
+      "file": "bN.svg",
+      "sha256": "72e1565fbc9024015dcb6ee28d918c876523119f6f552c0a40d3118c13a67e13"
+    },
+    {
+      "set": "cburnett",
+      "file": "bB.svg",
+      "sha256": "48ff9dba84dae861b1a81ac58f4647e05cee8a827acad1618bf11beaedcce60d"
+    },
+    {
+      "set": "cburnett",
+      "file": "bR.svg",
+      "sha256": "5928b86919ae815f5d35dea8a25f5a84c3f8839468a137e429d42f618185cbcd"
+    },
+    {
+      "set": "cburnett",
+      "file": "bQ.svg",
+      "sha256": "2d0162d1fe776ac5a4d307d4f6e5960804273edc0d3743f1c97a158f5a64c4b1"
+    },
+    {
+      "set": "cburnett",
+      "file": "bK.svg",
+      "sha256": "2dc3caba39a67a707ebc27f4e41b727dd5252f4f49da695fc15cc2589dd92a47"
+    },
+    {
+      "set": "merida",
+      "file": "wP.svg",
+      "sha256": "2d49d36334cd2836836ce7c25d63353222d10352b80d541bce77645e93707645"
+    },
+    {
+      "set": "merida",
+      "file": "wN.svg",
+      "sha256": "081d2ca7d7a168fc84b292326923a9086a3178db028b564c70f8eab8a96eaa01"
+    },
+    {
+      "set": "merida",
+      "file": "wB.svg",
+      "sha256": "6de6976b55afe25791ddb0cc70cace85dc410253f43a4b7b87db1bd8ad0e01d4"
+    },
+    {
+      "set": "merida",
+      "file": "wR.svg",
+      "sha256": "e278fefe31910848aed6fa378ccc2d366db843aeb3fdeba5ec0635fea0e0616b"
+    },
+    {
+      "set": "merida",
+      "file": "wQ.svg",
+      "sha256": "af2097f7174a0a02ed33c62cede5ed85b96c2a01e4802ce1dd38215330858a3a"
+    },
+    {
+      "set": "merida",
+      "file": "wK.svg",
+      "sha256": "3d029fd614be242e2281c3e308ffb10167880496b31d7b3eb4bd94b4423e8ac6"
+    },
+    {
+      "set": "merida",
+      "file": "bP.svg",
+      "sha256": "09fe0648e683e4f2b24e39164644ae54db7ef5f61122dcb0c7ee927975b7a7c2"
+    },
+    {
+      "set": "merida",
+      "file": "bN.svg",
+      "sha256": "16068e0d7f8bf3de6aa92d4577867f60b19a3e3507006cfdf619c515b8e8cc1e"
+    },
+    {
+      "set": "merida",
+      "file": "bB.svg",
+      "sha256": "5fd6779102126554c70f5ed99232008386a4dbb4913e10f88e6e2f4185750c4e"
+    },
+    {
+      "set": "merida",
+      "file": "bR.svg",
+      "sha256": "e76c948d92145b5e43f6e84c35481465cbb2271047ef568ac5dbb1ce1527cebe"
+    },
+    {
+      "set": "merida",
+      "file": "bQ.svg",
+      "sha256": "5c5bf0da5453c6fef7bb3df00d94f28b86a22a38bd63988949d391f58d7f2516"
+    },
+    {
+      "set": "merida",
+      "file": "bK.svg",
+      "sha256": "6838fd128b1f2fc4f483e5a16cccf59848b0923c95ac75e3894f41eb1b3b2797"
+    },
+    {
+      "set": "chessnut",
+      "file": "wP.svg",
+      "sha256": "81cde9f22edf3f750a282335a6d1367f011642d5a9bb8a94c6c6859ab1b326ea"
+    },
+    {
+      "set": "chessnut",
+      "file": "wN.svg",
+      "sha256": "f0fac07e481f7b31d1b074e458908f8fcad9ee4abdc76d84c274b8c4f438e388"
+    },
+    {
+      "set": "chessnut",
+      "file": "wB.svg",
+      "sha256": "ec62a67ea0212ec75e151ff673b2ef27e33e1732665839148dfdd27c357ab096"
+    },
+    {
+      "set": "chessnut",
+      "file": "wR.svg",
+      "sha256": "57d662b9b905a603e1cf28e36d61576dfd1a50695b23724c7189cd0f15736f03"
+    },
+    {
+      "set": "chessnut",
+      "file": "wQ.svg",
+      "sha256": "2d20b17499c7c268ca87f3c4038a3b1335e0a087010037b0d854f2f7f84aa254"
+    },
+    {
+      "set": "chessnut",
+      "file": "wK.svg",
+      "sha256": "f64f2d088fe96a10fa77104cd1a42339e5495f56d6dcfda491298decbda7b2fa"
+    },
+    {
+      "set": "chessnut",
+      "file": "bP.svg",
+      "sha256": "22da60dfa9fc6bfb54b1ee369dc9e3555e567e43eaea0fccad2e0211259ff0aa"
+    },
+    {
+      "set": "chessnut",
+      "file": "bN.svg",
+      "sha256": "8842b49915174de6d224273f9dffd2a84f65dc5fc2b67c83441cfbe1b423d008"
+    },
+    {
+      "set": "chessnut",
+      "file": "bB.svg",
+      "sha256": "933697379921e0a36f17a6863f5324e7f05fa73b243dab3d94e5ce8c37d064c2"
+    },
+    {
+      "set": "chessnut",
+      "file": "bR.svg",
+      "sha256": "b588445132bd2295989b94b058d6ed91605b5dffbb5b4533a2f782848cae1684"
+    },
+    {
+      "set": "chessnut",
+      "file": "bQ.svg",
+      "sha256": "cf47f78c1ad9a99163e942f70365f8dd2b6d911011a5d8298be3d0596ad924a2"
+    },
+    {
+      "set": "chessnut",
+      "file": "bK.svg",
+      "sha256": "9e3c0ec404aec41dfabea96a204712c3feae80a456496ec0398499a1a77e642f"
+    },
+    {
+      "set": "fantasy",
+      "file": "wP.svg",
+      "sha256": "07105c9aa3fdf172cc51480521ae3401fbfc33cfaab780ffc332d43859d963e6"
+    },
+    {
+      "set": "fantasy",
+      "file": "wN.svg",
+      "sha256": "bb532c0c19727613fe3385d556c99815f5ef5ba4cb75cc07e3e4554ae50e9d0e"
+    },
+    {
+      "set": "fantasy",
+      "file": "wB.svg",
+      "sha256": "3042d9f3359402759d13c5c23bd66129e7cbc63233a9d108312047de63cec904"
+    },
+    {
+      "set": "fantasy",
+      "file": "wR.svg",
+      "sha256": "e4934c4d25d24c7dd2b9e6df4e546c5efbbba09a7d63cb4c72cbc2ae36f32384"
+    },
+    {
+      "set": "fantasy",
+      "file": "wQ.svg",
+      "sha256": "ac53d7b2106532f7c3090531575cf39d5a3315530061be4390f245f6f19f05e4"
+    },
+    {
+      "set": "fantasy",
+      "file": "wK.svg",
+      "sha256": "d806f0d0a94bc1f8d71089a1a12370cea46806dd0dd6d758b04817b831c6ecd2"
+    },
+    {
+      "set": "fantasy",
+      "file": "bP.svg",
+      "sha256": "09b98781c32a4933533a3dfd3fa7ce20618f36827b3d649f69ac32dd7b82469c"
+    },
+    {
+      "set": "fantasy",
+      "file": "bN.svg",
+      "sha256": "aa8eb58d10722fca992dff04985d16165a7b8cf8a3a231c426dc7685a6981040"
+    },
+    {
+      "set": "fantasy",
+      "file": "bB.svg",
+      "sha256": "6e7e079b8c73b066537a6ce2623a14b65d1d625a408af8f42f5cffe3ea798e63"
+    },
+    {
+      "set": "fantasy",
+      "file": "bR.svg",
+      "sha256": "236d1fa4d39bd5563ecbde3453ac80d0b0266a570a7f7644b8ba7902380c14f1"
+    },
+    {
+      "set": "fantasy",
+      "file": "bQ.svg",
+      "sha256": "6c667a1b37d6dec21b2b72238991fbb87b936c5048cdd481e6dc43b2bbd422e5"
+    },
+    {
+      "set": "fantasy",
+      "file": "bK.svg",
+      "sha256": "023b003765e5c812007d02fb92b7d72eaafd535075d2ffeb209dc4a841f9524a"
+    },
+    {
+      "set": "spatial",
+      "file": "wP.svg",
+      "sha256": "e28c15f05210d24667830f4d7f6daa1176e05b33fd571e94575114f8fea7d270"
+    },
+    {
+      "set": "spatial",
+      "file": "wN.svg",
+      "sha256": "ed4b9264f83a3d1d658ed33b9b5286926a3d8cd3e77eb4ef9f5a8600b45d46f9"
+    },
+    {
+      "set": "spatial",
+      "file": "wB.svg",
+      "sha256": "da513b3b8071b0f70c2f03d4b6c84920680a847e972eb629e1a3795a8f61f6bf"
+    },
+    {
+      "set": "spatial",
+      "file": "wR.svg",
+      "sha256": "d1eb1ec3aadf3d37f98b839795780fd4f8c0d47122dfbee069e6a94f6db74722"
+    },
+    {
+      "set": "spatial",
+      "file": "wQ.svg",
+      "sha256": "8d57bc3f75779f1a2a355246d0c1c9a8cfdae721bced568e70d233b0ffa60f98"
+    },
+    {
+      "set": "spatial",
+      "file": "wK.svg",
+      "sha256": "d1255749e00346bfca3e098afd7ab9118a729f8031f0121874c1d306780084e5"
+    },
+    {
+      "set": "spatial",
+      "file": "bP.svg",
+      "sha256": "7d1203bfe0fb86bab3bffbc9d93160c1da16b961c35942853843d3cecda6a30f"
+    },
+    {
+      "set": "spatial",
+      "file": "bN.svg",
+      "sha256": "c0f3dda96a49920412d1496ea6c780f1b5bad5164244bd74e611b2134eeff341"
+    },
+    {
+      "set": "spatial",
+      "file": "bB.svg",
+      "sha256": "3bfac1a7809cf6d50318f701d6108fe76d99f0828a50598023d35f1fafee6627"
+    },
+    {
+      "set": "spatial",
+      "file": "bR.svg",
+      "sha256": "3fb504d1ce6be5208067471de4f64a0099fd0ee017c000f47542e6db03318eb3"
+    },
+    {
+      "set": "spatial",
+      "file": "bQ.svg",
+      "sha256": "1961df8bee9812f3834eb70e5e4f9be42caeffdefb44beeb17877ec530f0f87e"
+    },
+    {
+      "set": "spatial",
+      "file": "bK.svg",
+      "sha256": "aae225fbcf6b9c2ae659c2f355ecd09f5031608e2a0624c808d24d410da21645"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+"""The live vision and reconstruction pipeline can also consume a local video."""
+from pathlib import Path
+from datetime import datetime,timezone,timedelta
+import cv2
+from .domain import Settings
+from .storage import Store
+from .games import GameManager
+from .vision import TemplateRecognizer,OnnxRecognizer,BoardDetector,choose_orientation
+
+
+def replay_video(path:Path,root:Path,region=None,interval=1.0,orientation='auto'):
+    if interval<=0:raise ValueError('Screenshot interval must be positive')
+    settings=Settings.load(root/'settings.json');settings.orientation=orientation
+    store=Store(root);manager=GameManager(store,settings)
+    store.run_retention(settings.retention_days)
+    recognizer=OnnxRecognizer(settings.onnx_model) if settings.onnx_model else TemplateRecognizer(root/'custom-templates.npz');detector=BoardDetector()
+    capture=cv2.VideoCapture(str(path))
+    if not capture.isOpened():raise ValueError(f'Cannot open video: {path}')
+    fps=capture.get(cv2.CAP_PROP_FPS)
+    if fps<=0:raise ValueError('Video does not provide a valid frame rate')
+    step=max(1,round(fps/settings.adaptive_fps));index=0;next_saved=0
+    rect=tuple(map(int,region.split(','))) if region else None
+    start=datetime.now(timezone.utc);previous=None;stable=0
+    try:
+        while True:
+            ok,image=capture.read()
+            if not ok:break
+            if index%step:index+=1;continue
+            seconds=index/fps
+            if rect is None:rect,_=detector.detect(image)
+            board=image
+            if rect:
+                x,y,w,h=rect;board=image[y:y+h,x:x+w]
+            else:index+=1;continue
+            obs=recognizer.recognize(board)
+            if orientation=='auto':obs=choose_orientation(obs,manager.rec.board if manager.rec else None)
+            elif orientation=='black':obs=obs.flipped()
+            obs.timestamp=(start+timedelta(seconds=seconds)).isoformat(timespec='milliseconds')
+            stable=stable+1 if obs.placement()==previous else 1;previous=obs.placement()
+            if stable>=2:manager.process(obs)
+            if seconds>=next_saved:
+                store.save_screenshot(manager.session_id,manager.current_id,board,obs.timestamp,obs.placement(),obs.confidence,
+                    len(manager.rec.verified) if manager.rec else 0,settings.deduplicate)
+                next_saved=seconds+interval
+            index+=1
+        manager.finish();store.finish_session(manager.session_id)
+        print(f'Processed {index} video frames. {len(store.games())} games. PGNs: {root / "pgn"}')
+    finally:capture.release();store.close()

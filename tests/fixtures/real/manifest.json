@@ -1,0 +1,486 @@
+{
+  "captured_at": "2026-10-18T16:14:06.878987+00:00",
+  "method": "Playwright screenshots of actual public analysis UI, not a custom renderer",
+  "games": [
+    {
+      "id": "lichess-fools",
+      "url": "https://lichess.org/analysis",
+      "moves": "f3 e5 g4 Qh4#",
+      "frames": [
+        {
+          "file": "lichess-fools-000.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "ply": 0,
+          "san": "",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-fools-001.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1",
+          "ply": 1,
+          "san": "f3",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-fools-002.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/8/5P2/PPPPP1PP/RNBQKBNR w KQkq - 0 2",
+          "ply": 2,
+          "san": "e5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-fools-003.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+          "ply": 3,
+          "san": "g4",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-fools-004.png",
+          "fen": "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3",
+          "ply": 4,
+          "san": "Qh4#",
+          "orientation": "white"
+        }
+      ],
+      "calibrate": false
+    },
+    {
+      "id": "lichess-scholar",
+      "url": "https://lichess.org/analysis",
+      "moves": "e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#",
+      "frames": [
+        {
+          "file": "lichess-scholar-000.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "ply": 0,
+          "san": "",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-001.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "ply": 1,
+          "san": "e4",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-002.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "ply": 2,
+          "san": "e5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-003.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR b KQkq - 1 2",
+          "ply": 3,
+          "san": "Bc4",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-004.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 2 3",
+          "ply": 4,
+          "san": "Nc6",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-005.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 3 3",
+          "ply": 5,
+          "san": "Qh5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-006.png",
+          "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+          "ply": 6,
+          "san": "Nf6",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-scholar-007.png",
+          "fen": "r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4",
+          "ply": 7,
+          "san": "Qxf7#",
+          "orientation": "white"
+        }
+      ],
+      "calibrate": false
+    },
+    {
+      "id": "lichess-opera",
+      "url": "https://lichess.org/analysis",
+      "moves": "e4 e5 Nf3 d6 d4 Bg4 dxe5 Bxf3 Qxf3 dxe5 Bc4 Nf6 Qb3 Qe7 Nc3 c6 Bg5 b5 Nxb5 cxb5 Bxb5+ Nbd7 O-O-O Rd8 Rxd7 Rxd7 Rd1 Qe6 Bxd7+ Nxd7 Qb8+ Nxb8 Rd8#",
+      "frames": [
+        {
+          "file": "lichess-opera-000.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "ply": 0,
+          "san": "",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-001.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "ply": 1,
+          "san": "e4",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-002.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "ply": 2,
+          "san": "e5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-003.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "ply": 3,
+          "san": "Nf3",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-004.png",
+          "fen": "rnbqkbnr/ppp2ppp/3p4/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3",
+          "ply": 4,
+          "san": "d6",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-005.png",
+          "fen": "rnbqkbnr/ppp2ppp/3p4/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3",
+          "ply": 5,
+          "san": "d4",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-006.png",
+          "fen": "rn1qkbnr/ppp2ppp/3p4/4p3/3PP1b1/5N2/PPP2PPP/RNBQKB1R w KQkq - 1 4",
+          "ply": 6,
+          "san": "Bg4",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-007.png",
+          "fen": "rn1qkbnr/ppp2ppp/3p4/4P3/4P1b1/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 4",
+          "ply": 7,
+          "san": "dxe5",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-008.png",
+          "fen": "rn1qkbnr/ppp2ppp/3p4/4P3/4P3/5b2/PPP2PPP/RNBQKB1R w KQkq - 0 5",
+          "ply": 8,
+          "san": "Bxf3",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-009.png",
+          "fen": "rn1qkbnr/ppp2ppp/3p4/4P3/4P3/5Q2/PPP2PPP/RNB1KB1R b KQkq - 0 5",
+          "ply": 9,
+          "san": "Qxf3",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-010.png",
+          "fen": "rn1qkbnr/ppp2ppp/8/4p3/4P3/5Q2/PPP2PPP/RNB1KB1R w KQkq - 0 6",
+          "ply": 10,
+          "san": "dxe5",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-011.png",
+          "fen": "rn1qkbnr/ppp2ppp/8/4p3/2B1P3/5Q2/PPP2PPP/RNB1K2R b KQkq - 1 6",
+          "ply": 11,
+          "san": "Bc4",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-012.png",
+          "fen": "rn1qkb1r/ppp2ppp/5n2/4p3/2B1P3/5Q2/PPP2PPP/RNB1K2R w KQkq - 2 7",
+          "ply": 12,
+          "san": "Nf6",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-013.png",
+          "fen": "rn1qkb1r/ppp2ppp/5n2/4p3/2B1P3/1Q6/PPP2PPP/RNB1K2R b KQkq - 3 7",
+          "ply": 13,
+          "san": "Qb3",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-014.png",
+          "fen": "rn2kb1r/ppp1qppp/5n2/4p3/2B1P3/1Q6/PPP2PPP/RNB1K2R w KQkq - 4 8",
+          "ply": 14,
+          "san": "Qe7",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-015.png",
+          "fen": "rn2kb1r/ppp1qppp/5n2/4p3/2B1P3/1QN5/PPP2PPP/R1B1K2R b KQkq - 5 8",
+          "ply": 15,
+          "san": "Nc3",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-016.png",
+          "fen": "rn2kb1r/pp2qppp/2p2n2/4p3/2B1P3/1QN5/PPP2PPP/R1B1K2R w KQkq - 0 9",
+          "ply": 16,
+          "san": "c6",
+          "orientation": "black"
+        },
+        {
+          "file": "lichess-opera-017.png",
+          "fen": "rn2kb1r/pp2qppp/2p2n2/4p1B1/2B1P3/1QN5/PPP2PPP/R3K2R b KQkq - 1 9",
+          "ply": 17,
+          "san": "Bg5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-018.png",
+          "fen": "rn2kb1r/p3qppp/2p2n2/1p2p1B1/2B1P3/1QN5/PPP2PPP/R3K2R w KQkq - 0 10",
+          "ply": 18,
+          "san": "b5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-019.png",
+          "fen": "rn2kb1r/p3qppp/2p2n2/1N2p1B1/2B1P3/1Q6/PPP2PPP/R3K2R b KQkq - 0 10",
+          "ply": 19,
+          "san": "Nxb5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-020.png",
+          "fen": "rn2kb1r/p3qppp/5n2/1p2p1B1/2B1P3/1Q6/PPP2PPP/R3K2R w KQkq - 0 11",
+          "ply": 20,
+          "san": "cxb5",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-021.png",
+          "fen": "rn2kb1r/p3qppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/R3K2R b KQkq - 0 11",
+          "ply": 21,
+          "san": "Bxb5+",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-022.png",
+          "fen": "r3kb1r/p2nqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/R3K2R w KQkq - 1 12",
+          "ply": 22,
+          "san": "Nbd7",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-023.png",
+          "fen": "r3kb1r/p2nqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/2KR3R b kq - 2 12",
+          "ply": 23,
+          "san": "O-O-O",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-024.png",
+          "fen": "3rkb1r/p2nqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/2KR3R w k - 3 13",
+          "ply": 24,
+          "san": "Rd8",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-025.png",
+          "fen": "3rkb1r/p2Rqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/2K4R b k - 0 13",
+          "ply": 25,
+          "san": "Rxd7",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-026.png",
+          "fen": "4kb1r/p2rqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/2K4R w k - 0 14",
+          "ply": 26,
+          "san": "Rxd7",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-027.png",
+          "fen": "4kb1r/p2rqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/2KR4 b k - 1 14",
+          "ply": 27,
+          "san": "Rd1",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-028.png",
+          "fen": "4kb1r/p2r1ppp/4qn2/1B2p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 2 15",
+          "ply": 28,
+          "san": "Qe6",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-029.png",
+          "fen": "4kb1r/p2B1ppp/4qn2/4p1B1/4P3/1Q6/PPP2PPP/2KR4 b k - 0 15",
+          "ply": 29,
+          "san": "Bxd7+",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-030.png",
+          "fen": "4kb1r/p2n1ppp/4q3/4p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 0 16",
+          "ply": 30,
+          "san": "Nxd7",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-031.png",
+          "fen": "1Q2kb1r/p2n1ppp/4q3/4p1B1/4P3/8/PPP2PPP/2KR4 b k - 1 16",
+          "ply": 31,
+          "san": "Qb8+",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-032.png",
+          "fen": "1n2kb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2KR4 w k - 0 17",
+          "ply": 32,
+          "san": "Nxb8",
+          "orientation": "white"
+        },
+        {
+          "file": "lichess-opera-033.png",
+          "fen": "1n1Rkb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2K5 b k - 1 17",
+          "ply": 33,
+          "san": "Rd8#",
+          "orientation": "white"
+        }
+      ],
+      "calibrate": false
+    },
+    {
+      "id": "chesscom-ruy",
+      "url": "https://www.chess.com/analysis",
+      "moves": "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 d6 c3 O-O",
+      "frames": [
+        {
+          "file": "chesscom-ruy-000.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "ply": 0,
+          "san": "",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-001.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "ply": 1,
+          "san": "e4",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-002.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "ply": 2,
+          "san": "e5",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-003.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "ply": 3,
+          "san": "Nf3",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-004.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "ply": 4,
+          "san": "Nc6",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-005.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "ply": 5,
+          "san": "Bb5",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-006.png",
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+          "ply": 6,
+          "san": "a6",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-007.png",
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 4",
+          "ply": 7,
+          "san": "Ba4",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-008.png",
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
+          "ply": 8,
+          "san": "Nf6",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-009.png",
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 3 5",
+          "ply": 9,
+          "san": "O-O",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-010.png",
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6",
+          "ply": 10,
+          "san": "Be7",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-011.png",
+          "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 b kq - 5 6",
+          "ply": 11,
+          "san": "Re1",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-012.png",
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 w kq - 0 7",
+          "ply": 12,
+          "san": "b5",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-013.png",
+          "fen": "r1bqk2r/2ppbppp/p1n2n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 b kq - 1 7",
+          "ply": 13,
+          "san": "Bb3",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-014.png",
+          "fen": "r1bqk2r/2p1bppp/p1np1n2/1p2p3/4P3/1B3N2/PPPP1PPP/RNBQR1K1 w kq - 0 8",
+          "ply": 14,
+          "san": "d6",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-015.png",
+          "fen": "r1bqk2r/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 b kq - 0 8",
+          "ply": 15,
+          "san": "c3",
+          "orientation": "white"
+        },
+        {
+          "file": "chesscom-ruy-016.png",
+          "fen": "r1bq1rk1/2p1bppp/p1np1n2/1p2p3/4P3/1BP2N2/PP1P1PPP/RNBQR1K1 w - - 1 9",
+          "ply": 16,
+          "san": "O-O",
+          "orientation": "white"
+        }
+      ],
+      "calibrate": true
+    }
+  ]
+}
