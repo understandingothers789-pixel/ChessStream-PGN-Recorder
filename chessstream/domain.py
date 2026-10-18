@@ -58,6 +58,8 @@ class Settings:
     unresolved_fen_seconds: float = 15.0
     detect_results: bool = True
     read_context: bool = True
+    auto_context: bool = True
+    context_padding_percent: int = 18
     result_player_color: str = "initial-bottom"
     review_seconds: int = 120
     orientation: str = "auto"
@@ -88,6 +90,7 @@ class Settings:
             result.adaptive_fps = max(2, min(15, int(result.adaptive_fps)))
             result.max_plies = max(1, min(6, int(result.max_plies)))
             result.unresolved_fen_seconds = max(0.0, min(600.0, float(result.unresolved_fen_seconds)))
+            result.context_padding_percent=max(0,min(50,int(result.context_padding_percent)))
             result.review_seconds=max(0,min(3600,int(result.review_seconds)))
             if result.result_player_color not in ["initial-bottom","white","black","unknown"]:result.result_player_color="unknown"
             result.search_ms = max(50, min(5000, int(result.search_ms)))

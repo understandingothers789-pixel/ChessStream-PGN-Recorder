@@ -2,7 +2,7 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.4 reads visible game-ending messages, clocks and nearby player names locally. It finalizes supported pending moves when a game ends, preserves post-game review as PGN variations, and adds a variation viewer and exported diagnostics. FEN recovery, held-piece protection and per-position screenshots remain available.** See [known limitations](docs/KNOWN_LIMITATIONS.md) and the measured [native screenshot checks](docs/context-v1.4.json).
+**Version 1.5 automatically looks just beyond a tight board selection for nearby clocks and names. Result/name/clock OCR runs locally. It finalizes supported pending moves when a game ends, preserves post-game review as PGN variations, and adds a variation viewer and exported diagnostics. FEN recovery, held-piece protection and per-position screenshots remain available.** See [known limitations](docs/KNOWN_LIMITATIONS.md) and the measured [native screenshot checks](docs/context-v1.4.json).
 
 ![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 
@@ -13,7 +13,7 @@ Game library showing clock comments from the retained native browser capture and
 1. Download the ZIP from [GitHub Releases](https://github.com/understandingothers789-pixel/ChessStream-PGN-Recorder/releases/latest) and extract `ChessStream-PGN-Recorder-Portable.zip` to a folder you can write to, such as Documents. No installer, administrator access, or separate Python installation is needed.
 2. Double-click `Launch ChessStream.cmd` in the extracted folder. The package includes a private Python runtime; it does not install software system-wide.
 3. Place the app beside the browser or on a second monitor. The captured board must remain visible.
-4. Select **Select capture region**, include the board and its visible names/clocks, and select **Start recording**.
+4. Select **Select capture region**, draw around the board; nearby clocks/names are captured automatically in a temporary margin, and select **Start recording**.
 5. Check the live preview and **Weakest square score**. The bundled model needs no initial calibration for the tested Chess.com/Lichess themes. An uncertain first position stays pending, with affected squares named; stable positions continue to be saved.
 6. Verified moves have a checkmark; the latest provisional move appears in amber. If a resumed video shows a clear position the saved game cannot reach, the app preserves the old PGN and, after 15 seconds by default, starts a separate PGN from that board’s FEN. You can change or disable the timeout in Settings. Select **Start PGN from visible FEN** to do this immediately. **Copy visible FEN** copies the displayed position; if side to move is unknown, choose White or Black. Export from the live page or Game library. Unknown names stay `Unknown`.
 

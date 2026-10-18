@@ -13,6 +13,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 from .domain import Region, utcnow
 from .games import GameManager
+from .context_capture import capture_context
 from .results import EndMessageDetector,ContextStabilizer,extract_context
 from .vision import BoardDetector, TemplateRecognizer, create_recognizer, choose_orientation, checker_score
 
@@ -158,6 +159,7 @@ class RecordingWorker(QThread):
         stable_count=0
         next_saved=0.0
         last_detect=0.0
+        context_source_rect=None;context_source_shape=None
         try:
             cv2.setNumThreads(1)
             with mss.mss() as cap:
@@ -168,7 +170,7 @@ class RecordingWorker(QThread):
                         action,value=self.commands.get()
                         try:
                             if action=="region":
-                                self.region=value;board_rect=None;last_shape=None;last_pixels=None
+                                self.region=value;board_rect=None;last_shape=None;last_pixels=None;context_source_rect=None;self._text_detector.reset()
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
                             elif action=="correct":
@@ -233,6 +235,25 @@ class RecordingWorker(QThread):
                             board_image=None
                     else:
                         board_image=image
+                    if image.shape!=context_source_shape:
+                        context_source_rect=None;context_source_shape=image.shape
+                    if board_rect:context_source_rect=board_rect
+                    if not settings.detect_board:context_source_rect=(0,0,image.shape[1],image.shape[0])
+                    context_image=image;context_rect=context_source_rect
+                    context_due=(self.manager.rec is not None and (settings.read_context or settings.detect_results)
+                                 and not getattr(self,'_text_failed',False) and time.monotonic()-self._text_detector.last_scan>=1)
+                    if context_due and context_rect:
+                        try:
+                            context_image,context_rect,newer=capture_context(cap,source,image,context_rect,
+                                settings.auto_context,settings.context_padding_percent)
+                            if newer:
+                                timestamp=utcnow();captured_at=time.monotonic()
+                                if board_image is not None:
+                                    cx,cy,cw,ch=context_rect
+                                    board_image=context_image[cy:cy+ch,cx:cx+cw].copy()
+                        except Exception:
+                            logging.exception('Could not expand board context; using selected area')
+                            context_image=image;context_rect=context_source_rect
                     position_mode=settings.screenshot_mode=="positions"
                     save_due=position_mode or tick>=next_saved
                     snapshot=self.manager.snapshot()
@@ -250,7 +271,7 @@ class RecordingWorker(QThread):
                             from .domain import Observation
                             obs=Observation(last_obs.probabilities.copy(),orientation=last_obs.orientation,quality=last_obs.quality)
                         obs.timestamp=timestamp
-                        self.scan_context(image,board_rect if settings.detect_board else (0,0,image.shape[1],image.shape[0]),obs)
+                        self.scan_context(context_image,context_rect,obs)
                         if settings.detect_board and obs.confidence<.6 and tick-last_detect>2:
                             board_rect=None
                         key=obs.placement()
@@ -289,7 +310,7 @@ class RecordingWorker(QThread):
                                         recognition_mode=settings.recognition_mode)
                     else:
                         self.manager.clear_position_recovery()
-                        self.scan_context(image,board_rect,None)
+                        self.scan_context(context_image,context_rect,None)
                         snapshot=self.manager.snapshot()
                         self.frame.emit(image)
                         snapshot.update(status=(self.manager.last_message if self.manager.terminal_message else "Board hidden / not found • game preserved"),confidence=0)

@@ -1,0 +1,64 @@
+{
+  "method": "Actual X11 desktop MSS capture of a displayed retained native Chess.com frame. Only the 64-square board is selected; the production margin helper captures external names/clocks. Window moved and resized between two cases. No source pixels are directly supplied to OCR. Not a YouTube first-game or physical Windows acceptance test.",
+  "cases": [
+    {
+      "source_size": [
+        1200,
+        1000
+      ],
+      "board_selection": [
+        128,
+        76,
+        568,
+        568
+      ],
+      "temporary_context_size": [
+        772,
+        746
+      ],
+      "extra_capture": true,
+      "context": {
+        "clocks": {
+          "black": 597,
+          "white": 596
+        },
+        "names": {
+          "black": "Martinfoot",
+          "white": "Guest"
+        }
+      },
+      "capture_and_ocr_ms": 156.8,
+      "passed": true
+    },
+    {
+      "source_size": [
+        800,
+        667
+      ],
+      "board_selection": [
+        152,
+        94,
+        379,
+        379
+      ],
+      "temporary_context_size": [
+        515,
+        515
+      ],
+      "extra_capture": true,
+      "context": {
+        "clocks": {
+          "black": 597,
+          "white": 596
+        },
+        "names": {
+          "black": "Martinfoot",
+          "white": "Guest"
+        }
+      },
+      "capture_and_ocr_ms": 163.4,
+      "passed": true
+    }
+  ],
+  "passed": true
+}

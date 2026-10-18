@@ -121,7 +121,7 @@ def test_names_clocks_spatial_assignment_and_stable_identity_change(tmp_path):
     assert clock_seconds('9:59')==599
     assert clock_seconds('1:02:03')==3723
     assert clock_seconds('0:04.5')==4.5
-    lines=[('Opponent',.99,(80,5,160,25)),('9:59',.99,(350,5,400,25)),('Streamer',.99,(80,465,160,485)),('4:30',.99,(350,465,400,485)),('e4',.99,(120,220,160,240))]
+    lines=[('Opponent (492):',.99,(80,5,160,25)),('9:59',.99,(350,5,400,25)),('Streamer',.99,(80,465,160,485)),('4:30',.99,(350,465,400,485)),('e4',.99,(120,220,160,240))]
     context=extract_context(lines,(50,40,400,400),'black')
     assert context=={'clocks':{'white':599,'black':270},'names':{'white':'Opponent','black':'Streamer'}}
     stable=ContextStabilizer();assert not stable.observe(context)['names'];assert not stable.observe(context)['names']
