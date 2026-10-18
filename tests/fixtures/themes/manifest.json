@@ -1,0 +1,259 @@
+{
+  "method": "Actual public Lichess analysis UI in Chromium; testing-only CSS selects pinned upstream piece/board themes",
+  "captured_at": "2026-10-18T21:12:12.145066+00:00",
+  "asset_revision": "49fca53ebe4c1466b0ce723bbdf5ee4165d96c39",
+  "games": [
+    {
+      "id": "chess7",
+      "texture": "wood4.jpg",
+      "moves": "e4 e5 Nf3 Nc6 Bc4 Bc5 d4",
+      "frames": [
+        {
+          "file": "chess7-00.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "orientation": "black",
+          "ply": 0,
+          "san": ""
+        },
+        {
+          "file": "chess7-01.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "orientation": "black",
+          "ply": 1,
+          "san": "e4"
+        },
+        {
+          "file": "chess7-02.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "orientation": "black",
+          "ply": 2,
+          "san": "e5"
+        },
+        {
+          "file": "chess7-03.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "orientation": "white",
+          "ply": 3,
+          "san": "Nf3"
+        },
+        {
+          "file": "chess7-04.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "orientation": "white",
+          "ply": 4,
+          "san": "Nc6"
+        },
+        {
+          "file": "chess7-05.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "orientation": "black",
+          "ply": 5,
+          "san": "Bc4"
+        },
+        {
+          "file": "chess7-06.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          "orientation": "black",
+          "ply": 6,
+          "san": "Bc5"
+        },
+        {
+          "file": "chess7-07.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2BPP3/5N2/PPP2PPP/RNBQK2R b KQkq - 0 4",
+          "orientation": "black",
+          "ply": 7,
+          "san": "d4"
+        }
+      ]
+    },
+    {
+      "id": "merida",
+      "texture": "maple2.jpg",
+      "moves": "e4 e5 Nf3 Nc6 Bc4 Bc5 d4",
+      "frames": [
+        {
+          "file": "merida-00.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "orientation": "black",
+          "ply": 0,
+          "san": ""
+        },
+        {
+          "file": "merida-01.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "orientation": "black",
+          "ply": 1,
+          "san": "e4"
+        },
+        {
+          "file": "merida-02.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "orientation": "black",
+          "ply": 2,
+          "san": "e5"
+        },
+        {
+          "file": "merida-03.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "orientation": "white",
+          "ply": 3,
+          "san": "Nf3"
+        },
+        {
+          "file": "merida-04.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "orientation": "white",
+          "ply": 4,
+          "san": "Nc6"
+        },
+        {
+          "file": "merida-05.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "orientation": "black",
+          "ply": 5,
+          "san": "Bc4"
+        },
+        {
+          "file": "merida-06.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          "orientation": "black",
+          "ply": 6,
+          "san": "Bc5"
+        },
+        {
+          "file": "merida-07.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2BPP3/5N2/PPP2PPP/RNBQK2R b KQkq - 0 4",
+          "orientation": "black",
+          "ply": 7,
+          "san": "d4"
+        }
+      ]
+    },
+    {
+      "id": "maestro",
+      "texture": "marble.jpg",
+      "moves": "e4 e5 Nf3 Nc6 Bc4 Bc5 d4",
+      "frames": [
+        {
+          "file": "maestro-00.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "orientation": "black",
+          "ply": 0,
+          "san": ""
+        },
+        {
+          "file": "maestro-01.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "orientation": "black",
+          "ply": 1,
+          "san": "e4"
+        },
+        {
+          "file": "maestro-02.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "orientation": "black",
+          "ply": 2,
+          "san": "e5"
+        },
+        {
+          "file": "maestro-03.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "orientation": "white",
+          "ply": 3,
+          "san": "Nf3"
+        },
+        {
+          "file": "maestro-04.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "orientation": "white",
+          "ply": 4,
+          "san": "Nc6"
+        },
+        {
+          "file": "maestro-05.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "orientation": "black",
+          "ply": 5,
+          "san": "Bc4"
+        },
+        {
+          "file": "maestro-06.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          "orientation": "black",
+          "ply": 6,
+          "san": "Bc5"
+        },
+        {
+          "file": "maestro-07.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2BPP3/5N2/PPP2PPP/RNBQK2R b KQkq - 0 4",
+          "orientation": "black",
+          "ply": 7,
+          "san": "d4"
+        }
+      ]
+    },
+    {
+      "id": "tatiana",
+      "texture": "blue-marble.jpg",
+      "moves": "e4 e5 Nf3 Nc6 Bc4 Bc5 d4",
+      "frames": [
+        {
+          "file": "tatiana-00.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "orientation": "black",
+          "ply": 0,
+          "san": ""
+        },
+        {
+          "file": "tatiana-01.png",
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+          "orientation": "black",
+          "ply": 1,
+          "san": "e4"
+        },
+        {
+          "file": "tatiana-02.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+          "orientation": "black",
+          "ply": 2,
+          "san": "e5"
+        },
+        {
+          "file": "tatiana-03.png",
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "orientation": "white",
+          "ply": 3,
+          "san": "Nf3"
+        },
+        {
+          "file": "tatiana-04.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "orientation": "white",
+          "ply": 4,
+          "san": "Nc6"
+        },
+        {
+          "file": "tatiana-05.png",
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "orientation": "black",
+          "ply": 5,
+          "san": "Bc4"
+        },
+        {
+          "file": "tatiana-06.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          "orientation": "black",
+          "ply": 6,
+          "san": "Bc5"
+        },
+        {
+          "file": "tatiana-07.png",
+          "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2BPP3/5N2/PPP2PPP/RNBQK2R b KQkq - 0 4",
+          "orientation": "black",
+          "ply": 7,
+          "san": "d4"
+        }
+      ]
+    }
+  ]
+}

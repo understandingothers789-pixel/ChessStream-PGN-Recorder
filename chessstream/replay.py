@@ -5,7 +5,7 @@ import cv2
 from .domain import Settings
 from .storage import Store
 from .games import GameManager
-from .vision import TemplateRecognizer,OnnxRecognizer,BoardDetector,choose_orientation
+from .vision import create_recognizer,BoardDetector,choose_orientation
 
 
 def replay_video(path:Path,root:Path,region=None,interval=1.0,orientation='auto'):
@@ -13,7 +13,7 @@ def replay_video(path:Path,root:Path,region=None,interval=1.0,orientation='auto'
     settings=Settings.load(root/'settings.json');settings.orientation=orientation
     store=Store(root);manager=GameManager(store,settings)
     store.run_retention(settings.retention_days)
-    recognizer=OnnxRecognizer(settings.onnx_model) if settings.onnx_model else TemplateRecognizer(root/'custom-templates.npz');detector=BoardDetector()
+    recognizer=create_recognizer(settings,root/'custom-templates.npz');detector=BoardDetector()
     capture=cv2.VideoCapture(str(path))
     if not capture.isOpened():raise ValueError(f'Cannot open video: {path}')
     fps=capture.get(cv2.CAP_PROP_FPS)

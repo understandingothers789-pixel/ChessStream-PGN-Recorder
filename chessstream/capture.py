@@ -12,7 +12,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 from .domain import Region, utcnow
 from .games import GameManager
-from .vision import BoardDetector, TemplateRecognizer, OnnxRecognizer, choose_orientation, checker_score
+from .vision import BoardDetector, TemplateRecognizer, create_recognizer, choose_orientation, checker_score
 
 
 def enable_dpi_awareness():
@@ -150,6 +150,9 @@ class RecordingWorker(QThread):
                             elif action=="calibrate":
                                 image,orientation=value
                                 TemplateRecognizer.calibrate(image,store.root/"custom-templates.npz",orientation)
+                                settings.recognition_mode="calibrated"
+                                settings.onnx_model=""
+                                settings.save(store.root/"settings.json")
                                 recognizer=None;last_pixels=None;stable_key=None
                             self.update.emit(self.manager.snapshot())
                         except Exception as e:
@@ -157,9 +160,11 @@ class RecordingWorker(QThread):
                     if self.paused.is_set():
                         self.stopping.wait(.1)
                         continue
-                    if recognizer is None or settings.onnx_model != model_path:
-                        model_path=settings.onnx_model
-                        recognizer=OnnxRecognizer(model_path) if model_path else TemplateRecognizer(store.root/"custom-templates.npz")
+                    configuration=(settings.onnx_model,settings.recognition_mode)
+                    if recognizer is None or configuration != model_path:
+                        model_path=configuration
+                        recognizer=create_recognizer(settings,store.root/"custom-templates.npz")
+                        last_pixels=None;last_obs=None;stable_key=None;stable_count=0
                     try:
                         source=resolve_region(self.region)
                         if not source.valid():
@@ -246,7 +251,10 @@ class RecordingWorker(QThread):
                         else:
                             snapshot={**snapshot,"status":"Waiting for position to settle"}
                         self.frame.emit(board_image)
-                        snapshot.update(confidence=obs.confidence,orientation=obs.orientation)
+                        snapshot.update(confidence=obs.confidence,orientation=obs.orientation,
+                                        weakest_confidence=obs.weakest_confidence,
+                                        uncertain_squares=obs.uncertain_squares(max(.80,settings.min_confidence)),
+                                        recognition_mode=settings.recognition_mode)
                     else:
                         self.frame.emit(image)
                         snapshot.update(status="Board hidden / not found • game preserved",confidence=0)

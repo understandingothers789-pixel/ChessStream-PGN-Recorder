@@ -78,8 +78,13 @@ class GameManager:
         self.store.associate_screenshots(self.session_id,self.current_id,initial_placement=board.board_fen())
 
     def _initialize(self, obs):
-        if obs.confidence < self.settings.min_confidence:
-            self.last_message = "Waiting for a clear, stable board"
+        # The mean of 64 scores hides missing pieces and queen/knight mistakes.
+        # Every square must be sufficiently supported before freezing a root FEN.
+        uncertain = obs.uncertain_squares(max(.80, self.settings.min_confidence))
+        if uncertain:
+            self.last_message = ("Waiting for reliable recognition • uncertain squares: "
+                                 + ", ".join(uncertain[:8])
+                                 + (f" (+{len(uncertain)-8} more)" if len(uncertain)>8 else ""))
             return False
         if self.settings.initial_fen:
             b = chess.Board(self.settings.initial_fen)

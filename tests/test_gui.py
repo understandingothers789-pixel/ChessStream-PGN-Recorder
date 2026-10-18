@@ -28,3 +28,15 @@ def test_desktop_pages_game_review_and_screenshots(tmp_path):
     scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
     assert scroll.verticalScrollBar().value()==scroll.verticalScrollBar().maximum()
     window.close();window.deleteLater();app.processEvents()
+
+
+def test_pending_recognition_is_not_shown_as_a_reconstructed_start(tmp_path):
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(tmp_path)
+    assert window.live_board.fen is None
+    window.on_update({"fen":None,"moves":[],"status":"Waiting for reliable recognition",
+                      "weakest_confidence":.55,"confidence":.99,"uncertain_squares":["d8"]})
+    assert window.metric_labels['confidence'].text()=='55.0%'
+    assert 'd8' in window.recognition_details.text()
+    assert window.live_board.fen is None
+    window.close();window.deleteLater();app.processEvents()

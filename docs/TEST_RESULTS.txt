@@ -1,24 +1,2 @@
-ChessStream PGN Recorder — validation on Linux cloud host
-
-Automated suite:
-.................................                                        [100%]
-33 passed in 16.56s
-
-Actual headed-browser MSS capture acceptance:
-{
-  "method": "Headed Chromium on Xvfb, actual MSS screen capture through RecordingWorker, no image injection",
-  "display": ":93",
-  "expected_plies": 8,
-  "verified_plies": 8,
-  "saved_screenshots": 7,
-  "processed_updates": 35,
-  "board_flipped_midgame": true,
-  "pause_resume_checked": true,
-  "pgn_roundtrip_correct": true,
-  "final_fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
-  "passed": true,
-  "platform_limit": "Linux/X11 integration only; Windows desktop capture and scaling remain unvalidated"
-}
-
-Detailed image benchmark: docs/evaluation.json
-Windows runtime validation: not performed on this host.
+...............................................................          [100%]
+63 passed in 8.32s

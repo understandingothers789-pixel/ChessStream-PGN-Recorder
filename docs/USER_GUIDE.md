@@ -1,21 +1,25 @@
 # ChessStream PGN Recorder user guide
 
+## Download and launch
+
+Download `ChessStream-PGN-Recorder-Portable.zip` from the repository's GitHub Releases page. Extract it to Documents or another writable folder, then open `Launch ChessStream.cmd`. No installer, administrator rights or separate Python setup is required. If Windows blocks the downloaded launcher, right-click the ZIP → Properties → Unblock (if offered), apply, then extract again. An organization-managed block requires the device administrator; do not disable system security.
+
 ## First recording
 
 Keep the browser and board visible. Put ChessStream beside it or on another monitor; a window placed over the board becomes part of the screenshot.
 
 Choose **Select capture region** and drag from one outer board corner to the opposite corner. Include all 64 squares and avoid clocks, evaluation bars and player panels. Press Esc to cancel. Click **Start recording**. The first position must settle before it is accepted.
 
-The left board is what the screen contains. The middle board is the last internally verified position. The move list shows verified SAN. “Recognition similarity” estimates how well the current appearance fits the local model; it is not a measured accuracy probability. A ply is one move by one player, so 60 plies means 30 full moves.
+The left board is what the screen contains. The middle board is the last internally verified position. The move list shows verified SAN. **Weakest square score** shows the lowest classifier score among all 64 squares, not an accuracy guarantee. Before the first position is accepted, every square must score at least 80% (or the configured threshold, if higher). Uncertain squares are named below the capture and the reconstructed board stays pending. Recording and screenshot saving continue. A ply is one move by one player, so 60 plies means 30 full moves.
 
 ## Piece sets and orientation
 
-The bundled recognizer includes Cburnett, Merida, Chessnut, Fantasy and Spatial templates. Other sets, including Chess.com's default Neo pieces, should be calibrated:
+The default bundled screenshot model supports varied shaded pieces, board textures and colors. Calibration is not required for the tested Neo and Ocean sets. For an unsupported set, the optional **Calibrate piece set** command switches to manually learned templates:
 
 1. Display a genuine standard starting position with all pieces on their original squares.
 2. Start capture and choose **Calibrate piece set**.
 3. Confirm White or Black at the bottom. Do not confirm this on a midgame board.
-4. Verify the reconstructed preview. Calibration stays local under `custom-templates.npz`.
+4. Verify the reconstructed preview. Calibration stays local under `custom-templates.npz`. Return to **Settings → Piece recognition → Bundled screenshot model** to leave template mode. Calibration files from version 1.0 are not automatically activated by version 1.1.
 
 Choose **Flip orientation** if automatic detection is wrong. Settings can lock White/Black at the bottom or restore Auto. Automatic mode compares both orientations to the existing position and handles a board flip without adding chess moves.
 
@@ -81,10 +85,10 @@ Game library → **Delete game data** is independent. It removes the selected ga
 Progress is saved after state changes. After a crash or restart, open the saved game in Game library and choose **Resume recording**, or export it immediately. Pending ambiguity branches survive restart. Keep the data folder together when backing up: `%LOCALAPPDATA%\ChessStream PGN Recorder` on Windows. Close the app before copying it.
 
 - **Board not found**: tighten the region, remove menus, increase the displayed board size, or disable automatic detection for an exact board crop.
-- **Low similarity / invalid position**: check orientation and calibrate the current set from the actual starting position. Avoid large arrows or a pointer covering a piece.
+- **Uncertain squares / invalid position**: check the capture bounds and orientation, use the bundled screenshot model in Settings, and show a clear stable board. The new version does not automatically use old calibration files. Manual calibration from a starting position is an optional fallback for unsupported sets.
 - **Search limit**: enable adaptive frames or raise limits moderately. Review the screenshots and supply missing SAN if necessary.
 - **Wrong verified move**: pause, undo the affected recent plies in Correct moves, enter the correct sequence, then resume.
 - **Window moved / resized**: use tracked Window mode or Adjust. Source HWND replacement and unusual scaling may need re-selection.
-- **Cannot launch installed app**: run `Diagnose ChessStream.cmd` in the installation directory. The rotating `application.log` in the data directory records worker failures. Windows runtime validation is still required for this delivered build.
+- **Cannot launch installed app**: run `Diagnose ChessStream.cmd` in the installation directory. The rotating `application.log` in the data directory records worker failures. Packaged inference and GUI startup are tested by Windows CI; hardware-specific failures still need checking on your PC.
 
 See `KNOWN_LIMITATIONS.md` and `evaluation.json` for exact tested scope.

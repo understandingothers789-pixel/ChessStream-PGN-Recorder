@@ -61,9 +61,16 @@ def main():
     for name in ['README.md','LICENSE','THIRD_PARTY_NOTICES.md']:
         shutil.copy2(ROOT/name,package/name)
     shutil.copytree(ROOT/'docs',package/'docs')
-    (package/'Launch ChessStream.cmd').write_text('@echo off\r\ncd /d "%~dp0"\r\nstart "ChessStream PGN Recorder" "%~dp0runtime\\pythonw.exe" -m chessstream\r\n',encoding='utf-8')
-    (package/'Diagnose ChessStream.cmd').write_text('@echo off\r\ncd /d "%~dp0"\r\n"%~dp0runtime\\python.exe" -m chessstream\r\npause\r\n',encoding='utf-8')
-    (package/'BUILD-MANIFEST.json').write_text(json.dumps({'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes},indent=2))
+    (package/'Launch ChessStream.cmd').write_text('@echo off\r\ncd /d "%~dp0"\r\nstart "ChessStream PGN Recorder" "%~dp0runtime\\pythonw.exe" -m chessstream %*\r\n',encoding='utf-8',newline='')
+    (package/'Diagnose ChessStream.cmd').write_text('@echo off\r\ncd /d "%~dp0"\r\n"%~dp0runtime\\python.exe" -m chessstream %*\r\npause\r\n',encoding='utf-8',newline='')
+    model=package/'chessstream/assets/models/chess-tiles-v2.onnx'
+    model_info=json.loads(model.with_suffix('.json').read_text())
+    if hashlib.sha256(model.read_bytes()).hexdigest()!=model_info['sha256']:
+        raise RuntimeError('Bundled screenshot model checksum mismatch')
+    if not any((site/'onnxruntime').rglob('*.pyd')):
+        raise RuntimeError('Windows ONNX Runtime is missing; rebuild without --skip-download to refresh the wheel cache')
+    (package/'BUILD-MANIFEST.json').write_text(json.dumps({'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes,
+        'model':model_info},indent=2))
     dist=ROOT/'dist';dist.mkdir(exist_ok=True)
     portable_zip=dist/'ChessStream-PGN-Recorder-Portable.zip'
     portable_zip.unlink(missing_ok=True)

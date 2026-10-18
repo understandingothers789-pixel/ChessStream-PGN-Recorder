@@ -107,6 +107,13 @@ class BoardView(QSvgWidget):
         self.fen=chess.STARTING_FEN;self.flipped=False;self.last_move=None
         self.show_board()
 
+    def show_pending(self):
+        self.fen=None;self.last_move=None
+        self.load(b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">'
+                  b'<rect width="400" height="400" rx="8" fill="#0c131f"/>'
+                  b'<text x="200" y="195" text-anchor="middle" fill="#aac2b7" font-family="sans-serif" font-size="17">Waiting for reliable recognition</text>'
+                  b'<text x="200" y="224" text-anchor="middle" fill="#73869e" font-family="sans-serif" font-size="13">No starting position accepted yet</text></svg>')
+
     def show_board(self,fen=None,last_move=None,flipped=None):
         if fen:self.fen=fen
         if flipped is not None:self.flipped=flipped

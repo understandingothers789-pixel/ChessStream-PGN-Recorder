@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
         super().__init__();self.root=root;self.settings=Settings.load(root/"settings.json")
         self.store=Store(root);self.manager=GameManager(self.store,self.settings)
         self.worker=None;self.tasks=[];self.overlays=[];self.latest_image=None;self.snapshot={}
-        self.retention_task=None
+        self.retention_task=None;self._closing=False
         self.region=Region(**self.settings.region) if self.settings.region else None
         self.setWindowTitle("ChessStream PGN Recorder")
         available=QApplication.primaryScreen().availableGeometry()
@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.0.0"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.1.0"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
@@ -107,12 +107,14 @@ class MainWindow(QMainWindow):
         source.addWidget(QLabel("Save every"));self.interval=QDoubleSpinBox();self.interval.setRange(.1,60);self.interval.setDecimals(1);self.interval.setSuffix(" s");self.interval.setValue(self.settings.interval);self.interval.valueChanged.connect(self.set_interval);source.addWidget(self.interval)
         box.addLayout(source)
         metrics=QHBoxLayout();self.metric_labels={}
-        for key,title,value in [("moves","VERIFIED PLIES","0"),("confidence","RECOGNITION SIMILARITY","—"),("saved","SAVED SCREENSHOTS","0"),("disk","SCREENSHOT STORAGE","0 MB")]:
+        for key,title,value in [("moves","VERIFIED PLIES","0"),("confidence","WEAKEST SQUARE SCORE","—"),("saved","SAVED SCREENSHOTS","0"),("disk","SCREENSHOT STORAGE","0 MB")]:
             card=Card();card.box.addWidget(muted(title));label=QLabel(value);label.setObjectName("metric");card.box.addWidget(label);self.metric_labels[key]=label;metrics.addWidget(card)
         box.addLayout(metrics)
         splitter=QSplitter(Qt.Horizontal)
         capture_card=Card("CAPTURED BOARD");self.live_image=ImageView();capture_card.box.addWidget(self.live_image,1);self.capture_caption=muted("Permanent screenshots: every second. Adaptive frames: temporary, never saved.");capture_card.box.addWidget(self.capture_caption)
+        self.recognition_details=muted("Bundled screenshot model • waiting for a capture");capture_card.box.addWidget(self.recognition_details)
         internal=Card("RECONSTRUCTED BOARD");self.live_board=BoardView();internal.box.addWidget(self.live_board,1);self.last_move_label=muted("Waiting for the first verified position");internal.box.addWidget(self.last_move_label)
+        self.live_board.show_pending()
         moves_card=Card("VERIFIED MOVES");self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);moves_card.box.addWidget(self.move_table,1)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
@@ -163,12 +165,28 @@ class MainWindow(QMainWindow):
             warning=any(word in status.lower() for word in ['uncertain','unmatched','limit','obstructed','hidden','reset','review','waiting','unknown'])
             self.recording_status.setStyleSheet(f"color:{'#f4c17a' if warning else '#8ee3ce'};font-weight:600;padding:8px;")
         moves=snap.get('moves',[]);self.metric_labels['moves'].setText(str(len(moves)))
-        if 'confidence' in snap:self.metric_labels['confidence'].setText(f"{snap['confidence']*100:.1f}%")
+        if 'weakest_confidence' in snap:
+            self.metric_labels['confidence'].setText(f"{snap['weakest_confidence']*100:.1f}%")
+            self.metric_labels['confidence'].setToolTip(f"Lowest square classifier score. Average: {snap.get('confidence',0)*100:.1f}%. Scores are not an accuracy guarantee.")
+        if 'uncertain_squares' in snap:
+            uncertain=snap['uncertain_squares']
+            text=("Uncertain: "+", ".join(uncertain[:10])+(f" (+{len(uncertain)-10} more)" if len(uncertain)>10 else "")) if uncertain else "All 64 squares meet the recognition threshold"
+            self.recognition_details.setText(text)
+            self.recognition_details.setStyleSheet("color:"+("#f4c17a" if uncertain else "#8ee3ce"))
+        mode=snap.get('recognition_mode')
+        if mode and mode!=getattr(self,'_displayed_recognition_mode',None):
+            self.recognizer_setting.setCurrentIndex(1 if mode=='calibrated' else 0)
+            self._displayed_recognition_mode=mode
+        if snap.get('confidence')==0:
+            self.metric_labels['confidence'].setText('—')
+            self.recognition_details.setText('Board not found • previous verified position preserved')
         if 'saved_count' in snap:self.metric_labels['saved'].setText(str(snap['saved_count']))
         render_key=(snap.get('fen'),snap.get('last_move'),snap.get('orientation'))
         if snap.get('fen') and render_key!=getattr(self,'_last_board_render',None):
             self.live_board.show_board(snap['fen'],snap.get('last_move'),snap.get('orientation')=='black');self._last_board_render=render_key
-        self.last_move_label.setText(f"{len(moves)} verified plies  •  Last: {moves[-1] if moves else '—'}")
+        elif not snap.get('fen'):
+            self.live_board.show_pending();self._last_board_render=None
+        self.last_move_label.setText(f"{len(moves)} verified plies  •  Last: {moves[-1] if moves else '—'}" if snap.get('fen') else "Waiting for a reliable first position • recording continues")
         self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN))
         options=snap.get('alternatives',[])
         if [self.alternatives.itemText(i) for i in range(self.alternatives.count())]!=options:
@@ -253,7 +271,7 @@ class MainWindow(QMainWindow):
 
     def calibrate(self):
         if self.latest_image is None:self.error("Start capture and show the standard starting position first.");return
-        dialog=QMessageBox(self);dialog.setWindowTitle("Learn this piece set");dialog.setText("The visible board MUST be the standard starting position, with all 32 pieces on their original squares. This labels the pieces from that layout.");dialog.setInformativeText("Choose which color is at the bottom. Templates are kept locally. Existing templates remain available.")
+        dialog=QMessageBox(self);dialog.setWindowTitle("Learn this piece set");dialog.setText("The visible board MUST be the standard starting position, with all 32 pieces on their original squares. This labels the pieces from that layout.");dialog.setInformativeText("Optional fallback: this switches to manually learned templates. The bundled screenshot model is recommended for common Chess.com and Lichess themes. Choose the color at the bottom; return to the bundled model in Settings.")
         white=dialog.addButton("White at bottom",QMessageBox.AcceptRole);black=dialog.addButton("Black at bottom",QMessageBox.AcceptRole);dialog.addButton(QMessageBox.Cancel);dialog.exec()
         chosen=dialog.clickedButton()
         if chosen not in [white,black]:return
@@ -261,6 +279,7 @@ class MainWindow(QMainWindow):
         else:
             from .vision import TemplateRecognizer
             TemplateRecognizer.calibrate(self.latest_image,self.root/'custom-templates.npz','white' if chosen==white else 'black')
+            self.settings.recognition_mode='calibrated';self.settings.onnx_model='';self.model.clear();self.settings.save(self.root/'settings.json');self.recognizer_setting.setCurrentIndex(1)
         self.statusBar().showMessage("Piece templates calibrated. Show the board clearly to verify recognition.",8000)
 
     def choose_sequence(self):
@@ -503,12 +522,13 @@ class MainWindow(QMainWindow):
         self.fps=QSpinBox();self.fps.setRange(2,15);self.fps.setValue(self.settings.adaptive_fps);self.fps.setSuffix(' frames/s');capture.addRow('Adaptive target rate',self.fps)
         self.detect_setting=QCheckBox('Find the board inside the selected area');self.detect_setting.setChecked(self.settings.detect_board);capture.addRow('Board detection',self.detect_setting)
         self.orientation_setting=QComboBox();self.orientation_setting.addItems(['auto','white','black']);self.orientation_setting.setCurrentText(self.settings.orientation);capture.addRow('Color at the bottom',self.orientation_setting)
+        self.recognizer_setting=QComboBox();self.recognizer_setting.addItem('Bundled screenshot model (recommended)','neural');self.recognizer_setting.addItem('Manually calibrated templates','calibrated');self.recognizer_setting.setCurrentIndex(1 if self.settings.recognition_mode=='calibrated' else 0);capture.addRow('Piece recognition',self.recognizer_setting)
         self.maxplies=QSpinBox();self.maxplies.setRange(1,6);self.maxplies.setValue(self.settings.max_plies);capture.addRow('Maximum missing plies',self.maxplies)
         self.nodes=QSpinBox();self.nodes.setRange(1000,1000000);self.nodes.setSingleStep(10000);self.nodes.setValue(self.settings.search_nodes);capture.addRow('Search node limit / hypothesis',self.nodes)
         self.ms=QSpinBox();self.ms.setRange(50,5000);self.ms.setValue(self.settings.search_ms);self.ms.setSuffix(' ms');capture.addRow('Search time / hypothesis',self.ms)
-        self.threshold=QDoubleSpinBox();self.threshold.setRange(.5,.99);self.threshold.setSingleStep(.05);self.threshold.setValue(self.settings.min_confidence);capture.addRow('Minimum square similarity',self.threshold)
+        self.threshold=QDoubleSpinBox();self.threshold.setRange(.5,.99);self.threshold.setSingleStep(.05);self.threshold.setValue(self.settings.min_confidence);capture.addRow('Minimum square score',self.threshold)
         self.initialfen=QLineEdit(self.settings.initial_fen);self.initialfen.setPlaceholderText('Optional full FEN for the first position');capture.addRow('Known initial position',self.initialfen)
-        self.model=QLineEdit(self.settings.onnx_model);self.model.setPlaceholderText('Optional local .onnx model; bundled template model is the default');capture.addRow('ONNX model path',self.model)
+        self.model=QLineEdit(self.settings.onnx_model);self.model.setPlaceholderText('Optional compatible RGB/logit model; leave blank to use the bundled model');capture.addRow('Custom ONNX model path',self.model)
         capture.addRow(muted('Models must follow the documented 13-class contract. Midgame screenshots cannot prove castling rights or en passant history; an exact FEN supplies them. Larger search limits use more CPU.'))
         storage=tab('Storage & saving')
         self.dedupe=QCheckBox('Skip saving byte-identical images (recognition still runs)');self.dedupe.setChecked(self.settings.deduplicate);storage.addRow('Optional deduplication',self.dedupe)
@@ -535,7 +555,7 @@ class MainWindow(QMainWindow):
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
-            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
+            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))
         except Exception as e:self.error(str(e))
 
@@ -549,6 +569,7 @@ class MainWindow(QMainWindow):
                 key=QShortcut(QKeySequence(sequence),self);key.activated.connect(fn);self.shortcuts.append(key)
 
     def refresh_usage(self):
+        if self._closing:return
         try:
             usage=self.store.usage();text=f"{usage['count']} screenshots  •  {human_bytes(usage['bytes'])} used  •  {human_bytes(usage['free'])} available  •  {'Keep indefinitely' if not self.settings.retention_days else str(self.settings.retention_days)+' day retention'}"
             self.metric_labels['disk'].setText(human_bytes(usage['bytes']));self.storage_info.setText(text)
@@ -561,6 +582,7 @@ class MainWindow(QMainWindow):
         return task
 
     def run_retention(self):
+        if self._closing:return
         if self.retention_task and self.retention_task.isRunning():return
         self.retention_task=self.background(lambda:self.store.run_retention(self.settings.retention_days),lambda _:self.refresh_usage())
 
@@ -576,5 +598,6 @@ class MainWindow(QMainWindow):
             self.worker.stop()
             if not self.worker.wait(12000):
                 self.statusBar().showMessage('Waiting for current search or file write to finish…');event.ignore();return
+        self._closing=True
         for task in self.tasks[:]:task.wait()
         self.timer.stop();self.retention_timer.stop();self.global_hotkeys.clear();self.settings.save(self.root/'settings.json');self.store.close();event.accept()

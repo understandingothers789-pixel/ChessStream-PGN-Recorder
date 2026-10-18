@@ -15,7 +15,7 @@ import psutil
 from chessstream.domain import Settings,board_labels
 from chessstream.games import GameManager
 from chessstream.storage import Store
-from chessstream.vision import TemplateRecognizer,BoardDetector,choose_orientation
+from chessstream.vision import ScreenshotRecognizer,BoardDetector,choose_orientation
 
 ROOT=Path(__file__).resolve().parents[1]
 REAL=ROOT/'tests/fixtures/real'
@@ -30,10 +30,7 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         for game in manifest['games']:
             store=Store(Path(td)/game['id']);settings=Settings();manager=GameManager(store,settings)
-            recognizer=TemplateRecognizer();calibration='none'
-            if game.get('calibrate'):
-                bank=Path(td)/(game['id']+'.npz');TemplateRecognizer.calibrate(cv2.imread(str(REAL/game['frames'][0]['file'])),bank)
-                recognizer=TemplateRecognizer(bank);calibration='standard starting board from frame zero'
+            recognizer=ScreenshotRecognizer();calibration='none'
             times=[];bad=0;exact=0;expected=[];ground=chess.Board();last_verified=0
             for frame in game['frames']:
                 if frame['san']:
@@ -43,8 +40,7 @@ def main():
                 manager.process(obs);times.append((time.perf_counter()-t)*1000)
                 correct=int(np.sum(obs.labels==board_labels(chess.Board(frame['fen']))));bad+=64-correct;exact+=int(correct==64)
                 frames_total+=1
-                if not (game.get('calibrate') and frame['ply']==0):
-                    piece_correct+=correct;piece_total+=64;exact_frames+=int(correct==64)
+                piece_correct+=correct;piece_total+=64;exact_frames+=int(correct==64)
                 if manager.rec:
                     moves=manager.rec.verified
                     for i in range(last_verified,len(moves)):
@@ -82,19 +78,18 @@ def main():
                 'execution':'Linux cloud CPU, sequential image replay; not a Windows/YouTube live benchmark'},
             'dataset':{'source':manifest['method'],'captured_at':manifest['captured_at'],'frames':frames_total,'games':len(stats),
                 'evaluated_frames_excluding_calibration':piece_total//64,
-                'scope':'Three complete short/classic Lichess games and one 16-ply Chess.com opening, default 2D themes. Chess.com calibrated on frame zero; that frame is excluded from primary square/position accuracy. No streamed-video compression or arbitrary piece sets.'},
+                'scope':'Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.1.json. Not a YouTube benchmark.'},
             'metrics':{'square_accuracy':piece_correct/piece_total,'evaluated_squares':piece_total,'exact_position_accuracy':exact_frames/(piece_total//64),
                 'verified_move_accuracy':verified_correct/verified_total if verified_total else None,
                 'complete_sequence_accuracy':sum(g['complete_sequence_correct'] for g in stats)/len(stats),
                 'sequence_intervention_rate':interventions/len(stats),'localization_found_rate':sum(d['found'] for d in detected)/len(detected),
-                'one_time_setup_calibrations':sum(bool(g.get('calibrate')) for g in manifest['games']),
-                'sequences_requiring_setup_calibration_or_correction_rate':sum(bool(g.get('calibrate')) or not stat['complete_sequence_correct'] for g,stat in zip(manifest['games'],stats))/len(stats),
+                'one_time_setup_calibrations':0,
+                'sequences_requiring_setup_calibration_or_correction_rate':interventions/len(stats),
                 'localization_followed_by_correct_recognition_rate':sum(d.get('correct_position_after_crop',False) for d in detected)/len(detected),
                 'wall_seconds':elapsed,'process_cpu_seconds':cpu_seconds,'mean_process_cpu_percent_of_one_core':cpu_seconds/elapsed*100,
                 'resident_memory_mb_at_end':process.memory_info().rss/1024**2,'gpu_utilization':'not measured; CPU inference only'},
             'games':stats,'board_detection':detected,
             'limitations':['Small controlled suite; these values are not general stream accuracy claims.',
-                'Chess.com requires user-confirmed calibration for its default set.',
                 'The 16-ply Chess.com opening is a complete captured sequence, not a completed game.',
                 'PNG browser captures do not represent video compression, occlusion and animations in YouTube.',
                 'UI, desktop capture overhead and Windows GPU/CPU behavior are excluded from this benchmark.']}

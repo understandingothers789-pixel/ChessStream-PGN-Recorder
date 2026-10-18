@@ -1,5 +1,7 @@
 name: Windows validation and portable package
 on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
   windows:
     runs-on: windows-latest
@@ -16,11 +18,37 @@ jobs:
         run: python scripts/build_windows.py
       - name: Test packaged runtime imports and GUI
         run: |
-          build/windows-portable/runtime/python.exe -c "import chess, cv2, numpy, mss, psutil; from PySide6.QtWidgets import QApplication; from chessstream.vision import TemplateRecognizer; TemplateRecognizer(); print('Bundled imports passed')"
+          build/windows-portable/runtime/python.exe -c "import chess, cv2, numpy, mss, psutil, onnxruntime; from PySide6.QtWidgets import QApplication; from chessstream.vision import ScreenshotRecognizer; r=ScreenshotRecognizer(); o=r.recognize(cv2.imread('tests/fixtures/real/chesscom-ruy-000.png')); assert o.placement()==chess.Board().board_fen(); print('Bundled neural inference passed')"
           build/windows-portable/runtime/python.exe -m chessstream --data-dir build/bundle-smoke --smoke build/bundle-desktop.png
+      - name: Test the command launcher
+        run: |
+          $smokeDir = Join-Path $env:GITHUB_WORKSPACE "build/launcher-smoke"
+          $smokeImage = Join-Path $env:GITHUB_WORKSPACE "build/launcher-desktop.png"
+          & "build/windows-portable/Launch ChessStream.cmd" --data-dir "$smokeDir" --smoke "$smokeImage"
+          $deadline = (Get-Date).AddSeconds(30)
+          while (!(Test-Path "build/launcher-desktop.png") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+          if (!(Test-Path "build/launcher-desktop.png")) { throw "Portable command launcher failed to render the desktop" }
       - uses: actions/upload-artifact@v4
         with:
           name: ChessStream-Windows-Portable
-          path: |
-            dist/ChessStream-PGN-Recorder-Portable.zip
-            build/*desktop.png
+          path: dist/ChessStream-PGN-Recorder-Portable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-smoke-images
+          path: build/*desktop.png
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ChessStream-Windows-Portable
+          path: release-assets
+      - name: Publish validated portable download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/ChessStream-PGN-Recorder-Portable.zip --repo "$GITHUB_REPOSITORY" --verify-tag --title "ChessStream PGN Recorder $GITHUB_REF_NAME" --notes-file "docs/RELEASE-$GITHUB_REF_NAME.md"

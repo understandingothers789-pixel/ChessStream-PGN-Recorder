@@ -240,6 +240,67 @@ class OnnxRecognizer:
         return obs.flipped() if orientation == "black" else obs
 
 
+class ScreenshotRecognizer:
+    """Bundled fenshot CNN, trained for varied 2D screenshot styles (MIT).
+
+    Its flattened grayscale input, class order, and already-normalized output
+    differ from the optional user-supplied RGB/logit ONNX contract above.
+    Keep the upstream floating-point luma and half-pixel bilinear preprocessing.
+    No chess position, starting layout or previous move enters the classifier.
+    """
+    MODEL_LABELS = "1KQRBNPkqrbnp"
+
+    def __init__(self):
+        import onnxruntime as ort
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = 2
+        options.inter_op_num_threads = 1
+        self.session = ort.InferenceSession(
+            str(ASSETS / "models/chess-tiles-v2.onnx"), sess_options=options,
+            providers=["CPUExecutionProvider"])
+        self.order = [self.MODEL_LABELS.index("1" if c == "." else c) for c in LABELS]
+
+    @staticmethod
+    def tiles(image: np.ndarray) -> np.ndarray:
+        if min(image.shape[:2]) < 80:
+            raise ValueError("Board must be at least 80 pixels across")
+        # Integer cvtColor rounds before resizing; retain the model's float luma.
+        gray = image.astype(np.float32) @ np.array([.114, .587, .299], np.float32)
+        board = cv2.resize(gray, (256, 256), interpolation=cv2.INTER_LINEAR) / 255
+        return board.reshape(8, 32, 8, 32).transpose(0, 2, 1, 3)[::-1].reshape(64, 1024).copy()
+
+    def recognize(self, image: np.ndarray, orientation: str = "white") -> Observation:
+        values = self.session.run(["probs"], {"tiles": self.tiles(image)})[0]
+        if values.shape != (64, 13) or not np.isfinite(values).all():
+            raise ValueError("Bundled screenshot model returned invalid probabilities")
+        if values.max(axis=1).min() < .80:
+            # Dark pieces on textured backgrounds may have little contrast.
+            # Retry a modest global contrast adjustment. A stronger score alone
+            # is insufficient: all 64 class decisions must agree to select it.
+            enhanced = np.clip((image.astype(np.float32)-127.5)*1.3+127.5, 0, 255)
+            retry = self.session.run(["probs"], {"tiles": self.tiles(enhanced)})[0]
+            if np.array_equal(values.argmax(axis=1), retry.argmax(axis=1)):
+                if retry.max(axis=1).min() > values.max(axis=1).min():
+                    values = retry
+            else:
+                # Disagreement is evidence of uncertainty, not permission to
+                # replace a piece with whichever view looks most confident.
+                disputed = values.argmax(axis=1) != retry.argmax(axis=1)
+                values[disputed] = (values[disputed] + retry[disputed]) / 2
+        obs = Observation(values[:, self.order].copy())
+        return obs.flipped() if orientation == "black" else obs
+
+
+def create_recognizer(settings, custom_bank: Path | None = None):
+    if settings.onnx_model:
+        return OnnxRecognizer(settings.onnx_model)
+    if settings.recognition_mode == "calibrated":
+        if not custom_bank or not custom_bank.exists():
+            raise ValueError("No calibrated piece set exists. Select the bundled screenshot model in Settings.")
+        return TemplateRecognizer(custom_bank)
+    return ScreenshotRecognizer()
+
+
 def choose_orientation(obs: Observation, previous: chess.Board | None = None) -> Observation:
     if previous:
         expected = np.array([LABELS.index(p.symbol()) if (p:=previous.piece_at(s)) else 0 for s in chess.SQUARES])

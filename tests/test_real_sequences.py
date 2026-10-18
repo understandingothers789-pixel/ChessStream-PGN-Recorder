@@ -7,7 +7,7 @@ import chess.pgn
 import cv2
 import pytest
 from chessstream.domain import Settings
-from chessstream.vision import TemplateRecognizer,choose_orientation
+from chessstream.vision import ScreenshotRecognizer,choose_orientation
 from chessstream.games import GameManager
 from chessstream.storage import Store
 
@@ -17,9 +17,7 @@ MANIFEST=json.loads((REAL/'manifest.json').read_text())
 
 @pytest.mark.parametrize('game',MANIFEST['games'],ids=lambda g:g['id'])
 def test_actual_browser_sequences(game,tmp_path):
-    rec=TemplateRecognizer()
-    if game.get('calibrate'):
-        bank=tmp_path/'calibration.npz';rec.calibrate(cv2.imread(str(REAL/game['frames'][0]['file'])),bank);rec=TemplateRecognizer(bank)
+    rec=ScreenshotRecognizer()
     store=Store(tmp_path/'recordings');manager=GameManager(store,Settings());expected=[];ground=chess.Board()
     # Every second real frame exercises multiple moves between observations.
     indices=sorted(set([0]+list(range(2,len(game['frames']),2))+[len(game['frames'])-1]))
@@ -39,7 +37,7 @@ def test_actual_browser_sequences(game,tmp_path):
 
 
 def test_actual_back_to_back_games_and_image_only_deletion(tmp_path):
-    store=Store(tmp_path/'recordings');manager=GameManager(store,Settings());recognizer=TemplateRecognizer()
+    store=Store(tmp_path/'recordings');manager=GameManager(store,Settings());recognizer=ScreenshotRecognizer()
     for game in MANIFEST['games'][:3]:
         for f in game['frames']:
             image=cv2.imread(str(REAL/f['file']));obs=recognizer.recognize(image)

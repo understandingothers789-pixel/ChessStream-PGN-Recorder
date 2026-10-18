@@ -63,6 +63,7 @@ class Settings:
     export_dir: str = ""
     auto_export: bool = True
     onnx_model: str = ""
+    recognition_mode: str = "neural"
     initial_fen: str = ""
     start_hotkey: str = "F8"
     stop_hotkey: str = "F9"
@@ -109,6 +110,14 @@ class Observation:
     @property
     def confidence(self) -> float:
         return float(np.mean(self.probabilities.max(axis=1))) * self.quality
+
+    @property
+    def weakest_confidence(self) -> float:
+        return float(self.probabilities.max(axis=1).min()) * self.quality
+
+    def uncertain_squares(self, threshold: float = .80) -> list[str]:
+        return [chess.square_name(s) for s in np.flatnonzero(
+            self.probabilities.max(axis=1) * self.quality < threshold)]
 
     def flipped(self) -> Observation:
         return Observation(self.probabilities[::-1].copy(), self.timestamp,

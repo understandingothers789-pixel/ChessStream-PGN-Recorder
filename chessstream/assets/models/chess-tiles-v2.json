@@ -1,0 +1,26 @@
+{
+  "source": "https://github.com/scoriiu/fenshot",
+  "revision": "04d8bbb365e1abc679007cb1ac836fa2dc1e40ac",
+  "upstream_path": "packages/fenshot/model/chess-tiles-v2.onnx",
+  "sha256": "883f6a8e639e6d6b6399b3fda0508ad772e3c6f9cefa2e678a13f27b9fa6248d",
+  "license": "MIT",
+  "input": {
+    "name": "tiles",
+    "shape": [
+      "N",
+      1024
+    ],
+    "dtype": "float32",
+    "range": [
+      0,
+      1
+    ],
+    "preprocessing": "BGR to float BT.601 grayscale; bilinear full-board resize to 256x256; 32x32 tiles in a1..h8 order"
+  },
+  "output": {
+    "name": "probs",
+    "labels": "1KQRBNPkqrbnp",
+    "already_softmax": true
+  },
+  "low_confidence_retry": "Contrast factor 1.3 about 127.5; accept stronger view only if all labels agree, otherwise average disputed distributions."
+}
