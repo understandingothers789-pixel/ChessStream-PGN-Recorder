@@ -53,6 +53,8 @@ class Settings:
     adaptive: bool = True
     adaptive_fps: int = 6
     deduplicate: bool = False
+    screenshot_mode: str = "positions"
+    confirm_on_reply: bool = True
     orientation: str = "auto"
     detect_board: bool = True
     max_plies: int = 4

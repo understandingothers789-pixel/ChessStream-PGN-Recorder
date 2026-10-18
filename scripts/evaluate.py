@@ -46,8 +46,11 @@ def main():
                     for i in range(last_verified,len(moves)):
                         verified_total+=1;verified_correct+=int(i<len(expected) and moves[i]==expected[i])
                     last_verified=len(moves)
+            automatic_plies=len(manager.rec.verified) if manager.rec else 0
+            final_review=bool(manager.rec and manager.rec.verified==expected[:-1] and manager.snapshot().get('provisional'))
+            if final_review:manager.choose(0)
             complete=bool(manager.rec and manager.rec.verified==expected)
-            if not complete:interventions+=1
+            if final_review or not complete:interventions+=1
             row=store.game(manager.current_id)
             pgn=chess.pgn.read_game(io.StringIO(row['pgn'])) if row else None
             roundtrip=bool(pgn and not pgn.errors and list(pgn.mainline_moves())==[chess.Move.from_uci(m) for m in expected])
@@ -58,10 +61,11 @@ def main():
             for index in indices:
                 image=cv2.imread(str(REAL/game['frames'][index]['file']));obs=recognizer.recognize(image)
                 obs=choose_orientation(obs,gap_manager.rec.board if gap_manager.rec else None);gap_manager.process(obs)
+            if gap_manager.snapshot().get('provisional') and gap_manager.rec.verified==expected[:-1]:gap_manager.choose(0)
             gaps_correct=bool(gap_manager.rec and gap_manager.rec.verified==expected)
             stats.append({'id':game['id'],'calibration':calibration,'frames':len(game['frames']),
                 'square_errors':bad,'exact_positions':exact,'verified_plies':len(manager.rec.verified) if manager.rec else 0,
-                'expected_plies':len(expected),'complete_sequence_correct':complete,'pgn_roundtrip_correct':roundtrip,
+                'expected_plies':len(expected),'automatic_verified_plies':automatic_plies,'final_confirmation_required':final_review,'complete_sequence_correct':complete,'pgn_roundtrip_correct':roundtrip,
                 'two_ply_gap_sequence_correct':gaps_correct,'mean_processing_ms':float(np.mean(times)),
                 'p95_processing_ms':float(np.percentile(times,95))})
             # Localization is assessed separately on full browser screenshots.
@@ -74,17 +78,17 @@ def main():
             print(json.dumps(stats[-1]),flush=True)
             store.close();gap_store.close()
     elapsed=time.perf_counter()-start;cpu_seconds=sum(process.cpu_times()[:2])-cpu_start
-    report={'environment':{'os':platform.platform(),'python':platform.python_version(),'cpu_count':psutil.cpu_count(),
+    report={'recording_policy':'Conservative opponent-response confirmation; evaluator explicitly confirms each final pending ply once. Automatic move accuracy excludes those manual final confirmations.','environment':{'os':platform.platform(),'python':platform.python_version(),'cpu_count':psutil.cpu_count(),
                 'execution':'Linux cloud CPU, sequential image replay; not a Windows/YouTube live benchmark'},
             'dataset':{'source':manifest['method'],'captured_at':manifest['captured_at'],'frames':frames_total,'games':len(stats),
                 'evaluated_frames_excluding_calibration':piece_total//64,
-                'scope':'Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.1.json. Not a YouTube benchmark.'},
+                'scope':'Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.2.json. Not a YouTube benchmark.'},
             'metrics':{'square_accuracy':piece_correct/piece_total,'evaluated_squares':piece_total,'exact_position_accuracy':exact_frames/(piece_total//64),
                 'verified_move_accuracy':verified_correct/verified_total if verified_total else None,
                 'complete_sequence_accuracy':sum(g['complete_sequence_correct'] for g in stats)/len(stats),
                 'sequence_intervention_rate':interventions/len(stats),'localization_found_rate':sum(d['found'] for d in detected)/len(detected),
                 'one_time_setup_calibrations':0,
-                'sequences_requiring_setup_calibration_or_correction_rate':interventions/len(stats),
+                'sequences_requiring_any_manual_confirmation_rate':interventions/len(stats),
                 'localization_followed_by_correct_recognition_rate':sum(d.get('correct_position_after_crop',False) for d in detected)/len(detected),
                 'wall_seconds':elapsed,'process_cpu_seconds':cpu_seconds,'mean_process_cpu_percent_of_one_core':cpu_seconds/elapsed*100,
                 'resident_memory_mb_at_end':process.memory_info().rss/1024**2,'gpu_utilization':'not measured; CPU inference only'},

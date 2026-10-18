@@ -38,9 +38,10 @@ def replay_video(path:Path,root:Path,region=None,interval=1.0,orientation='auto'
             obs.timestamp=(start+timedelta(seconds=seconds)).isoformat(timespec='milliseconds')
             stable=stable+1 if obs.placement()==previous else 1;previous=obs.placement()
             if stable>=2:manager.process(obs)
-            if seconds>=next_saved:
+            position_mode=settings.screenshot_mode=='positions'
+            if (position_mode and stable>=2) or (not position_mode and seconds>=next_saved):
                 store.save_screenshot(manager.session_id,manager.current_id,board,obs.timestamp,obs.placement(),obs.confidence,
-                    len(manager.rec.verified) if manager.rec else 0,settings.deduplicate)
+                    len(manager.rec.verified) if manager.rec else 0,settings.deduplicate,position_mode)
                 next_saved=seconds+interval
             index+=1
         manager.finish();store.finish_session(manager.session_id)

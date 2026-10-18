@@ -1,3 +1,4 @@
+# Storage bookkeeping uses explicit immediate mode; safe defaults have separate capture tests.
 from datetime import datetime,timezone,timedelta
 import io
 import json
@@ -10,7 +11,7 @@ from chessstream.games import GameManager
 
 
 def test_retention_restart_and_pgn_independence(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board()
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board()
     m.process(Observation.from_board(b));b.push_san('e4');m.process(Observation.from_board(b))
     gid=m.current_id;sid=m.session_id;old='2025-01-01T00:00:00.000+00:00'
     image=np.zeros((80,80,3),np.uint8)
@@ -31,7 +32,7 @@ def test_retention_restart_and_pgn_independence(tmp_path):
 
 
 def test_filters_dedupe_and_delete_data_only(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());m.process(Observation.from_board(chess.Board()))
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));m.process(Observation.from_board(chess.Board()))
     gid=m.current_id;image=np.zeros((80,80,3),np.uint8)
     assert s.save_screenshot(m.session_id,gid,image,utcnow(),deduplicate=True)
     assert not s.save_screenshot(m.session_id,gid,image,utcnow(),deduplicate=True)
@@ -43,7 +44,7 @@ def test_filters_dedupe_and_delete_data_only(tmp_path):
 
 
 def test_midgame_setup_and_side_inference(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board()
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board()
     for san in 'e4 e5 Nf3 Nc6'.split():b.push_san(san)
     m.process(Observation.from_board(b));b.push_san('Bb5');m.process(Observation.from_board(b))
     row=s.game(m.current_id);game=chess.pgn.read_game(io.StringIO(row['pgn']))
@@ -54,7 +55,7 @@ def test_midgame_setup_and_side_inference(tmp_path):
 
 
 def test_terminal_and_back_to_back(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board()
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board()
     m.process(Observation.from_board(b))
     for san in 'f3 e5 g4 Qh4#'.split():
         b.push_san(san);m.process(Observation.from_board(b))
@@ -68,7 +69,7 @@ def test_terminal_and_back_to_back(tmp_path):
 
 
 def test_nonterminal_reset_and_opening_review(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board()
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board()
     m.process(Observation.from_board(b))
     for san in 'e4 e5 Nf3 Nc6'.split():
         b.push_san(san);m.process(Observation.from_board(b))
@@ -85,25 +86,25 @@ def test_nonterminal_reset_and_opening_review(tmp_path):
 
 def test_manual_correction_is_atomic_and_recoverable(tmp_path):
     import pytest
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board();m.process(Observation.from_board(b))
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board();m.process(Observation.from_board(b))
     for san in 'e4 e5 Nf3'.split():b.push_san(san);m.process(Observation.from_board(b))
     before=m.rec.board.fen()
     with pytest.raises(ValueError):m.correct_line('Qh9',1)
     assert m.rec.board.fen()==before
     m.correct_line('Bc4',1)
     assert m.rec.verified==['e2e4','e7e5','f1c4']
-    recovered=GameManager(s,Settings());recovered.recover(m.current_id)
+    recovered=GameManager(s,Settings(confirm_on_reply=False));recovered.recover(m.current_id)
     assert recovered.rec.verified==m.rec.verified
     assert s.query("SELECT * FROM audit WHERE action='manual legal SAN correction'")
     s.close()
 
 
 def test_manual_result_overrides_automatic_result_and_freezes_finished_game(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board();m.process(Observation.from_board(b))
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board();m.process(Observation.from_board(b))
     for san in 'f3 e5 g4 Qh4#'.split():b.push_san(san);m.process(Observation.from_board(b))
     headers=dict(m.headers);headers['Result']='1/2-1/2';m.edit(m.current_id,m.name,headers)
     m.process(Observation.from_board(b));assert m.headers['Result']=='1/2-1/2'
-    restored=GameManager(s,Settings());restored.recover(m.current_id)
+    restored=GameManager(s,Settings(confirm_on_reply=False));restored.recover(m.current_id)
     assert restored.result_override
     s.close()
 
@@ -134,7 +135,7 @@ def test_opt_in_age_retention_has_strict_cutoff(tmp_path):
 
 
 def test_one_click_initial_orientation_correction_repairs_provisional_fen(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings())
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False))
     m.process(Observation.from_board(chess.Board()).flipped());gid=m.current_id
     assert m.rec.board.board_fen()!=chess.Board().board_fen()
     m.process(Observation.from_board(chess.Board()))
@@ -145,7 +146,7 @@ def test_one_click_initial_orientation_correction_repairs_provisional_fen(tmp_pa
 
 
 def test_finishing_game_preserves_uncertainty_in_library_status(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings());b=chess.Board();b.push_san('e4');b.push_san('e5')
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board();b.push_san('e4');b.push_san('e5')
     m.process(Observation.from_board(b));assert len(m.rec.branches)==2
     m.headers['Result']='1-0';m.finish()
     game=s.game(m.current_id)

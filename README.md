@@ -2,9 +2,11 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.1 replaces the original limited template recognizer with a bundled pretrained screenshot CNN and requires reliable evidence for every square before accepting a starting position. A portable Windows ZIP and complete source are provided.** See [known limitations](docs/KNOWN_LIMITATIONS.md) before relying on unattended stream reconstruction.
+**Version 1.2 protects against held-piece drags by keeping the latest move provisional until the opponent replies. It recovers shorter legal continuations from unverified detours and saves one screenshot per settled observed position by default. The bundled screenshot CNN runs locally. A portable Windows ZIP and complete source are provided.** See [known limitations](docs/KNOWN_LIMITATIONS.md) before relying on unattended stream reconstruction.
 
-![Version 1.1 recognizing a captured Chess.com Ocean board](docs/recognition-v1.1-preview.png)
+![Version 1.2: verified knights and a provisional queen move after Bb6, with native analysis arrows](docs/confirmation-v1.2-preview.png)
+
+Controlled browser-capture preview beginning after `Bb6`: `Ng5 Nh6` are verified, while `Qf3` waits for a reply.
 
 ## Install on Windows 11 x64
 
@@ -13,7 +15,7 @@ A local Python / PySide6 desktop application that reads a visible 2D chessboard 
 3. Place the app beside the browser or on a second monitor. The captured board must remain visible.
 4. Select **Select capture region**, draw tightly around the 64 squares, and select **Start recording**.
 5. Check the live preview and **Weakest square score**. The bundled model needs no initial calibration for the tested Chess.com/Lichess themes. An uncertain first position stays pending, with affected squares named; screenshots continue to be saved.
-6. Export from the live page or Game library. Unknown names stay `Unknown`.
+6. Verified moves have a checkmark; the latest provisional move appears in amber. After the game ends, inspect the final move and select **Confirm final / pending move** before exporting. Export from the live page or Game library. Unknown names stay `Unknown`.
 
 The ZIP contains `pythonw.exe` as part of its private Python runtime, launched by the included `.cmd` shortcut script. No installer executable is required. Windows SmartScreen may still display warnings for unsigned downloaded scripts or binaries. The Windows workflow tests the bundled inference runtime and GUI before release. Live capture on your Windows 11 hardware remains a separate acceptance check.
 
@@ -29,6 +31,8 @@ py -3.13 -m venv .venv
 
 `Launch-Windows.cmd` automates that first-time setup when a compatible Python is installed. Recognition assets are already included. Normal use makes no network requests.
 
+To update a portable copy, stop and close the old app, extract the new ZIP into a separate folder, and launch the new copy. The default data directory is shared, so existing games and screenshots remain available. Back it up first if needed. Old verified moves are never silently rewritten; an older ambiguous recording can be resumed for further evidence or manually corrected.
+
 For Linux development:
 
 ```sh
@@ -42,9 +46,9 @@ PySide6 requires a desktop session for interactive use. Headless GUI verificatio
 ## Implemented functionality
 
 - Region drawing and live move/resize overlay; monitor selection; Windows application-window selection with client-area tracking. On Windows, a drawn source remembers its containing window for board reacquisition after layout changes.
-- Region-only MSS capture, adjustable permanent screenshot interval (default one second), and optional adaptive temporary frames (default six per second). Unchanged images reuse recognition results; image deduplication is separately opt-in.
+- Region-only MSS capture, screenshots per settled observed position by default, an optional adjustable interval mode, and adaptive temporary analysis frames (default six per second). Arrow/cursor changes that preserve the recognized position do not create duplicate position-mode screenshots. Analysis continues independently of image storage.
 - OpenCV checkerboard localization, a bundled 1.3 MB pretrained 13-class screenshot CNN (fenshot, MIT), CPU inference through ONNX Runtime, optional manual template calibration, and a separate custom-model adapter.
-- Automatic orientation, explicit flip, stability confirmation, legal multi-ply reconstruction, castling, en passant, promotion, and independent ambiguity branches. Incomplete searches cannot certify a unique path.
+- Automatic orientation, explicit flip, stability confirmation, legal multi-ply reconstruction, castling, en passant, promotion, and independent ambiguity branches. Changed squares require positive visual support. The latest ply stays provisional until a reply or explicit confirmation; provisional hovers can be replaced without rewriting verified moves. Incomplete searches cannot certify a unique path.
 - Continuous verified-prefix PGNs, SQLite crash recovery, midgame FEN/SetUp, automatic checkmate/stalemate and board-provable endings, conservative reset/review handling, separate games, editable headers/results, import and multi-game export.
 - Live preview, reconstructed board, SAN move list, confidence/similarity and storage indicators, game library with a move slider, screenshot thumbnails/timeline, observed positions and full-resolution review.
 - Image-only deletion by game, session, date, range or all; confirmed future jobs; optional age retention; pending-job cancellation. Keep indefinitely is the default. Independent game-data deletion preserves screenshots and external exports.
@@ -52,7 +56,9 @@ PySide6 requires a desktop session for interactive use. Headless GUI verificatio
 
 ## Recognition and reconstruction boundaries
 
-The default model is a transparent template classifier, not a claimed universal pretrained neural model. It supports Cburnett, Merida, Chessnut, Fantasy and Spatial artwork. The actual browser-image evaluation covers **default Cburnett on Lichess and calibrated default Neo on Chess.com**, not all bundled sets under real stream conditions. A starting-board calibration is necessary for unsupported sets. An optional model must be supplied separately to use ONNX.
+The default recognizer is the bundled MIT-licensed fenshot screenshot CNN, running offline through ONNX Runtime. Controlled browser tests cover Lichess and Chess.com pieces, textured boards, arrows, drag states, flips and compression. Those tests do not establish universal recognition accuracy. Optional calibrated templates remain available for unsupported artwork.
+
+A piece held over a legal square can be visually identical to a dropped piece, even for several seconds. With the default protection enabled, repeating that image never verifies the latest move: an opponent response or explicit user confirmation is required. The board and PGN can therefore trail the live display by one ply. Final moves, including checkmate, need explicit confirmation if no reply follows. Disabling **Protect against dragged pieces** restores immediate confirmation but removes this safeguard.
 
 “Verified” means supported by stable visual evidence and a unique legal path **under the shortest-gap search assumption and configured limits**. It is not a guarantee against visual misclassification. Different move orders can reach the same board. Completely unseen reversible cycles cannot be recovered. The app retains legal ambiguity instead of engine-ranking a human move into existence.
 
@@ -68,13 +74,13 @@ python -m pytest -q
 python scripts/evaluate.py
 ```
 
-The included `tests/fixtures/real` contains **64 actual Chromium screenshots** captured from public Lichess and Chess.com analysis boards, with a manifest of known FENs and test moves. Three are full Lichess games; the fourth is a 16-ply Chess.com opening. Chess.com calibration uses frame zero, with subsequent positions evaluated independently. This is a controlled fixture set, not a YouTube stream benchmark.
+The included `tests/fixtures/real` contains **64 actual Chromium screenshots** captured from public Lichess and Chess.com analysis boards, with a manifest of known FENs and test moves. Three are full Lichess games; the fourth is a 16-ply Chess.com opening. All frames are evaluated without calibration. This is a controlled fixture set, not a YouTube stream benchmark.
 
-The recorded [evaluation](docs/evaluation.json) evaluates every existing real browser frame without calibration. The additional [recognition regression report](docs/recognition-v1.1.json) compares the original templates with the new model on textured boards and includes Chess.com Ocean/Walnut, analysis arrows, dragging, flips and compressed captures. These are controlled regression suites; they are not evidence of general YouTube accuracy. Your particular stream and capture still need checking.
+The recorded [evaluation](docs/evaluation.json) evaluates every existing real browser frame without calibration. The additional [recognition regression report](docs/recognition-v1.2.json) compares the original templates with the new model on textured boards and includes Chess.com Ocean/Walnut, analysis arrows, dragging, flips and compressed captures. These are controlled regression suites; they are not evidence of general YouTube accuracy. Your particular stream and capture still need checking.
 
-An additional [live capture acceptance test](docs/live-capture-result.json) used headed Chromium on an actual X11 desktop with MSS and the production recording worker. It reconstructed eight paired test plies, verified pause/resume and a real board flip, and saved interval screenshots independently of adaptive analysis. A compressed MJPEG video replay and three consecutive real-image games are also covered by automated tests. These Linux results do not validate Windows capture or YouTube streams.
+An additional [live capture acceptance test](docs/live-capture-result.json) used headed Chromium on an actual X11 desktop with MSS and the production recording worker. It automatically verified seven of eight test plies, with one explicit final confirmation, checked pause/resume and a real board flip, and saved five position screenshots over 54 processed updates. Every measured complete sequence in the current reports includes one explicit final-move confirmation; the reports count that intervention. A compressed MJPEG video replay and three consecutive real-image games are also covered by automated tests. These Linux results do not validate Windows capture or YouTube streams.
 
-`scripts/capture_fixtures.py` recreates the real-browser fixtures using the public UIs and known test PGNs. The application does not include any of those test sequences in its runtime behavior. `examples/*.pgn` are generated by the actual recognition pipeline from the captured sequences.
+`scripts/capture_fixtures.py` recreates the original browser fixtures. `scripts/capture_confirmation_fixtures.py` reproduces the continuation after `Bb6`, native blue arrows and a bishop held over `c5` before release at `b4`; `scripts/evaluate_confirmation.py` records the results. These use public browser UIs and known test PGNs. The application does not include any of those test sequences in its runtime behavior. `examples/*.pgn` are generated by the actual recognition pipeline from the captured sequences.
 
 ## Local video replay
 

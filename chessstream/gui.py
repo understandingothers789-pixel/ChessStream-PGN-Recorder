@@ -10,7 +10,7 @@ import sys
 import chess
 import chess.pgn
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QSize, QDateTime
-from PySide6.QtGui import QShortcut, QKeySequence, QIcon, QPixmap, QDesktopServices
+from PySide6.QtGui import QShortcut, QKeySequence, QIcon, QPixmap, QDesktopServices, QColor
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.1.0"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.2.0"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
@@ -104,18 +104,19 @@ class MainWindow(QMainWindow):
         box.addLayout(controls)
         source=QHBoxLayout();self.source_label=muted(self.region_text());source.addWidget(self.source_label,1)
         source.addWidget(button("Monitor…",self.choose_monitor));source.addWidget(button("Window…",self.choose_window))
-        source.addWidget(QLabel("Save every"));self.interval=QDoubleSpinBox();self.interval.setRange(.1,60);self.interval.setDecimals(1);self.interval.setSuffix(" s");self.interval.setValue(self.settings.interval);self.interval.valueChanged.connect(self.set_interval);source.addWidget(self.interval)
+        source.addWidget(QLabel("Screenshots"));self.screenshot_mode=QComboBox();self.screenshot_mode.addItem('Per position','positions');self.screenshot_mode.addItem('At interval','interval');self.screenshot_mode.setCurrentIndex(0 if self.settings.screenshot_mode=='positions' else 1);self.screenshot_mode.currentIndexChanged.connect(self.set_screenshot_mode);source.addWidget(self.screenshot_mode)
+        self.interval=QDoubleSpinBox();self.interval.setRange(.1,60);self.interval.setDecimals(1);self.interval.setSuffix(" s");self.interval.setValue(self.settings.interval);self.interval.setEnabled(self.settings.screenshot_mode!='positions');self.interval.valueChanged.connect(self.set_interval);source.addWidget(self.interval)
         box.addLayout(source)
         metrics=QHBoxLayout();self.metric_labels={}
         for key,title,value in [("moves","VERIFIED PLIES","0"),("confidence","WEAKEST SQUARE SCORE","—"),("saved","SAVED SCREENSHOTS","0"),("disk","SCREENSHOT STORAGE","0 MB")]:
             card=Card();card.box.addWidget(muted(title));label=QLabel(value);label.setObjectName("metric");card.box.addWidget(label);self.metric_labels[key]=label;metrics.addWidget(card)
         box.addLayout(metrics)
         splitter=QSplitter(Qt.Horizontal)
-        capture_card=Card("CAPTURED BOARD");self.live_image=ImageView();capture_card.box.addWidget(self.live_image,1);self.capture_caption=muted("Permanent screenshots: every second. Adaptive frames: temporary, never saved.");capture_card.box.addWidget(self.capture_caption)
+        capture_card=Card("CAPTURED BOARD");self.live_image=ImageView();capture_card.box.addWidget(self.live_image,1);self.capture_caption=muted("Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary." if self.settings.screenshot_mode=='positions' else "Permanent screenshots: at the selected interval. Analysis frames stay temporary.");capture_card.box.addWidget(self.capture_caption)
         self.recognition_details=muted("Bundled screenshot model • waiting for a capture");capture_card.box.addWidget(self.recognition_details)
         internal=Card("RECONSTRUCTED BOARD");self.live_board=BoardView();internal.box.addWidget(self.live_board,1);self.last_move_label=muted("Waiting for the first verified position");internal.box.addWidget(self.last_move_label)
         self.live_board.show_pending()
-        moves_card=Card("VERIFIED MOVES");self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);moves_card.box.addWidget(self.move_table,1)
+        moves_card=Card("MOVES");self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);moves_card.box.addWidget(self.move_table,1)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
         self.choose_path=button("Confirm selected sequence",self.choose_sequence);self.choose_path.hide();moves_card.box.addWidget(self.choose_path)
@@ -134,6 +135,11 @@ class MainWindow(QMainWindow):
     def set_interval(self,value):
         self.settings.interval=value;self.settings.save(self.root/"settings.json")
         if hasattr(self,'settings_interval'):self.settings_interval.setValue(value)
+
+    def set_screenshot_mode(self,index):
+        self.settings.screenshot_mode=self.screenshot_mode.currentData();self.settings.save(self.root/'settings.json')
+        if hasattr(self,'interval'):self.interval.setEnabled(self.settings.screenshot_mode!='positions')
+        if hasattr(self,'capture_caption'):self.capture_caption.setText('Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary.' if self.settings.screenshot_mode=='positions' else 'Permanent screenshots: at the selected interval. Analysis frames stay temporary.')
 
     def toggle_start(self):
         if self.worker and self.worker.isRunning():self.pause();return
@@ -162,7 +168,7 @@ class MainWindow(QMainWindow):
         self.snapshot=snap
         if not self.worker or not self.worker.paused.is_set():
             status=snap.get('status','Recording');self.recording_status.setText("●  "+status)
-            warning=any(word in status.lower() for word in ['uncertain','unmatched','limit','obstructed','hidden','reset','review','waiting','unknown'])
+            warning=any(word in status.lower() for word in ['uncertain','unmatched','limit','obstructed','hidden','reset','review','waiting','unknown','provisional'])
             self.recording_status.setStyleSheet(f"color:{'#f4c17a' if warning else '#8ee3ce'};font-weight:600;padding:8px;")
         moves=snap.get('moves',[]);self.metric_labels['moves'].setText(str(len(moves)))
         if 'weakest_confidence' in snap:
@@ -187,25 +193,32 @@ class MainWindow(QMainWindow):
         elif not snap.get('fen'):
             self.live_board.show_pending();self._last_board_render=None
         self.last_move_label.setText(f"{len(moves)} verified plies  •  Last: {moves[-1] if moves else '—'}" if snap.get('fen') else "Waiting for a reliable first position • recording continues")
-        self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN))
+        pending=snap.get('pending_moves',[]) if snap.get('provisional') else []
+        self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN),pending)
+        if pending:self.last_move_label.setText(f"{len(moves)} verified plies • {' '.join(pending)} provisional, "+('final confirmation needed' if snap.get('pending_terminal') else 'waiting for reply'))
         options=snap.get('alternatives',[])
         if [self.alternatives.itemText(i) for i in range(self.alternatives.count())]!=options:
             self.alternatives.clear();self.alternatives.addItems(options)
         self.alternatives.setVisible(bool(options));self.choose_path.setVisible(bool(options));self.choose_path.setEnabled(not snap.get('incomplete',False))
         self.uncertain_label.setVisible(bool(options))
+        self.uncertain_label.setText(('FINAL MOVE • confirm after review; excluded from PGN' if snap.get('pending_terminal') else 'PROVISIONAL MOVE • waiting for opponent reply; excluded from PGN') if snap.get('provisional') else 'UNVERIFIED POSSIBILITIES • excluded from PGN')
+        self.choose_path.setText('Confirm final / pending move' if snap.get('provisional') else 'Confirm selected sequence')
+        self.choose_path.setToolTip('Confirm only after seeing the piece released, or when reviewing the final move. This overrides reply-based confirmation.')
         self.delay_label.setText(f"Processing {snap.get('processing_ms',0)} ms  •  {snap.get('orientation','auto').title()} at bottom")
 
-    def update_move_table(self,moves,fen):
-        key=(fen,tuple(moves))
+    def update_move_table(self,moves,fen,pending=()):
+        key=(fen,tuple(moves),tuple(pending))
         if key==getattr(self,'_last_moves_render',None):return
         self._last_moves_render=key
         self.move_table.clearContents()
         initial=chess.Board(fen);start=initial.fullmove_number;black_first=not initial.turn
-        rows=(len(moves)+(1 if black_first else 0)+1)//2
+        rows=(len(moves)+len(pending)+(1 if black_first else 0)+1)//2
         self.move_table.setRowCount(rows)
         for row in range(rows):self.move_table.setItem(row,0,QTableWidgetItem(str(start+row)))
-        for i,san in enumerate(moves):
-            index=i+(1 if black_first else 0);self.move_table.setItem(index//2,1+index%2,QTableWidgetItem("✓ "+san))
+        for i,san in enumerate(list(moves)+list(pending)):
+            index=i+(1 if black_first else 0);item=QTableWidgetItem(("✓ " if i<len(moves) else "… ")+san)
+            if i>=len(moves):item.setForeground(QColor('#f4c17a'));item.setToolTip('Provisional: a held piece can look like a move. Not included in PGN until confirmed.')
+            self.move_table.setItem(index//2,1+index%2,item)
         if rows:self.move_table.scrollToBottom()
 
     def sources(self):
@@ -519,6 +532,8 @@ class MainWindow(QMainWindow):
         capture=tab("Capture & recognition")
         self.settings_interval=QDoubleSpinBox();self.settings_interval.setRange(.1,60);self.settings_interval.setValue(self.settings.interval);self.settings_interval.setSuffix(' seconds');capture.addRow('Permanent screenshot interval',self.settings_interval)
         self.adaptive=QCheckBox('Analyze additional temporary frames for fast games');self.adaptive.setChecked(self.settings.adaptive);capture.addRow('Adaptive recognition',self.adaptive)
+        self.confirm_reply=QCheckBox('Keep the latest move provisional until the opponent responds');self.confirm_reply.setChecked(self.settings.confirm_on_reply);capture.addRow('Protect against dragged pieces',self.confirm_reply)
+        capture.addRow(muted('Recommended for blitz and rapid: a stable hover is not proof of a drop. The last move stays amber and out of PGN until a reply or explicit final-move confirmation.'))
         self.fps=QSpinBox();self.fps.setRange(2,15);self.fps.setValue(self.settings.adaptive_fps);self.fps.setSuffix(' frames/s');capture.addRow('Adaptive target rate',self.fps)
         self.detect_setting=QCheckBox('Find the board inside the selected area');self.detect_setting.setChecked(self.settings.detect_board);capture.addRow('Board detection',self.detect_setting)
         self.orientation_setting=QComboBox();self.orientation_setting.addItems(['auto','white','black']);self.orientation_setting.setCurrentText(self.settings.orientation);capture.addRow('Color at the bottom',self.orientation_setting)
@@ -555,7 +570,7 @@ class MainWindow(QMainWindow):
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
-            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
+            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))
         except Exception as e:self.error(str(e))
 

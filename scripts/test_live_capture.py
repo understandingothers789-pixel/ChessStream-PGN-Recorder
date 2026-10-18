@@ -46,6 +46,8 @@ def main():
             deadline=time.monotonic()+8
             while not manager.rec and time.monotonic()<deadline:pump(.1)
             assert manager.rec,'The actual desktop board was not initialized'
+            pump(1.4);initial_count=len(store.screenshots());pump(1.4)
+            assert len(store.screenshots())==initial_count,'Unchanged position kept saving screenshots'
             ground=chess.Board();expected=[]
             pairs=['e4 e5','Nf3 Nc6','Bb5 a6','Ba4 Nf6']
             for i,pair in enumerate(pairs):
@@ -62,7 +64,8 @@ def main():
         finally:
             worker.stop();assert worker.wait(10000),'Worker did not stop';app.processEvents()
         assert not errors,errors
-        assert manager.rec.verified==expected,(manager.rec.verified,expected,manager.snapshot())
+        assert manager.rec.verified==expected[:-1],(manager.rec.verified,expected,manager.snapshot())
+        automatic_plies=len(manager.rec.verified);manager.choose(0)
         row=store.game(manager.current_id);game=chess.pgn.read_game(io.StringIO(row['pgn']))
         assert [move.uci() for move in game.mainline_moves()]==expected
         shots=store.screenshots({'session_id':manager.session_id})
@@ -70,7 +73,7 @@ def main():
         assert len(updates)>len(shots),'Temporary adaptive frames were not independently processed'
         worker_fen=manager.rec.board.fen()
         report={'method':'Headed Chromium on Xvfb, actual MSS screen capture through RecordingWorker, no image injection',
-            'display':os.environ['DISPLAY'],'expected_plies':len(expected),'verified_plies':len(manager.rec.verified),
+            'display':os.environ['DISPLAY'],'expected_plies':len(expected),'verified_plies':len(manager.rec.verified),'automatic_verified_plies':automatic_plies,'final_move_confirmed_explicitly':True,'unchanged_position_dedup_checked':True,
             'saved_screenshots':len(shots),'processed_updates':len(updates),'board_flipped_midgame':True,
             'pause_resume_checked':True,
             'pgn_roundtrip_correct':True,'final_fen':worker_fen,'passed':True,

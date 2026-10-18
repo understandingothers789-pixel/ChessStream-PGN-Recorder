@@ -10,7 +10,7 @@ Keep the browser and board visible. Put ChessStream beside it or on another moni
 
 Choose **Select capture region** and drag from one outer board corner to the opposite corner. Include all 64 squares and avoid clocks, evaluation bars and player panels. Press Esc to cancel. Click **Start recording**. The first position must settle before it is accepted.
 
-The left board is what the screen contains. The middle board is the last internally verified position. The move list shows verified SAN. **Weakest square score** shows the lowest classifier score among all 64 squares, not an accuracy guarantee. Before the first position is accepted, every square must score at least 80% (or the configured threshold, if higher). Uncertain squares are named below the capture and the reconstructed board stays pending. Recording and screenshot saving continue. A ply is one move by one player, so 60 plies means 30 full moves.
+The left board is what the screen contains. The middle board is the last internally verified position. The move list shows verified SAN with checkmarks and the latest provisional move in amber. **Weakest square score** shows the lowest classifier score among all 64 squares, not an accuracy guarantee. Before the first position is accepted, every square must score at least 80% (or the configured threshold, if higher). Uncertain squares are named below the capture and the reconstructed board stays pending. Recording continues; position-mode screenshots are saved once a classification settles. A ply is one move by one player, so 60 plies means 30 full moves.
 
 ## Piece sets and orientation
 
@@ -29,17 +29,23 @@ Choose **Flip orientation** if automatic detection is wrong. Settings can lock W
 
 **Adjust** opens an overlay while capture is temporarily paused. Drag to move it, drag its bottom/right edge to resize, then press Enter or double-click to apply. Esc cancels. Use a new drawing when moving to another monitor. Window tracking can follow source size changes; minimized or closed windows pause source processing until available again.
 
-The permanent screenshot interval defaults to **one second**. Settings enables adaptive recognition (default **six temporary frames per second**). These extra frames can recover fast moves but are not saved as images. Their useful recognition evidence can be retained as database metadata. Disable adaptive recognition for lower load; a short unsaved confirmation capture still checks animation stability.
+**Screenshots → Per position** is the default: save one image when a recognized position settles, then skip further images with the same recognized piece placement in the same game. Arrows, highlights, cursors and texture changes alone do not create duplicates when the recognized position is unchanged. A repeated position after intervening moves is saved again. This is a storage rule, not a proof that a provisional displayed position was an actual move; a held-piece image may be kept for review. Existing images are never removed by this setting.
 
-Deduplication is separately opt-in. It suppresses only byte-identical permanent images after the move pipeline has already processed them. It never disables recognition to save disk space.
+Select **Screenshots → At interval** to save every configured interval (default **one second**), including unmatched board views. Settings also offers opt-in byte-identical image deduplication for this mode.
+
+Adaptive recognition analyzes up to **six temporary frames per second** by default, independently of permanent image storage. Useful evidence is retained as database metadata. Disable adaptive recognition for lower load; a short unsaved confirmation capture still checks animation stability. Neither screenshot mode disables move analysis to save disk space.
 
 **Pause** stops capture; **Resume** continues the same game. **Stop** saves and closes the recording. Use Game library → Resume recording to continue a saved game. Starting fresh after Stop starts a separate recording. The default hotkeys are F8 start/pause/resume, F9 stop, Ctrl+Shift+R region. Windows registers supported sequences globally when available, with focused shortcuts as fallback.
 
 ## Uncertainty and stream behavior
 
+**Protect against dragged pieces** is enabled by default in Settings. A piece held over `c5` can look like a completed move for several seconds. The recorder keeps that latest move provisional until the opponent responds. If the piece is then dropped on `b4`, the unconfirmed `c5` candidate can be replaced; repeating a hover never confirms it just because time passed. The reconstructed board and PGN stay one ply behind while the amber move waits.
+
+At the end of a game, inspect the visible final move and choose **Confirm final / pending move**. This is an explicit override; use it only after the piece has been released or after reviewing the game. Checkmate also waits for this confirmation. Stop, export, end of video and restart never automatically promote a pending move. Turning the protection off allows immediate confirmation and loses the hover safeguard.
+
 The recorder tries legal sequences across missing frames, up to the configured number of plies, nodes and milliseconds. Increasing these settings can resolve a larger gap but uses more CPU. Hitting a search limit leaves the current PGN unchanged.
 
-If several sequences fit, the move panel shows competing SAN lines. Later frames can resolve some differences. If two histories have already transposed, later boards cannot distinguish their earlier order. Confirm a sequence only if you know which was played. Unverified alternatives are never included in the main PGN.
+If several sequences fit, the move panel shows competing SAN lines. Later frames can resolve some differences. If two histories have already transposed, later boards cannot distinguish their earlier order. Changed source/destination squares need positive visual support; arrows hiding unrelated pieces can be tolerated, but an unseen destination cannot prove a move. Shorter direct legal evidence can replace unverified hover/detour candidates under the documented shortest-gap assumption. It never rewrites the verified prefix. Confirm a sequence only if you know which was played. Unverified alternatives are never included in the main PGN.
 
 **Correct moves** allows undoing recent verified plies and entering the correct legal SAN sequence. The entire correction is validated before application. The previous state is kept in the audit metadata. Corrections do not remove screenshots.
 
@@ -60,7 +66,7 @@ Select a game in Game library to see its PGN and board. Drag **Review ply** to s
 - **Export selected**, **Export entire session**, and **Export all** write standard multi-game PGN files.
 - The live page exports or copies the current game.
 - **Rename / edit headers** edits players, ratings, event, site, date, time control and result. Keep unknown players as `Unknown`; the app does not identify streamers.
-- Checkmate and other board-provable results can be detected. Enter resignation, timeout or agreed-draw results yourself when known.
+- Checkmate and other board-provable results can be detected once the final move is verified. With reply protection on, confirm the final pending move explicitly. Enter resignation, timeout or agreed-draw results yourself when known.
 - Settings → Automatic export folder writes a separate per-game PGN copy as verified state changes, including completion. Internal autosave always runs even without an export directory.
 - **Open PGN** imports existing PGNs for review. Preserve your original file if it contains comments/variations you need to retain when editing.
 
@@ -81,6 +87,8 @@ Settings → Automatically delete after enables an explicit age policy. Zero mea
 Game library → **Delete game data** is independent. It removes the selected game's database record, move history and internal PGN autosave. Screenshots are kept and become unassigned. Exports saved elsewhere are kept. Stop an active recording before deleting its game data.
 
 ## Recovery and troubleshooting
+
+To update, close the old copy, extract the new ZIP into a separate folder, then launch it. The default data directory is shared across versions; existing screenshots and games remain available. Old verified moves are not automatically rewritten.
 
 Progress is saved after state changes. After a crash or restart, open the saved game in Game library and choose **Resume recording**, or export it immediately. Pending ambiguity branches survive restart. Keep the data folder together when backing up: `%LOCALAPPDATA%\ChessStream PGN Recorder` on Windows. Close the app before copying it.
 

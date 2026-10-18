@@ -14,7 +14,7 @@ Implemented the PySide6 desktop interface, asynchronous capture/inference, sourc
 
 ## Stage 4 — Screenshots, review and retention
 
-Implemented session/game PNG storage and separate SQLite metadata, thumbnails/timeline/full-image review, timestamp/date/range/session/game deletion, future UTC deletion jobs, restart catch-up, cancellation, age retention, usage estimates and independent game deletion. Automated tests close and reopen storage before running overdue jobs and assert PGN preservation. No retention or deduplication is enabled by default.
+Implemented session/game PNG storage and separate SQLite metadata, thumbnails/timeline/full-image review, timestamp/date/range/session/game deletion, future UTC deletion jobs, restart catch-up, cancellation, age retention, usage estimates and independent game deletion. Automated tests close and reopen storage before running overdue jobs and assert PGN preservation. No retention was enabled by default. Version 1.2 adds position-based screenshot suppression by default, without deleting existing files.
 
 ## Stage 5 — Evaluation, packaging and polish
 
@@ -29,3 +29,13 @@ The Windows installer is assembled from official CPython and unmodified Windows 
 ## Version 1.1 recognition correction
 
 The original template default failed on common shaded pieces and textures. The production path now uses the pinned fenshot screenshot CNN and bundled ONNX Runtime. All-square startup gating, an honest pending-state preview, weakest-score display and explicit calibration mode prevent low-confidence roots being silently frozen. The new real-theme regression corpus records five sequences, including Chess.com Ocean/Walnut and orange Burled Wood, arrows, dragging, a pointer, flips and compression. See recognition-v1.1.json for measured results and limits. The original version 1.0 measurements above describe that earlier implementation.
+
+## Version 1.2 provisional-move and storage correction
+
+The reported recording ended at `5...Bb6`; its screenshot showed a direct `Ng5 Nh6 Qf3` continuation competing with unverified reversible bishop detours. The new recovery rechecks direct legal evidence from the verified prefix and can remove unsupported detours without rewriting verified moves. Changed squares must be positively observed. Equal-depth move-order ambiguity remains unresolved.
+
+Held-piece safety now defaults to withholding the latest ply until an opponent response or explicit confirmation. Repeated legal hover images never verify the held move. Real native Chess.com drag fixtures keep a bishop held over `c5`, move it to `b4`, release there and then play `a3`; only `Bb4` is verified automatically. A separate controlled five-second legal-hover test exercises the same rule. Native blue-arrow captures after `Bb6` test the reported continuation. These are controlled reproductions, not byte-identical copies of inline user uploads or a full Hikaru video benchmark.
+
+Screenshot storage defaults to one image per settled recognized position. A headed Chromium/MSS run processed 54 updates and saved five images, verified seven of eight plies automatically, then explicitly confirmed the final ply. Evaluators now count the final confirmation as intervention instead of claiming fully unattended completion. EOF, stop and restart preserve pending moves. Existing images and PGNs are not deleted or rewritten.
+
+The portable distribution remains a ZIP with an app-local Python runtime and command launcher. GitHub's Windows workflow gates each tagged publication on source tests, bundled inference, GUI rendering and launcher validation. Physical Windows 11 capture/scaling and long-duration stream acceptance remain outstanding.

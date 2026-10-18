@@ -1,4 +1,5 @@
 {
+  "recording_policy": "Conservative opponent-response confirmation; evaluator explicitly confirms each final pending ply once. Automatic move accuracy excludes those manual final confirmations.",
   "environment": {
     "os": "Linux-6.18.55-x86_64-with-glibc2.41",
     "python": "3.12.14",
@@ -11,7 +12,7 @@
     "frames": 64,
     "games": 4,
     "evaluated_frames_excluding_calibration": 64,
-    "scope": "Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.1.json. Not a YouTube benchmark."
+    "scope": "Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.2.json. Not a YouTube benchmark."
   },
   "metrics": {
     "square_accuracy": 1.0,
@@ -19,15 +20,15 @@
     "exact_position_accuracy": 1.0,
     "verified_move_accuracy": 1.0,
     "complete_sequence_accuracy": 1.0,
-    "sequence_intervention_rate": 0.0,
+    "sequence_intervention_rate": 1.0,
     "localization_found_rate": 1.0,
     "one_time_setup_calibrations": 0,
-    "sequences_requiring_setup_calibration_or_correction_rate": 0.0,
+    "sequences_requiring_any_manual_confirmation_rate": 1.0,
     "localization_followed_by_correct_recognition_rate": 1.0,
-    "wall_seconds": 2.939329433000239,
-    "process_cpu_seconds": 4.8999999999999995,
-    "mean_process_cpu_percent_of_one_core": 166.7046893412849,
-    "resident_memory_mb_at_end": 165.65234375,
+    "wall_seconds": 6.944734076001623,
+    "process_cpu_seconds": 6.91,
+    "mean_process_cpu_percent_of_one_core": 99.49985016529789,
+    "resident_memory_mb_at_end": 173.7421875,
     "gpu_utilization": "not measured; CPU inference only"
   },
   "games": [
@@ -39,11 +40,13 @@
       "exact_positions": 5,
       "verified_plies": 4,
       "expected_plies": 4,
+      "automatic_verified_plies": 3,
+      "final_confirmation_required": true,
       "complete_sequence_correct": true,
       "pgn_roundtrip_correct": true,
       "two_ply_gap_sequence_correct": true,
-      "mean_processing_ms": 10.458603200822836,
-      "p95_processing_ms": 12.89492200157838
+      "mean_processing_ms": 45.260790798784,
+      "p95_processing_ms": 67.30227560037747
     },
     {
       "id": "lichess-scholar",
@@ -53,11 +56,13 @@
       "exact_positions": 8,
       "verified_plies": 7,
       "expected_plies": 7,
+      "automatic_verified_plies": 6,
+      "final_confirmation_required": true,
       "complete_sequence_correct": true,
       "pgn_roundtrip_correct": true,
       "two_ply_gap_sequence_correct": true,
-      "mean_processing_ms": 10.466332999840233,
-      "p95_processing_ms": 11.975420350427157
+      "mean_processing_ms": 15.901797374681337,
+      "p95_processing_ms": 23.18632819915365
     },
     {
       "id": "lichess-opera",
@@ -67,11 +72,13 @@
       "exact_positions": 34,
       "verified_plies": 33,
       "expected_plies": 33,
+      "automatic_verified_plies": 32,
+      "final_confirmation_required": true,
       "complete_sequence_correct": true,
       "pgn_roundtrip_correct": true,
       "two_ply_gap_sequence_correct": true,
-      "mean_processing_ms": 10.204449676808402,
-      "p95_processing_ms": 11.81526454947743
+      "mean_processing_ms": 23.860191529606443,
+      "p95_processing_ms": 58.313253751293814
     },
     {
       "id": "chesscom-ruy",
@@ -81,11 +88,13 @@
       "exact_positions": 17,
       "verified_plies": 16,
       "expected_plies": 16,
+      "automatic_verified_plies": 15,
+      "final_confirmation_required": true,
       "complete_sequence_correct": true,
       "pgn_roundtrip_correct": true,
       "two_ply_gap_sequence_correct": true,
-      "mean_processing_ms": 10.739745940929211,
-      "p95_processing_ms": 11.891743397427488
+      "mean_processing_ms": 37.52121082352995,
+      "p95_processing_ms": 64.23900160225456
     }
   ],
   "board_detection": [
@@ -99,7 +108,7 @@
         712
       ],
       "checker_score": 0.9500551065998357,
-      "ms": 244.9624870023399,
+      "ms": 325.3785989982134,
       "correct_position_after_crop": true
     },
     {
@@ -112,7 +121,7 @@
         712
       ],
       "checker_score": 0.9500551065998357,
-      "ms": 228.32082800232456,
+      "ms": 312.3339230005513,
       "correct_position_after_crop": true
     },
     {
@@ -125,7 +134,7 @@
         712
       ],
       "checker_score": 0.9500551065998357,
-      "ms": 228.26326100039296,
+      "ms": 318.3508299989626,
       "correct_position_after_crop": true
     },
     {
@@ -138,7 +147,7 @@
         824
       ],
       "checker_score": 0.9238468333742982,
-      "ms": 316.40396999864606,
+      "ms": 478.3543779994943,
       "correct_position_after_crop": true
     }
   ],

@@ -29,6 +29,9 @@ def test_actual_browser_sequences(game,tmp_path):
         obs=choose_orientation(obs,manager.rec.board if manager.rec else None)
         assert obs.placement()==chess.Board(f['fen']).board_fen()
         manager.process(obs)
+    assert manager.rec.verified==[m.uci() for m in expected[:-1]]
+    assert manager.snapshot()['provisional']
+    manager.choose(0)  # One explicit confirmation for the final move, not every move.
     assert manager.rec.verified==[m.uci() for m in expected]
     pgn=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
     assert not pgn.errors
@@ -44,6 +47,7 @@ def test_actual_back_to_back_games_and_image_only_deletion(tmp_path):
             obs=choose_orientation(obs,manager.rec.board if manager.rec else None);manager.process(obs)
             if f['ply']==1:
                 store.save_screenshot(manager.session_id,manager.current_id,image,obs.timestamp,obs.placement(),obs.confidence,f['ply'])
+        manager.choose(0)  # Review the final mate before moving to the next test game.
     games=store.games()
     assert len(games)==3
     assert sorted(g['plies'] for g in games)==[4,7,33]

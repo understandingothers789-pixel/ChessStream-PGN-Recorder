@@ -5,6 +5,8 @@ import chess
 import chess.pgn
 from chessstream.replay import replay_video
 from chessstream.storage import Store
+from chessstream.games import GameManager
+from chessstream.domain import Settings
 
 
 def test_compressed_prerecorded_video(tmp_path):
@@ -22,6 +24,10 @@ def test_compressed_prerecorded_video(tmp_path):
     b=chess.Board();expected=[]
     for san in 'f3 e5 g4 Qh4#'.split():
         move=b.parse_san(san);expected.append(move);b.push(move)
+    assert list(game.mainline_moves())==expected[:-1]
+    assert game.headers['Result']=='*'
+    manager=GameManager(store,Settings());manager.recover(games[0]['id']);manager.choose(0)
+    game=chess.pgn.read_game(io.StringIO(store.game(games[0]['id'])['pgn']))
     assert list(game.mainline_moves())==expected
     assert game.headers['Result']=='0-1'
     store.close()

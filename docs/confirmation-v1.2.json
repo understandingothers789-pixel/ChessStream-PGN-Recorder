@@ -1,0 +1,179 @@
+{
+  "version": "1.2.0",
+  "environment": "Linux-6.18.55-x86_64-with-glibc2.41",
+  "provenance": "Actual Chromium Chess.com UI: native mouse moves, native held drag (no drop at c5), release at b4, and native blue analysis arrows. Test artwork selection only; no site access in runtime.",
+  "confirmation_policy": "Opponent response required; final reply remains provisional. No explicit confirmation applied.",
+  "cases": [
+    {
+      "id": "italian",
+      "frames": [
+        {
+          "file": "italian-root.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [],
+          "pending_moves": [],
+          "status": "recording"
+        },
+        {
+          "file": "italian-Ng5.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [],
+          "pending_moves": [
+            "Ng5"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "italian-Nh6.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [
+            "Ng5"
+          ],
+          "pending_moves": [
+            "Nh6"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "italian-Qf3.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [
+            "Ng5",
+            "Nh6"
+          ],
+          "pending_moves": [
+            "Qf3"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "italian-arrows.png",
+          "kind": "annotation",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [
+            "Ng5",
+            "Nh6"
+          ],
+          "pending_moves": [
+            "Qf3"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "italian-reply.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [
+            "Ng5",
+            "Nh6",
+            "Qf3"
+          ],
+          "pending_moves": [
+            "d6"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        }
+      ],
+      "expected_verified_moves": [
+        "Ng5",
+        "Nh6",
+        "Qf3"
+      ],
+      "saved_images": 5,
+      "passed": true
+    },
+    {
+      "id": "bishop-drag",
+      "frames": [
+        {
+          "file": "bishop-drag-root.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [],
+          "pending_moves": [],
+          "status": "recording"
+        },
+        {
+          "file": "bishop-drag-hover-c5.png",
+          "kind": "hover",
+          "processed_frames": 8,
+          "square_errors": null,
+          "verified_moves": [],
+          "pending_moves": [
+            "Bc5"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "bishop-drag-hover-c5-held.png",
+          "kind": "hover",
+          "processed_frames": 8,
+          "square_errors": null,
+          "verified_moves": [],
+          "pending_moves": [
+            "Bc5"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "bishop-drag-hover-b4.png",
+          "kind": "hover",
+          "processed_frames": 8,
+          "square_errors": null,
+          "verified_moves": [],
+          "pending_moves": [
+            "Bb4"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "bishop-drag-released-b4.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [],
+          "pending_moves": [
+            "Bb4"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        },
+        {
+          "file": "bishop-drag-reply.png",
+          "kind": "position",
+          "processed_frames": 1,
+          "square_errors": 0,
+          "verified_moves": [
+            "Bb4"
+          ],
+          "pending_moves": [
+            "a3"
+          ],
+          "status": "provisional move \u2022 waiting for opponent response"
+        }
+      ],
+      "expected_verified_moves": [
+        "Bb4"
+      ],
+      "saved_images": 4,
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "Controlled reproductions on the real Chess.com UI, not a full YouTube stream benchmark.",
+    "Inline user screenshots are not byte-identical to these test captures.",
+    "Stable held hover can be visually identical to a released piece; time is not confirmation.",
+    "Storage follows recognized positions, so provisional hover images may be kept for review.",
+    "Heavy occlusion can still stall recognition or bounded reconstruction."
+  ]
+}

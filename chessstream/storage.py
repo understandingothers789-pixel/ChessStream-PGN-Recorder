@@ -108,11 +108,13 @@ class Store:
                 with self.transaction() as db:
                     db.execute('UPDATE screenshots SET game_id=?,path=? WHERE id=?',(gid,relative,row['id']))
 
-    def save_screenshot(self, sid, gid, image, timestamp, fen=None, confidence=None, ply=0, deduplicate=False):
+    def save_screenshot(self, sid, gid, image, timestamp, fen=None, confidence=None, ply=0, deduplicate=False, deduplicate_position=False):
         digest = hashlib.sha256(image.tobytes()).hexdigest()
         with self.lock:
-            last = self.query("SELECT sha256 FROM screenshots WHERE session_id=? AND deleted=0 ORDER BY id DESC LIMIT 1", (sid,))
-            if deduplicate and last and last[0]["sha256"] == digest:
+            last = self.query("SELECT sha256,fen,game_id FROM screenshots WHERE session_id=? AND deleted=0 ORDER BY id DESC LIMIT 1", (sid,))
+            if deduplicate_position and fen and last and last[0]['fen']==fen and last[0]['game_id']==gid:
+                return None
+            if deduplicate and last and last[0]['game_id']==gid and last[0]["sha256"] == digest:
                 return None
             sequence = self.query("SELECT COALESCE(MAX(sequence),0)+1 AS n FROM screenshots WHERE session_id=?", (sid,))[0]["n"]
             folder = self.images / sid / (gid or "unassigned")

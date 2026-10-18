@@ -35,6 +35,7 @@ class LegalSearcher:
         result = SearchResult()
         start = perf_counter()
         target = observed.labels
+        initial_labels = board_labels(board)
         mask = observed.probabilities.max(axis=1) >= self.threshold
         if mask.sum() < 60:
             result.exhaustive = False
@@ -55,7 +56,9 @@ class LegalSearcher:
             labels = board_labels(state)
             mismatch = int(np.count_nonzero((labels != target) & mask))
             if remaining == 0:
-                if mismatch == 0:
+                # Obscured unchanged squares may keep their previous pieces.
+                # A move may not be proved by an unknown destination/source.
+                if mismatch == 0 and np.all(mask[labels != initial_labels]):
                     result.paths.append(path)
                     if len(result.paths) >= self.path_limit:
                         abort = True
@@ -111,10 +114,11 @@ class ReconstructionUpdate:
     alternatives: list[list[str]] = field(default_factory=list)
     nodes: int = 0
     search_ms: float = 0
+    recovered: bool = False
 
 
 class Reconstructor:
-    def __init__(self, initial: chess.Board, searcher: LegalSearcher | None = None, roots: list[str] | None = None):
+    def __init__(self, initial: chess.Board, searcher: LegalSearcher | None = None, roots: list[str] | None = None, confirmation_plies: int = 0):
         self.initial_fen = initial.fen()
         self.board = initial.copy(stack=True)
         self.searcher = searcher or LegalSearcher()
@@ -123,6 +127,41 @@ class Reconstructor:
         self.history: list[str] = [initial.board_fen()]
         self.status = "recording" if len(self.branches) == 1 else "awaiting side to move"
         self.incomplete = False
+        self.confirmation_plies = confirmation_plies
+
+    def _recover_provisional(self, observed, update):
+        """Replace an unconfirmed hover or unsupported reversible detour.
+
+        Never changes verified moves. Direct alternatives at equal depth remain
+        ambiguous; prior constraints are retained where they still fit. A fully
+        supported direct transition is required before discarding a hypothesis;
+        every changed square must be observed, even if arrows hide other pieces.
+        """
+        if not any(b.moves for b in self.branches) or len({b.root_fen for b in self.branches}) != 1:
+            return None
+        lengths = [len(b.moves) for b in self.branches]
+        if len(set(lengths)) == 1 and all(observed.placement() == b.board().board_fen() for b in self.branches):
+            return None
+        direct = LegalSearcher(self.searcher.max_plies, self.searcher.node_limit,
+                               self.searcher.time_limit_ms * .7, self.searcher.threshold,
+                               self.searcher.path_limit).search(self.board, observed)
+        update.nodes += direct.nodes;update.search_ms += direct.elapsed_ms
+        if not direct.exhaustive or not direct.paths:
+            return None
+        paths = [tuple(m.uci() for m in path) for path in direct.paths]
+        compatible = [p for p in paths if any(p[:len(b.moves)] == b.moves for b in self.branches)]
+        candidates = compatible
+        if not candidates and (max(lengths) <= 1 or len(paths[0]) < min(lengths)):
+            candidates = paths
+        if not candidates:
+            return None
+        old = {(b.root_fen, b.moves) for b in self.branches}
+        root = self.board.fen()
+        result = [Branch(root,p) for p in candidates]
+        update.recovered = any((root,p) not in old for p in candidates) and not compatible
+        # A shorter supported line also removes unverified reversible cycles.
+        update.recovered |= any(len(b.moves)>len(paths[0]) for b in self.branches)
+        return result
 
     def observe(self, observed: Observation) -> ReconstructionUpdate:
         update = ReconstructionUpdate()
@@ -135,10 +174,14 @@ class Reconstructor:
         infer_turn = not self.verified and len({b.root_fen for b in self.branches})>1
         evidence_start=perf_counter()
         cache={}
+        recovered = self._recover_provisional(observed, update)
+        if recovered is not None:
+            survivors = recovered
         # For unknown initial turn compare both roots at the same shortest depth.
         # Otherwise a reversible three-ply detour from the wrong turn can mask a
         # directly observed one-ply transition forever.
         for depth in (range(1,self.searcher.max_plies+1) if infer_turn else [self.searcher.max_plies]):
+            if survivors:break
             for branch in self.branches:
                 state=branch.board()
                 key=(state.fen(),depth)
@@ -188,6 +231,12 @@ class Reconstructor:
                 prefix = i
                 break
         common = self.branches[0].moves[:prefix]
+        if self.confirmation_plies:
+            # Repetition or elapsed time cannot prove a piece was dropped.
+            # The opponent's reply confirms the preceding move, while the last
+            # ply stays provisional until later evidence or explicit review.
+            supported = max(0,min(len(b.moves) for b in self.branches)-self.confirmation_plies)
+            common = common[:min(len(common),supported)]
         for uci in common:
             # Defensive validation at the only commit point.
             move = chess.Move.from_uci(uci)
@@ -199,8 +248,11 @@ class Reconstructor:
             update.verified.append(uci)
         if common:
             root = self.board.fen()
-            self.branches = [Branch(root, b.moves[prefix:]) for b in self.branches]
-        self.status = "uncertain • choose a legal sequence" if any(b.moves for b in self.branches) or len(self.branches)>1 else "recording"
+            self.branches = [Branch(root, b.moves[len(common):]) for b in self.branches]
+        if self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
+            self.status = "provisional move • waiting for opponent response"
+        else:
+            self.status = "uncertain • choose a legal sequence" if any(b.moves for b in self.branches) or len(self.branches)>1 else "recording"
         update.status = self.status
         update.alternatives = [list(b.moves) for b in self.branches if b.moves]
         return update
@@ -225,7 +277,7 @@ class Reconstructor:
     def serialize(self) -> dict:
         return {"initial_fen":self.initial_fen,"verified":list(self.verified),
                 "branches":[{"root_fen":b.root_fen,"moves":list(b.moves)} for b in self.branches],
-                "status":self.status,"incomplete":self.incomplete}
+                "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies}
 
     @classmethod
     def restore(cls, data: dict, searcher: LegalSearcher | None = None) -> Reconstructor:
@@ -237,4 +289,5 @@ class Reconstructor:
         r.branches = [Branch(b["root_fen"], tuple(b["moves"])) for b in data["branches"]]
         r.status = data.get("status", "recovered")
         r.incomplete = data.get("incomplete",False)
+        r.confirmation_plies = data.get("confirmation_plies",0)
         return r

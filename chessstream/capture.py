@@ -203,7 +203,8 @@ class RecordingWorker(QThread):
                             board_image=None
                     else:
                         board_image=image
-                    save_due=tick>=next_saved
+                    position_mode=settings.screenshot_mode=="positions"
+                    save_due=position_mode or tick>=next_saved
                     snapshot=self.manager.snapshot()
                     obs=None
                     if board_image is not None:
@@ -258,11 +259,14 @@ class RecordingWorker(QThread):
                     else:
                         self.frame.emit(image)
                         snapshot.update(status="Board hidden / not found • game preserved",confidence=0)
-                    if save_due:
+                    # Position-mode storage never suppresses recognition, search
+                    # or evidence metadata. Ignore hidden/unstable board images.
+                    if save_due and (not position_mode or obs is not None and stable_count>=2):
                         store.save_screenshot(self.manager.session_id,self.manager.current_id,
                             board_image if board_image is not None else image,timestamp,
                             fen=(obs.placement() if obs else None),confidence=(obs.confidence if obs else None),
-                            ply=snapshot.get("plies",0),deduplicate=settings.deduplicate)
+                            ply=snapshot.get("plies",0),deduplicate=settings.deduplicate,
+                            deduplicate_position=position_mode)
                         next_saved=tick+settings.interval
                     snapshot["processing_ms"]=round((time.monotonic()-tick)*1000)
                     snapshot["saved_count"]=store.deletion_estimate({"session_id":self.manager.session_id})["count"]

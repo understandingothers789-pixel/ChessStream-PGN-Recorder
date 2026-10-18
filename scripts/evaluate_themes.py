@@ -34,6 +34,9 @@ def main():
                 frames.append({'file':frame['file'],'new_square_errors':int((observed.labels!=expected).sum()),
                                'legacy_square_errors':int((old.labels!=expected).sum()),'weakest_score':observed.weakest_confidence})
             expected_moves=[move.uci() for move in ground.move_stack]
+            auto_plies=len(manager.rec.verified) if manager.rec else 0
+            final_review=bool(manager.rec and manager.snapshot().get('provisional') and manager.rec.verified==expected_moves[:-1])
+            if final_review:manager.choose(0)
             pgn=store.game(manager.current_id)['pgn'] if manager.current_id else ''
             parsed=chess.pgn.read_game(io.StringIO(pgn))
             for sample in game.get('extra_frames',[]):
@@ -55,13 +58,13 @@ def main():
                 compression.append({'file':frame['file'],'size':416,'jpeg_quality':40,
                                     'square_errors':int((observed.labels!=board_labels(chess.Board(frame['fen']))).sum())})
             rows.append({'id':game['id'],'texture':game['texture'],'calibration':False,'frames':frames,
-                         'expected_plies':len(expected_moves),'verified_plies':len(manager.rec.verified) if manager.rec else 0,
+                         'expected_plies':len(expected_moves),'automatic_verified_plies':auto_plies,'final_confirmation_required':final_review,'verified_plies':len(manager.rec.verified) if manager.rec else 0,
                          'complete_sequence_correct':bool(manager.rec and manager.rec.verified==expected_moves),
                          'pgn_roundtrip_correct':bool(parsed and not parsed.errors and [m.uci() for m in parsed.mainline_moves()]==expected_moves),
                          'extra_frames':extra,'compressed_frames':compression})
             if pgn:(ROOT/'examples'/f'{game["id"]}-theme.pgn').write_text(pgn+'\n')
             store.close()
-    report={'version':'1.1.0','environment':platform.platform(),'dataset_provenance':manifests,
+    report={'version':'1.2.0','environment':platform.platform(),'dataset_provenance':manifests,
             'model':json.loads((ROOT/'chessstream/assets/models/chess-tiles-v2.json').read_text()),
             'metrics':{'clear_frames':sum(len(r['frames']) for r in rows),'evaluated_squares':64*sum(len(r['frames']) for r in rows),
                        'legacy_template_square_errors':sum(f['legacy_square_errors'] for r in rows for f in r['frames']),
@@ -70,12 +73,12 @@ def main():
                        'sequences':len(rows),'mean_inference_ms':float(np.mean(milliseconds)),
                        'p95_inference_ms':float(np.percentile(milliseconds,95)),
                        'process_rss_mb':psutil.Process().memory_info().rss/1024**2},
-            'games':rows,'limitations':['Controlled browser captures, not a YouTube reliability study.',
+            'games':rows,'limitations':['Controlled browser captures, not a YouTube reliability study. The final pending ply of each sequence is explicitly confirmed by the evaluator; it is not auto-promoted at the end.',
                 'Posted inline samples were visually inspected; executable tests use the corresponding captured Chess.com piece style, not byte-identical copies of those inline uploads.',
                 'Compressed checks are degradations of real browser captures, not real video recordings.',
                 'A model score is not a calibrated accuracy probability; unseen sets and heavy overlays can still fail.',
                 'Timing is Linux CPU inference, excluding capture and GUI. RSS includes both new and legacy recognizers.']}
-    (ROOT/'docs/recognition-v1.1.json').write_text(json.dumps(report,indent=2)+'\n')
+    (ROOT/'docs/recognition-v1.2.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report['metrics'],indent=2))
 
 

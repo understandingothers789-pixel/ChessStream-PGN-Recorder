@@ -85,7 +85,9 @@ def test_textured_boards_shaded_pieces_and_actual_flips(game, recognizer, tmp_pa
         assert obs.orientation == frame["orientation"]
         np.testing.assert_array_equal(obs.labels, board_labels(ground), err_msg=frame["file"])
         manager.process(obs)
-    assert manager.rec and manager.rec.verified == [m.uci() for m in ground.move_stack]
+    assert manager.rec and manager.rec.verified == [m.uci() for m in ground.move_stack[:-1]]
+    manager.choose(0)
+    assert manager.rec.verified == [m.uci() for m in ground.move_stack]
     store.close()
 
 
@@ -131,12 +133,12 @@ def test_chesscom_annotation_drag_and_cursor_preserve_moves(game, extra, recogni
         if frame['san']:ground.push_san(frame['san'])
         manager.process(recognizer.recognize(cv2.imread(str(FIXTURES/'themes'/frame['file'])),frame['orientation']))
     expected=[move.uci() for move in ground.move_stack]
-    assert manager.rec.verified==expected
+    assert manager.rec.verified==expected[:-1]
     observed=choose_orientation(recognizer.recognize(cv2.imread(str(FIXTURES/'themes'/extra['file']))),manager.rec.board)
     manager.process(observed)
-    assert manager.rec.verified==expected,extra['scenario']
+    assert manager.rec.verified==expected[:-1],extra['scenario']
     clear=game['frames'][extra['after_ply']+1]
     ground.push_san(clear['san'])
     manager.process(recognizer.recognize(cv2.imread(str(FIXTURES/'themes'/clear['file'])),clear['orientation']))
-    assert manager.rec.verified==[move.uci() for move in ground.move_stack]
+    assert manager.rec.verified==[move.uci() for move in ground.move_stack[:-1]]
     store.close()
