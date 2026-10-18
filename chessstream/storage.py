@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import hashlib
 import json
+import logging
 import shutil
 import sqlite3
 import threading
@@ -217,6 +218,7 @@ class Store:
         return {**result,"free":disk.free,"total":disk.total}
 
     def audit(self, action, detail):
+        logging.info("Audit %s %s",action,json.dumps(detail))
         with self.transaction() as db:
             db.execute("INSERT INTO audit(timestamp,action,detail) VALUES(?,?,?)",(utcnow(),action,json.dumps(detail)))
 

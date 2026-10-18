@@ -1,7 +1,6 @@
 from __future__ import annotations
 import argparse
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import sys
@@ -19,8 +18,8 @@ def main():
     args=parser.parse_args()
     root=args.data_dir or user_data_path('ChessStream PGN Recorder',appauthor=False)
     root.mkdir(parents=True,exist_ok=True)
-    handler=RotatingFileHandler(root/'application.log',maxBytes=2_000_000,backupCount=3,encoding='utf-8')
-    logging.basicConfig(level=logging.INFO,handlers=[handler],format='%(asctime)s %(levelname)s %(message)s')
+    from .diagnostics import configure_logging
+    configure_logging(root)
     from .capture import enable_dpi_awareness
     enable_dpi_awareness()
     if args.replay:

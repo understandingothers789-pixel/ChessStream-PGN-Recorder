@@ -83,3 +83,23 @@ def test_copy_visible_fen_copies_known_and_user_selected_side_to_move(tmp_path,m
     assert chess.Board(copied).turn is chess.BLACK
     assert len(choices['items'])==2
     window.close();window.deleteLater();app.processEvents()
+
+
+def test_pgn_variation_viewer_navigates_alternative_without_changing_mainline(tmp_path):
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(tmp_path);board=chess.Board();window.manager.process(Observation.from_board(board))
+    for san in 'e4 e5 Nf3'.split():board.push_san(san);window.manager.process(Observation.from_board(board))
+    window.manager.choose(0);gid=window.manager.current_id
+    window.manager.annotate(gid,[],'d4 d5','Queen pawn alternative')
+    window.navigate(1);window.game_table.selectRow(0);app.processEvents()
+    window.review_tree.setCurrentItem(window.review_items[(1,0)])
+    expected=chess.Board();expected.push_san('d4');expected.push_san('d5')
+    assert chess.Board(window.library_board.fen).board_fen()==expected.board_fen()
+    assert 'variation' in window.review_label.text()
+    assert len(window.manager.rec.verified)==3
+    window.review_slider.setValue(0);app.processEvents()
+    assert window.library_board.fen==chess.STARTING_FEN
+    import io
+    parsed=chess.pgn.read_game(io.StringIO(window.library_pgn.toPlainText()))
+    assert len(parsed.variations)==2 and parsed.variations[1].move.uci()=='d2d4'
+    window.close();window.deleteLater();app.processEvents()

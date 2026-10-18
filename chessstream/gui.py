@@ -25,6 +25,7 @@ from .storage import Store
 from .games import GameManager
 from .capture import RecordingWorker, monitors, windows, window_client, containing_window
 from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEditor, button, muted
+from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
 
 
@@ -49,7 +50,7 @@ class Task(QThread):
         except Exception as e:logging.exception("Background task failed");self.failed.emit(str(e))
 
 
-class MainWindow(QMainWindow):
+class MainWindow(ReviewTools,QMainWindow):
     def __init__(self,root:Path):
         super().__init__();self.root=root;self.settings=Settings.load(root/"settings.json")
         self.store=Store(root);self.manager=GameManager(self.store,self.settings)
@@ -71,8 +72,9 @@ class MainWindow(QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.3.0"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.4.0"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
+        sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
         self.navigate(0);self.install_hotkeys()
@@ -167,6 +169,10 @@ class MainWindow(QMainWindow):
 
     def on_update(self,snap):
         self.snapshot=snap
+        diagnostic_key=(snap.get('game_id'),snap.get('status'),tuple(snap.get('uncertain_squares',[])),snap.get('plies'))
+        if diagnostic_key!=getattr(self,'_last_diagnostic',None):
+            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks']}))
+            self._last_diagnostic=diagnostic_key
         if not self.worker or not self.worker.paused.is_set():
             status=snap.get('status','Recording');self.recording_status.setText("●  "+status)
             warning=any(word in status.lower() for word in ['uncertain','unmatched','limit','obstructed','hidden','reset','review','waiting','unknown','provisional'])
@@ -205,6 +211,10 @@ class MainWindow(QMainWindow):
         self.uncertain_label.setText(('FINAL MOVE • confirm after review; excluded from PGN' if snap.get('pending_terminal') else 'PROVISIONAL MOVE • waiting for opponent reply; excluded from PGN') if snap.get('provisional') else 'UNVERIFIED POSSIBILITIES • excluded from PGN')
         self.choose_path.setText('Confirm final / pending move' if snap.get('provisional') else 'Confirm selected sequence')
         self.choose_path.setToolTip('Confirm only after seeing the piece released, or when reviewing the final move. This overrides reply-based confirmation.')
+        if snap.get('clocks'):
+            def clock_text(seconds):
+                return f'{int(seconds)//60}:{int(seconds)%60:02d}'
+            self.recovery.setText('Observed clocks • '+ '  |  '.join(color.title()+' ('+snap.get('players',{}).get(color,'Unknown')+'): '+clock_text(seconds) for color,seconds in snap['clocks'].items())+' • saved in PGN clock comments')
         self.delay_label.setText(f"Processing {snap.get('processing_ms',0)} ms  •  {snap.get('orientation','auto').title()} at bottom")
 
     def update_move_table(self,moves,fen,pending=()):
@@ -342,11 +352,14 @@ class MainWindow(QMainWindow):
         bar.addStretch();box.addLayout(bar)
         self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game)
         box.addWidget(self.game_table,2)
-        detail=QSplitter(Qt.Horizontal);self.library_board=BoardView();detail.addWidget(self.library_board);self.library_pgn=QPlainTextEdit();self.library_pgn.setReadOnly(True);detail.addWidget(self.library_pgn);detail.setSizes([350,650]);box.addWidget(detail,2)
+        detail=QSplitter(Qt.Horizontal);self.library_board=BoardView();detail.addWidget(self.library_board);detail.addWidget(self.make_review_tabs());detail.setSizes([350,650]);box.addWidget(detail,2)
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Review ply"));self.review_slider=QSlider(Qt.Horizontal);self.review_slider.valueChanged.connect(self.review_game);timeline.addWidget(self.review_slider,1);self.review_label=muted("0");timeline.addWidget(self.review_label);box.addLayout(timeline)
         actions=QHBoxLayout()
         for name,fn in [("Rename / edit headers",self.edit_game),("Copy PGN",self.copy_selected),("Resume recording",self.resume_game),("Screenshots",self.game_screenshots)]:actions.addWidget(button(name,fn))
         actions.addStretch();actions.addWidget(button("Delete game data…",self.delete_games,danger=True));box.addLayout(actions)
+        variations=QHBoxLayout()
+        for label,fn in [('Add alternative line…',self.add_review_variation),('Edit comment…',self.edit_review_comment),('Remove alternative line',self.delete_review_variation)]:variations.addWidget(button(label,fn))
+        variations.addWidget(muted('Select a position before an existing move; alternatives are saved in exported PGNs.'));box.addLayout(variations)
         self.game_rows=[]
 
     def refresh_library(self):
@@ -364,14 +377,11 @@ class MainWindow(QMainWindow):
     def show_game(self):
         selected=self.selected_games()
         if not selected:return
-        game=selected[0];self.library_pgn.setPlainText(game['pgn']);state=json.loads(game['state']);self.review_slider.setMaximum(len(state['verified']));self.review_slider.setValue(len(state['verified']));self.review_game()
+        self.populate_review(selected[0])
 
     def review_game(self):
-        selected=self.selected_games()
-        if not selected:return
-        state=json.loads(selected[0]['state']);b=chess.Board(state['initial_fen']);moves=state['verified'][:self.review_slider.value()]
-        for uci in moves:b.push_uci(uci)
-        self.library_board.show_board(b.fen(),moves[-1] if moves else None);self.review_label.setText(str(len(moves)))
+        self.slider_review()
+
 
     def edit_game(self):
         selected=self.selected_games()
@@ -550,6 +560,14 @@ class MainWindow(QMainWindow):
         capture.addRow(muted('Recommended for blitz and rapid: a stable hover is not proof of a drop. The last move stays amber and out of PGN until a reply or explicit final-move confirmation.'))
         self.unresolved_fen=QDoubleSpinBox();self.unresolved_fen.setRange(0,600);self.unresolved_fen.setDecimals(0);self.unresolved_fen.setSuffix(' seconds');self.unresolved_fen.setSpecialValueText('Off');self.unresolved_fen.setValue(self.settings.unresolved_fen_seconds);capture.addRow('Start a FEN segment after unresolved position',self.unresolved_fen)
         capture.addRow(muted('If a clear board cannot be linked to the saved game for this long, keep the old PGN and continue in a new PGN from the displayed position. Side to move is inferred from later evidence. The latest legal hover is excluded from this timer. Set Off to disable automatic FEN recovery.'))
+        self.detect_results=QCheckBox('Read visible result messages and end the game automatically');self.detect_results.setChecked(self.settings.detect_results);capture.addRow('Game-ending messages',self.detect_results)
+        self.read_context=QCheckBox('Read clocks and nearby player names outside the board');self.read_context.setChecked(self.settings.read_context);capture.addRow('Visible game information',self.read_context)
+        capture.addRow(muted('Include names and clocks when drawing the capture area. The board detector crops the 64 squares for piece recognition; text is read locally once per second. Hidden names stay Unknown.'))
+        self.result_player=QComboBox()
+        for label,value in [('Remember bottom color when recording starts','initial-bottom'),('White','white'),('Black','black'),('Unknown — require an explicit color or score','unknown')]:self.result_player.addItem(label,value)
+        self.result_player.setCurrentIndex(max(0,self.result_player.findData(self.settings.result_player_color)));capture.addRow('Player color for You Won / You Lost',self.result_player)
+        capture.addRow(muted('The default assumes the account owner begins at the bottom, then remembers that color across flips. If recording starts on an already flipped board, choose White or Black here. Explicit scores and White/Black Won messages take precedence.'))
+        self.review_seconds=QSpinBox();self.review_seconds.setRange(0,3600);self.review_seconds.setSuffix(' seconds');self.review_seconds.setSpecialValueText('Off');self.review_seconds.setValue(self.settings.review_seconds);capture.addRow('Capture post-game review variations for',self.review_seconds)
         self.fps=QSpinBox();self.fps.setRange(2,15);self.fps.setValue(self.settings.adaptive_fps);self.fps.setSuffix(' frames/s');capture.addRow('Adaptive target rate',self.fps)
         self.detect_setting=QCheckBox('Find the board inside the selected area');self.detect_setting.setChecked(self.settings.detect_board);capture.addRow('Board detection',self.detect_setting)
         self.orientation_setting=QComboBox();self.orientation_setting.addItems(['auto','white','black']);self.orientation_setting.setCurrentText(self.settings.orientation);capture.addRow('Color at the bottom',self.orientation_setting)
@@ -586,7 +604,7 @@ class MainWindow(QMainWindow):
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
-            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
+            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.detect_results=self.detect_results.isChecked();s.read_context=self.read_context.isChecked();s.result_player_color=self.result_player.currentData();s.review_seconds=self.review_seconds.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))
         except Exception as e:self.error(str(e))
 
@@ -618,6 +636,7 @@ class MainWindow(QMainWindow):
         self.retention_task=self.background(lambda:self.store.run_retention(self.settings.retention_days),lambda _:self.refresh_usage())
 
     def error(self,text):
+        logging.warning('User-visible error: %s',text)
         self.statusBar().showMessage(text,15000);QMessageBox.warning(self,'ChessStream',text)
 
     def open_guide(self):

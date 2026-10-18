@@ -2,20 +2,22 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.3 adds automatic recovery when a resumed stream no longer matches the saved position: the previous PGN is preserved, then recording continues in a new PGN from the visible board’s FEN. You can also copy that FEN directly. Version 1.2’s held-piece protection and per-position screenshots remain enabled by default. A portable Windows ZIP and complete source are provided.** See [known limitations](docs/KNOWN_LIMITATIONS.md) before relying on unattended stream reconstruction.
+**Version 1.4 reads visible game-ending messages, clocks and nearby player names locally. It finalizes supported pending moves when a game ends, preserves post-game review as PGN variations, and adds a variation viewer and exported diagnostics. FEN recovery, held-piece protection and per-position screenshots remain available.** See [known limitations](docs/KNOWN_LIMITATIONS.md) and the measured [native screenshot checks](docs/context-v1.4.json).
 
-![Version 1.2: verified knights and a provisional queen move after Bb6, with native analysis arrows](docs/confirmation-v1.2-preview.png)
+![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 
-Controlled browser-capture preview beginning after `Bb6`: `Ng5 Nh6` are verified, while `Qf3` waits for a reply.
+Game library showing clock comments from the retained native browser capture and a manually added analysis variation.
 
 ## Install on Windows 11 x64
 
 1. Download the ZIP from [GitHub Releases](https://github.com/understandingothers789-pixel/ChessStream-PGN-Recorder/releases/latest) and extract `ChessStream-PGN-Recorder-Portable.zip` to a folder you can write to, such as Documents. No installer, administrator access, or separate Python installation is needed.
 2. Double-click `Launch ChessStream.cmd` in the extracted folder. The package includes a private Python runtime; it does not install software system-wide.
 3. Place the app beside the browser or on a second monitor. The captured board must remain visible.
-4. Select **Select capture region**, draw tightly around the 64 squares, and select **Start recording**.
+4. Select **Select capture region**, include the board and its visible names/clocks, and select **Start recording**.
 5. Check the live preview and **Weakest square score**. The bundled model needs no initial calibration for the tested Chess.com/Lichess themes. An uncertain first position stays pending, with affected squares named; stable positions continue to be saved.
 6. Verified moves have a checkmark; the latest provisional move appears in amber. If a resumed video shows a clear position the saved game cannot reach, the app preserves the old PGN and, after 15 seconds by default, starts a separate PGN from that board’s FEN. You can change or disable the timeout in Settings. Select **Start PGN from visible FEN** to do this immediately. **Copy visible FEN** copies the displayed position; if side to move is unknown, choose White or Black. Export from the live page or Game library. Unknown names stay `Unknown`.
+
+After a detected result, the played main line is frozen. Post-game review can add side variations for two minutes by default. In Game library, select a position to add a legal SAN alternative or comment; exports retain them. **Diagnostics / logs** opens saved status messages and can export a support ZIP without screenshots.
 
 The ZIP contains `pythonw.exe` as part of its private Python runtime, launched by the included `.cmd` shortcut script. No installer executable is required. Windows SmartScreen may still display warnings for unsigned downloaded scripts or binaries. The Windows workflow tests the bundled inference runtime and GUI before release. Live capture on your Windows 11 hardware remains a separate acceptance check.
 

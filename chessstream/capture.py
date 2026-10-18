@@ -7,11 +7,13 @@ import queue
 import sys
 import threading
 import time
+import logging
 import cv2
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 from .domain import Region, utcnow
 from .games import GameManager
+from .results import EndMessageDetector,ContextStabilizer,extract_context
 from .vision import BoardDetector, TemplateRecognizer, create_recognizer, choose_orientation, checker_score
 
 
@@ -114,6 +116,30 @@ class RecordingWorker(QThread):
         self.paused=threading.Event()
         self.commands=queue.SimpleQueue()
 
+    def scan_context(self,image,rect,obs):
+        settings=self.manager.settings
+        if getattr(self,"_text_failed",False):return
+        if not self.manager.rec or not (settings.detect_results or settings.read_context):return
+        if self._context_game!=self.manager.current_id:
+            self._context_game=self.manager.current_id;self._text_detector.reset()
+        before=self._text_detector.last_scan
+        try:
+            if rect:self._text_board_rect=rect
+            message=self._text_detector.scan(image,self.manager.result_player(),rect or getattr(self,'_text_board_rect',None),self.manager.observed_names)
+            if self._text_detector.last_scan!=before:
+                if settings.read_context:
+                    orientation=obs.orientation if obs else (self.manager.last_observation.orientation if self.manager.last_observation else None)
+                    context=self._context_stabilizer.observe(extract_context(self._text_detector.last_lines,rect,orientation))
+                    self.manager.observe_context(context,obs.timestamp if obs else utcnow())
+                    if context.get('clocks') or context.get('names'):
+                        logging.info('Visible game context %s',context)
+                if message and settings.detect_results and not self.manager.pending_identity:self.manager.declare_end(message,obs)
+        except Exception:
+            if not getattr(self,'_text_failed',False):
+                logging.exception('Local text recognition failed; chess capture continues')
+                self.problem.emit('Could not read result messages or clocks. Chess capture continues; see application.log.')
+                self._text_failed=True
+
     def stop(self):
         self.stopping.set()
 
@@ -121,6 +147,7 @@ class RecordingWorker(QThread):
         import mss
         store=self.manager.store
         detector=BoardDetector()
+        self._text_detector=EndMessageDetector();self._context_stabilizer=ContextStabilizer();self._context_game=None
         recognizer=None
         model_path=None
         board_rect=None
@@ -156,9 +183,11 @@ class RecordingWorker(QThread):
                                 recognizer=None;last_pixels=None;stable_key=None
                             self.update.emit(self.manager.snapshot())
                         except Exception as e:
+                            logging.exception("Capture command %s failed",action)
                             self.problem.emit(str(e))
                     if self.paused.is_set():
                         self.manager.clear_position_recovery()
+                        self._text_detector.reset()
                         self.stopping.wait(.1)
                         continue
                     configuration=(settings.onnx_model,settings.recognition_mode)
@@ -221,6 +250,7 @@ class RecordingWorker(QThread):
                             from .domain import Observation
                             obs=Observation(last_obs.probabilities.copy(),orientation=last_obs.orientation,quality=last_obs.quality)
                         obs.timestamp=timestamp
+                        self.scan_context(image,board_rect if settings.detect_board else (0,0,image.shape[1],image.shape[0]),obs)
                         if settings.detect_board and obs.confidence<.6 and tick-last_detect>2:
                             board_rect=None
                         key=obs.placement()
@@ -259,8 +289,10 @@ class RecordingWorker(QThread):
                                         recognition_mode=settings.recognition_mode)
                     else:
                         self.manager.clear_position_recovery()
+                        self.scan_context(image,board_rect,None)
+                        snapshot=self.manager.snapshot()
                         self.frame.emit(image)
-                        snapshot.update(status="Board hidden / not found • game preserved",confidence=0)
+                        snapshot.update(status=(self.manager.last_message if self.manager.terminal_message else "Board hidden / not found • game preserved"),confidence=0)
                     # Position-mode storage never suppresses recognition, search
                     # or evidence metadata. Ignore hidden/unstable board images.
                     if save_due and (not position_mode or obs is not None and stable_count>=2):

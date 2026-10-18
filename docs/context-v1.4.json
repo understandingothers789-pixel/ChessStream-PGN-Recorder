@@ -1,0 +1,95 @@
+{
+  "method": "Four native Chromium Chess.com guest bot screenshots: genuine game-aborted and named-winner resignation dialogs, genuine clocks/names. Ocean/Walnut artwork chosen with CSS for recognition; no text or result injection. Expected clocks manually transcribed from retained images. Controlled corpus; not an arbitrary-stream accuracy estimate.",
+  "initialization_ms": 172.3,
+  "cpu_provider": "ONNX Runtime CPUExecutionProvider, two inference threads",
+  "rss_after_mb": 273.1,
+  "rss_increase_mb": 215.7,
+  "cases": [
+    {
+      "file": "native-bot-start.png",
+      "sha256": "e25818fb850cc4d1e963fa6b280deb984f50851bbc29d927984f34e9c2c81613",
+      "expected_result": null,
+      "detected_result": null,
+      "expected_clocks": {
+        "black": 600,
+        "white": 597
+      },
+      "observed_clocks": {
+        "black": 600,
+        "white": 597
+      },
+      "observed_names": {
+        "black": "Martinfoot",
+        "white": "Guest"
+      },
+      "elapsed_ms": 191.3,
+      "cpu_seconds": 0.38,
+      "passed": true
+    },
+    {
+      "file": "native-bot-clock.png",
+      "sha256": "d1b633888f345084f336645a648b1cd79e35228962a69d0c2d707e676e194ef4",
+      "expected_result": null,
+      "detected_result": null,
+      "expected_clocks": {
+        "black": 597,
+        "white": 596
+      },
+      "observed_clocks": {
+        "black": 597,
+        "white": 596
+      },
+      "observed_names": {
+        "black": "Martinfoot",
+        "white": "Guest"
+      },
+      "elapsed_ms": 226.3,
+      "cpu_seconds": 0.45,
+      "passed": true
+    },
+    {
+      "file": "native-bot-aborted.png",
+      "sha256": "2d3cc12b608ee501158b308bf7ddba201c949ef550a8aba6ee9a20f42065949f",
+      "expected_result": "*",
+      "detected_result": "*",
+      "expected_clocks": {
+        "black": 599,
+        "white": 594
+      },
+      "observed_clocks": {
+        "black": 599,
+        "white": 594
+      },
+      "observed_names": {
+        "black": "Martinfoot",
+        "white": "Guest"
+      },
+      "elapsed_ms": 261.9,
+      "cpu_seconds": 0.52,
+      "passed": true
+    },
+    {
+      "file": "native-bot-resigned.png",
+      "sha256": "6f39b69ad6b11d199949c65f10b0b762e10ab5958eae9c2160a0af250655ca9f",
+      "expected_result": "0-1",
+      "detected_result": "0-1",
+      "expected_clocks": {
+        "black": 595,
+        "white": 593
+      },
+      "observed_clocks": {
+        "black": 595,
+        "white": 593
+      },
+      "observed_names": {
+        "black": "Martinfoot",
+        "white": "Guest"
+      },
+      "elapsed_ms": 300.0,
+      "cpu_seconds": 0.6,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "limitations": "English horizontal text, selected area must include context. Clock readings are sampled, not exact release times. GPU utilization and full Windows capture load were not measured."
+}

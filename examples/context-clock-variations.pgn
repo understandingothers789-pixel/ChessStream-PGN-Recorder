@@ -1,0 +1,13 @@
+[Event "Controlled native UI capture"]
+[Site "Chess.com browser screenshot evaluation"]
+[Date "2026.10.18"]
+[Round "?"]
+[White "Guest"]
+[Black "Martinfoot"]
+[Result "0-1"]
+[Termination "resignation"]
+
+{ Example derived from the retained native bot capture. Only observed clock readings are included. }
+1. e4 c5 { [%clk 0:09:57] } ( 1... e5 2. Nf3
+{ Manual analysis example; not part of the played main line. } ) 2. Nf3 d6 3.
+Bc4 Nf6 { [%clk 0:09:55] } 0-1

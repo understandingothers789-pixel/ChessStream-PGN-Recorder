@@ -33,3 +33,7 @@ Dependency wheels are unmodified apart from normal extraction/installation. Thei
 `tests/fixtures/real` and `tests/fixtures/themes` contain limited screenshots of publicly accessible Lichess and Chess.com analysis interfaces, captured for testing and interoperability evaluation. Site names, logos and interface artwork belong to their owners. These fixtures are not application recognition assets and are not included in the installed application. The sites do not endorse this project. Test moves/positions and screenshot provenance are in the fixture manifest.
 
 Playwright, CairoSVG, pytest and PyInstaller are development dependencies and are not needed in the installed application. The fenshot weights above are bundled and are the default production classifier.
+
+## Offline result and context text recognition
+
+`result-text-det.onnx` and `result-text-rec.onnx` are PaddleOCR PP-OCRv4 models redistributed from the `rapidocr-onnxruntime==1.4.4` wheel (RapidAI / PaddleOCR contributors), Apache-2.0. Source: https://github.com/RapidAI/RapidOCR and https://github.com/PaddlePaddle/PaddleOCR. License: `chessstream/assets/licenses/Apache-2.0.txt`. The pinned source wheel and individual model hashes are in `chessstream/assets/models/result-text.json`; `scripts/fetch_result_models.py` reproduces the exact assets. The application uses its own small horizontal-text ONNX adapter and the existing ONNX Runtime/OpenCV dependencies. It does not require RapidOCR, Tesseract, external OCR programs, network services or subscriptions at runtime.

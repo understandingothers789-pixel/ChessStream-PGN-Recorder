@@ -20,6 +20,7 @@ jobs:
         run: |
           build/windows-portable/runtime/python.exe -c "import chess, cv2, numpy, mss, psutil, onnxruntime; from PySide6.QtWidgets import QApplication; from chessstream.vision import ScreenshotRecognizer; r=ScreenshotRecognizer(); o=r.recognize(cv2.imread('tests/fixtures/real/chesscom-ruy-000.png')); assert o.placement()==chess.Board().board_fen(); print('Bundled neural inference passed')"
           build/windows-portable/runtime/python.exe -m chessstream --data-dir build/bundle-smoke --smoke build/bundle-desktop.png
+          build/windows-portable/runtime/python.exe -c "import cv2; from chessstream.results import LocalTextReader,parse_end_message; lines=LocalTextReader().read(cv2.imread('tests/fixtures/results/native-bot-resigned.png')); message=parse_end_message(lines,'white',{'black':'Martinfoot'}); assert message and message.result=='0-1'; print('Bundled offline text recognition passed')"
       - name: Test the command launcher
         run: |
           $smokeDir = Join-Path $env:GITHUB_WORKSPACE "build/launcher-smoke"

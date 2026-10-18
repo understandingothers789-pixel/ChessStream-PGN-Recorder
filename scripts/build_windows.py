@@ -67,10 +67,14 @@ def main():
     model_info=json.loads(model.with_suffix('.json').read_text())
     if hashlib.sha256(model.read_bytes()).hexdigest()!=model_info['sha256']:
         raise RuntimeError('Bundled screenshot model checksum mismatch')
+    text_models=json.loads((model.parent/'result-text.json').read_text())
+    for entry in text_models['models'].values():
+        if hashlib.sha256((model.parent/entry['file']).read_bytes()).hexdigest()!=entry['sha256']:
+            raise RuntimeError('Bundled text-recognition model checksum mismatch')
     if not any((site/'onnxruntime').rglob('*.pyd')):
         raise RuntimeError('Windows ONNX Runtime is missing; rebuild without --skip-download to refresh the wheel cache')
     (package/'BUILD-MANIFEST.json').write_text(json.dumps({'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes,
-        'model':model_info},indent=2))
+        'model':model_info,'text_models':text_models},indent=2))
     dist=ROOT/'dist';dist.mkdir(exist_ok=True)
     portable_zip=dist/'ChessStream-PGN-Recorder-Portable.zip'
     portable_zip.unlink(missing_ok=True)

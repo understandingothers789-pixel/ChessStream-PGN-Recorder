@@ -8,7 +8,7 @@ Download `ChessStream-PGN-Recorder-Portable.zip` from the repository's GitHub Re
 
 Keep the browser and board visible. Put ChessStream beside it or on another monitor; a window placed over the board becomes part of the screenshot.
 
-Choose **Select capture region** and drag from one outer board corner to the opposite corner. Include all 64 squares and avoid clocks, evaluation bars and player panels. Press Esc to cancel. Click **Start recording**. The first position must settle before it is accepted.
+Choose **Select capture region** and drag from one outer board corner to the opposite corner. Include all 64 squares and optionally the visible player names and clocks above/below or beside the board. Keep automatic board detection on: pieces are recognized only inside its board crop; text is read in the selected area. Avoid unrelated boards and large areas of unrelated text. An exact 64-square crop cannot reveal external clocks or names. Press Esc to cancel. Click **Start recording**. The first position must settle before it is accepted.
 
 The left board is what the screen contains. The middle board is the last internally verified position. The move list shows verified SAN with checkmarks and the latest provisional move in amber. **Weakest square score** shows the lowest classifier score among all 64 squares, not an accuracy guarantee. Before the first position is accepted, every square must score at least 80% (or the configured threshold, if higher). Uncertain squares are named below the capture and the reconstructed board stays pending. Recording continues; position-mode screenshots are saved once a classification settles. A ply is one move by one player, so 60 plies means 30 full moves.
 
@@ -41,7 +41,7 @@ Adaptive recognition analyzes up to **six temporary frames per second** by defau
 
 **Protect against dragged pieces** is enabled by default in Settings. A piece held over `c5` can look like a completed move for several seconds. The recorder keeps that latest move provisional until the opponent responds. If the piece is then dropped on `b4`, the unconfirmed `c5` candidate can be replaced; repeating a hover never confirms it just because time passed. The reconstructed board and PGN stay one ply behind while the amber move waits.
 
-At the end of a game, inspect the visible final move and choose **Confirm final / pending move**. This is an explicit override; use it only after the piece has been released or after reviewing the game. Checkmate also waits for this confirmation. Stop, export, end of video and restart never automatically promote a pending move. Turning the protection off allows immediate confirmation and loses the hover safeguard.
+At the end of a game, inspect the visible final move and choose **Confirm final / pending move**. This is an explicit override; use it only after the piece has been released or after reviewing the game. A stable game-ending message can confirm the final pending move when its changed squares remain clearly visible; covered destinations remain pending. Checkmate without an identifiable result message still waits for confirmation. Stop, export, end of video and restart never automatically promote a pending move. Turning the protection off allows immediate confirmation and loses the hover safeguard.
 
 The recorder tries legal sequences across missing frames, up to the configured number of plies, nodes and milliseconds. Increasing these settings can resolve a larger gap but uses more CPU. Hitting a search limit leaves the current PGN unchanged.
 
@@ -52,6 +52,24 @@ If several sequences fit, the move panel shows competing SAN lines. Later frames
 Known earlier positions are treated as likely review/rewind when a short live continuation does not explain them. Temporary menus, advertisements or a hidden board do not overwrite the current game. Legal analysis can be indistinguishable from play; pause recording during known analysis or off-board browsing.
 
 After a nonterminal reset to the standard position, the app waits for an opening continuation different from the previous game before separating a likely new game. Identical opening replay remains uncertain. **Start PGN from visible FEN** saves the current PGN as its own game, then begins another from the currently displayed board. Earlier moves are not added to the new PGN. Standard starting boards use the normal PGN headers; a midgame uses `SetUp` and `FEN`. Its side to move is inferred from the next legal continuation. Castling rights and en passant history are not visible and are left unset. A terminal game followed by the initial position separates automatically.
+
+## Results, clocks and player names
+
+By default, the local bundled OCR models scan the selected source about once per second. English **You Won**, **You Lost**, **White/Black Won**, a recognized winner name, a standalone score, draws, **Game Aborted** and abandonment messages can end a recording after repeated evidence. `1-0`, `0-1` and `1/2-1/2` are standard results; an aborted game or an unidentified winner keeps `*` with an explanatory note. The played main line is frozen and capture stays ready for a new starting board. If the final provisional move's changed squares are visible, the message confirms it even when other squares are covered by the dialog. If its destination is hidden, the PGN result is saved while that move stays unresolved until a clear view or correction.
+
+**You Won / You Lost** describes the account owner. Settings → **Player color for You Won / You Lost** defaults to remembering the bottom color from the beginning of this recording, keeping it across later flips. If you start with the stream already flipped, set White or Black explicitly, or choose Unknown to require a named/color result. Explicit scores and matched visible winner names take precedence. Midgame FEN recovery starts a new segment and remembers its initial bottom color. Review a result if the initial player-color assumption was wrong. Edit Result to `*` to reopen a mistaken completed boundary.
+
+Clocks must be within the selected area, outside the 64 squares. Readings are assigned to colors by board orientation and saved as standard `[%clk H:MM:SS]` PGN comments. The first observed reading for a pending move is retained when that move is later verified, rather than using a later clock value. Captures may be about one second after release, or later when a frame is missed. No exact release time, increment, time control, or missing clock value is invented. A skipped intermediate position may have no clock comment.
+
+Names near a detected clock must repeat across three scans before they are used. Visible names can populate Unknown player headers. Hidden names remain Unknown. Stable player-name changes preserve the previous game and start a new FEN segment; a recent reset of both clocks supports separating a new standard-start game. Repeated openings with hidden names and clocks may remain ambiguous. Settings can turn result recognition and clock/name recognition off separately.
+
+## Alternative lines and post-game review
+
+Game library → **Moves & variations** shows the played main line, side variations, clock comments and annotations. Click any move to display its position. The main line stays flat; alternative branches are indented. **PGN text** shows the full export.
+
+Select the position **before** the move you want to replace, choose **Add alternative line**, and enter legal SAN from that position. Add a comment if desired. Nested alternatives work inside other variations. **Edit comment** changes a move/position comment; **Remove alternative line** removes only a side branch, never the played main line. A review annotation cannot extend the actual game after its final recorded move; select an earlier branching position. Corrections to actual played moves use Correct moves.
+
+After a result, known earlier positions can anchor automatic review variations for **120 seconds** by default (Settings → Capture post-game review variations for). Clearly reconstructed review moves are added only as alternatives to the completed main line and labeled as observed analysis. The latest held review move still waits for later evidence. The completed result and played moves are preserved. An initial board arms another game; an analysis reset to the initial board can be indistinguishable from a new game. Pause during known opening reviews if needed. Imported PGN variations and move comments survive ordinary header edits and exports.
 
 ## Starting in the middle
 
@@ -91,6 +109,12 @@ The default is **keep indefinitely**. Disk usage and free space appear in the ap
 Settings → Automatically delete after enables an explicit age policy. Zero means indefinite. Enabling a positive period requires confirmation and applies to already-saved older screenshots as well as future ones.
 
 Game library → **Delete game data** is independent. It removes the selected game's database record, move history and internal PGN autosave. Screenshots are kept and become unassigned. Exports saved elsewhere are kept. Stop an active recording before deleting its game data.
+
+## Diagnostics and saved logs
+
+**Diagnostics / logs** in the sidebar opens the saved log, with Refresh, Copy, Open folder and **Export diagnostic ZIP**. The usual Windows path is `%LOCALAPPDATA%\ChessStream PGN Recorder\application.log`. It records changing recognition warnings/uncertain squares, pending moves, recovery decisions, game results, observed move clocks, user-facing errors and exception tracebacks. Logs rotate at 2 MB with three backups (about 8 MB total).
+
+The support ZIP includes logs, recent recognition/audit records, settings, saved game states and PGNs. It can include visible player names and your local folder/region settings. It excludes screenshots. Save it anywhere and attach it when asking for debugging help. Screenshot retention controls remain independent.
 
 ## Recovery and troubleshooting
 

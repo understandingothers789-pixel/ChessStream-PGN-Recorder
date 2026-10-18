@@ -41,3 +41,11 @@ Install `pip install -e '.[onnx]'`. Input is float32 RGB normalized to `[0,1]`, 
 ```
 
 Uppercase is white, lowercase black, dot empty. The adapter selects CPU execution and two intra-op threads. A model with a different label order, normalization, input layout or output probability convention must be converted first. No universal-model accuracy claim accompanies this interface.
+
+## Visible game context and annotation trees
+
+The capture worker scans the selected source (not just the board crop) at most once per second with pinned offline PP-OCRv4 DB/CTC models. Exact unchanged source pixels reuse text inference while debounce still requires temporal evidence. Spatial association assigns outside-board clocks/names to colors; names need three repeated scans. Relative You Won/Lost messages use an explicit player-color setting or the remembered initial bottom color, never the current flipped orientation. Result messages need repeated evidence. A unique final pending move needs positive evidence on every changed square, even if the popup obstructs unrelated squares. A terminal latch survives restart, freezes played moves, and arms a new standard board. A recent dual-clock reset and stable changed names contribute boundary evidence.
+
+`game_extras.py` stores observed clocks by full resulting FEN and binds them to verified plies only after the corresponding move becomes verified. PGN output uses standard `[%clk]` comments. No exact release times or missing readings are fabricated. Completed-game review uses a separate bounded reconstructor anchored to a known main-line position. Verified review moves enter a PGN variation tree, never the recorded move list. `pgn_tools.py` merges annotations onto the authoritative main line; it refuses silent main-line extensions. The viewer navigates nested trees and preserves annotations, clocks, imports and header edits.
+
+`diagnostics.py` rotates application logs and exports a user-requested ZIP of recent database evidence, audit records, settings, game states and PGNs. No screenshot bytes are included. The database remains the durable source of capture evidence.

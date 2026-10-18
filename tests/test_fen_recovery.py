@@ -107,3 +107,14 @@ def test_recovery_timeout_load_is_bounded_and_old_settings_default_safe(tmp_path
     assert settings.unresolved_fen_seconds==15
     settings_file.write_text(json.dumps({'unresolved_fen_seconds':99999}))
     assert Settings.load(settings_file).unresolved_fen_seconds==600
+
+
+def test_confident_but_invalid_popup_position_does_not_crash_automatic_recovery(tmp_path):
+    store=Store(tmp_path);manager=GameManager(store,Settings(max_plies=1,confirm_on_reply=False,unresolved_fen_seconds=1))
+    now=[10.];manager._clock=lambda:now[0]
+    manager.process(Observation.from_board(chess.Board()));gid=manager.current_id
+    obscured=Observation.from_board(chess.Board(None))
+    manager.process(obscured);now[0]+=2;manager.process(obscured)
+    assert manager.current_id==gid
+    assert 'do not form a valid FEN' in manager.last_message
+    store.close()

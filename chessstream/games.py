@@ -6,15 +6,18 @@ import io
 import json
 import threading
 import time
+import logging
 import uuid
 import chess
 import chess.pgn
 from .domain import Settings, Observation, utcnow, atomic_text
 from .reconstruction import Reconstructor, LegalSearcher
 from .storage import Store
+from .game_extras import GameExtras
+from .pgn_tools import merge_annotations
 
 
-def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="") -> str:
+def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None) -> str:
     game = chess.pgn.Game()
     initial = chess.Board(initial_fen)
     game.setup(initial)
@@ -36,10 +39,11 @@ def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="") ->
             raise ValueError(f"Cannot export illegal move {uci}")
         node = node.add_variation(move)
         board.push(move)
-    return game.accept(chess.pgn.StringExporter(headers=True, variations=False, comments=True))
+    merge_annotations(game,review_pgn,clocks)
+    return game.accept(chess.pgn.StringExporter(headers=True, variations=True, comments=True))
 
 
-class GameManager:
+class GameManager(GameExtras):
     def __init__(self, store: Store, settings: Settings, session_id: str | None = None):
         self.store, self.settings = store, settings
         self.session_id = session_id or store.session()
@@ -62,6 +66,7 @@ class GameManager:
         self._unresolved_since=None
         self._unresolved_timestamp=None
         self._clock=time.monotonic
+        self._reset_extras()
 
     def searcher(self):
         s = self.settings
@@ -71,6 +76,8 @@ class GameManager:
         return Reconstructor(board, self.searcher(), roots, int(self.settings.confirm_on_reply))
 
     def _create(self, board, timestamp, roots=None, note=""):
+        self._reset_extras()
+        self.reset_candidate=None;self.reset_started=None
         self.current_id = uuid.uuid4().hex
         self.started = timestamp
         self.ended = None
@@ -155,6 +162,20 @@ class GameManager:
     def process(self, obs: Observation) -> dict:
         with self.lock:
             self.last_observation = obs
+            # An aborted game can end before a single move. A clear legal
+            # opening after its popup disappears starts a fresh recording.
+            if (self.rec and self.terminal_message and not self.rec.verified
+                    and self.rec.initial_fen==chess.STARTING_FEN
+                    and obs.placement()!=self.rec.board.board_fen()
+                    and not obs.uncertain_squares(max(.8,self.settings.min_confidence))):
+                opening=LegalSearcher(1,self.settings.search_nodes,self.settings.search_ms,self.settings.min_confidence).search(chess.Board(),obs)
+                if opening.exhaustive and len(opening.paths)==1:
+                    self._create(chess.Board(),obs.timestamp)
+            if self.rec and self.pending_identity and obs.confidence>=.8 and not obs.uncertain_squares(max(.8,self.settings.min_confidence)):
+                names=self.pending_identity
+                self._start_from_visible(obs,'visible player names changed')
+                self.observed_names=names
+                for color,name in names.items():self.headers[color.title()]=name
             if not self.rec:
                 self._initialize(obs)
             else:
@@ -176,13 +197,14 @@ class GameManager:
                                 if initial.is_valid():roots.append(initial.fen())
                             if roots:self.rec=self.reconstructor(chess.Board(roots[0]),roots)
                         if self.rec.initial_fen!=previous:
+                            if self.settings.result_player_color=='initial-bottom':self.player_color=obs.orientation
                             if not self.result_override:self.headers['Result']='*';self.ended=None
                             self.store.audit('initial orientation correction',{'game_id':self.current_id,'previous_fen':previous,'corrected_fen':self.rec.initial_fen})
                 self.rec.searcher = self.searcher()
                 self.rec.confirmation_plies=int(self.settings.confirm_on_reply)
                 is_start = obs.placement() == chess.Board().board_fen()
-                if is_start and self.rec.verified and self.rec.board.board_fen() != obs.placement():
-                    if self.rec.board.is_game_over(claim_draw=False) or self.headers["Result"] != "*":
+                if is_start and (self.rec.verified or self.terminal_message) and self.rec.board.board_fen() != obs.placement():
+                    if self.terminal_message or self.clocks_recently_reset() or self.rec.board.is_game_over(claim_draw=False) or self.headers["Result"] != "*":
                         self.finish("complete")
                         self._create(chess.Board(), obs.timestamp)
                     else:
@@ -190,6 +212,9 @@ class GameManager:
                             self.reset_candidate = self.reconstructor(chess.Board())
                             self.reset_started = obs.timestamp
                         self.last_message = "Board reset • checking for a new game or opening review"
+                elif self.terminal_message:
+                    self._confirm_terminal_pending(obs)
+                    self._observe_review(obs)
                 elif self.ended and self.headers['Result']!='*':
                     self.last_message='Game complete • waiting for a new game'
                 elif self.reset_candidate:
@@ -228,9 +253,11 @@ class GameManager:
                         self.ended = self.ended or obs.timestamp
                         self.last_message = "Complete • " + outcome.termination.name.replace("_"," ").lower()
             if self.rec:
+                self._record_clocks(obs)
                 self.persist()
             signature=(self.current_id,obs.placement(),self.last_message,obs.orientation)
             if signature!=self._last_evidence_signature:
+                logging.info('Recorder state %s',json.dumps({'game_id':self.current_id,'status':self.last_message,'placement':obs.placement(),'plies':len(self.rec.verified) if self.rec else 0,'uncertain_squares':obs.uncertain_squares(max(.8,self.settings.min_confidence))}))
                 self.store.save_observation(self.session_id, self.current_id, obs, self.last_message,
                     {"labels":obs.labels.tolist(), "confidence":[round(float(v),3) for v in obs.probabilities.max(axis=1)],
                      "orientation":obs.orientation})
@@ -255,7 +282,12 @@ class GameManager:
             self._unresolved_timestamp=obs.timestamp
         elapsed=now-self._unresolved_since
         if elapsed>=seconds:
-            self._start_from_visible(obs,"stable board remained unresolved for configured timeout",self._unresolved_timestamp)
+            try:
+                self._start_from_visible(obs,"stable board remained unresolved for configured timeout",self._unresolved_timestamp)
+            except ValueError:
+                self.clear_position_recovery()
+                self.last_message=status+' • visible pieces do not form a valid FEN; existing game preserved'
+                logging.warning(self.last_message)
         else:
             remaining=max(1,int(seconds-elapsed+.999))
             self.last_message=f"{status} • will start a new FEN recording in {remaining}s if this clear position remains unresolved"
@@ -272,14 +304,15 @@ class GameManager:
             comment += (" Final move awaits opponent response or explicit confirmation; only the verified prefix is exported."
                         if self.rec.confirmation_plies and len(self.rec.branches)==1 and len(self.rec.branches[0].moves)==1
                         else " Unresolved observations exist; only the verified prefix is exported.")
-        status = "complete" if self.ended and self.headers["Result"] != "*" else self.rec.status
+        status = ("aborted" if self.terminal_message["reason"]=="aborted" else "complete") if self.terminal_message else ("complete" if self.ended and self.headers["Result"] != "*" else self.rec.status)
         if pending:status+=' • unresolved'
         data = self.rec.serialize()
         data["note"] = self.note
+        data.update(self._extra_state())
         data['result_override']=self.result_override
         fingerprint=json.dumps([self.current_id,self.name,self.headers,data,self.ended,self.settings.export_dir,self.settings.auto_export],sort_keys=True)
         if fingerprint==self._persisted_fingerprint:return
-        pgn = export_pgn(self.rec.initial_fen, self.rec.verified, self.headers, comment)
+        pgn = export_pgn(self.rec.initial_fen, self.rec.verified, self.headers, comment,self.review_pgn,self.move_clocks)
         self.store.save_game(self.current_id,self.session_id,self.name,self.started,status,self.headers,data,pgn,self.ended)
         if self.settings.export_dir and self.settings.auto_export:
             atomic_text(Path(self.settings.export_dir)/(self.current_id+".pgn"),pgn+"\n")
@@ -307,6 +340,7 @@ class GameManager:
                     "fen":self.rec.board.fen(),"initial_fen":self.rec.initial_fen,"moves":san,
                     "plies":len(san),"last_move":self.rec.verified[-1] if san else None,
                     "alternatives":alternatives,"incomplete":self.rec.incomplete,"note":self.note,
+                    "result":self.headers.get("Result","*"),"terminal_message":self.terminal_message,"clocks":(self.latest_context or {}).get("clocks",{}),"players":{"white":self.headers.get('White','Unknown'),"black":self.headers.get('Black','Unknown')},
                     "provisional":bool(self.rec.confirmation_plies and len(self.rec.branches)==1 and len(self.rec.branches[0].moves)==1),
                     "pending_terminal":bool(self.rec.confirmation_plies and len(self.rec.branches)==1 and len(self.rec.branches[0].moves)==1 and self.rec.branches[0].board().is_game_over()),
                     "pending_moves":alternatives[0].split() if self.rec.confirmation_plies and len(self.rec.branches)==1 and alternatives else []}
@@ -357,6 +391,8 @@ class GameManager:
             self.ended=(row['ended'] or utcnow()) if self.headers.get('Result','*')!='*' else None
             state = json.loads(row["state"])
             self.note = state.get("note", "")
+            self._load_extras(state)
+            if self.terminal_message:self.ended=row['ended'] or utcnow()
             self.result_override=state.get('result_override',False)
             self.rec = Reconstructor.restore(state,self.searcher())
             self.rec.confirmation_plies=int(self.settings.confirm_on_reply)
@@ -370,6 +406,7 @@ class GameManager:
             if not self.rec:
                 return
             self.rec.choose(index)
+            self._sync_move_clocks()
             outcome=self.rec.board.outcome(claim_draw=False)
             if outcome and not self.result_override:
                 self.headers['Result']=outcome.result();self.ended=self.last_observation.timestamp if self.last_observation else utcnow()
@@ -398,6 +435,8 @@ class GameManager:
             previous=self.rec.serialize()
             self.rec.board=chess.Board(self.rec.initial_fen)
             self.rec.verified=prefix+moves
+            self.move_clocks={key:value for key,value in self.move_clocks.items() if int(key)<=len(prefix)}
+            self.clock_evidence={};self.review_tracker=None
             self.rec.history=[self.rec.board.board_fen()]
             for uci in self.rec.verified:
                 self.rec.board.push_uci(uci);self.rec.history.append(self.rec.board.board_fen())
@@ -406,7 +445,7 @@ class GameManager:
             self.rec.incomplete = False
             self.note += " A move sequence was confirmed manually."
             self.rec.status = "recording"
-            if not self.result_override:
+            if not self.result_override and not self.terminal_message:
                 self.headers['Result']='*';self.ended=None
             self.store.audit("manual legal SAN correction",{"game_id":self.current_id,"moves":moves,"undone_plies":undo,"previous_state":previous})
             self.persist()
@@ -420,12 +459,13 @@ class GameManager:
                 if headers.get('Result','*')!=self.headers.get('Result','*'):
                     self.result_override=True
                     self.ended=utcnow() if headers.get('Result','*')!='*' else None
+                    if headers.get('Result','*')=='*':self.terminal_message=None;self.review_tracker=None
                 self.name, self.headers = name,headers
                 self.persist()
             else:
                 state = json.loads(row["state"])
                 if headers.get('Result','*')!=json.loads(row['headers']).get('Result','*'):state['result_override']=True
-                pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""))
+                pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""),state.get("review_pgn",""),state.get("move_clocks",{}))
                 self.store.save_game(gid,row["session_id"],name,row["started"],row["status"],headers,state,pgn,row["ended"])
 
     def import_pgn(self, path: Path) -> int:
@@ -444,6 +484,6 @@ class GameManager:
                 gid = uuid.uuid4().hex
                 pgn = game.accept(chess.pgn.StringExporter(headers=True, variations=True, comments=True))
                 self.store.save_game(gid,self.session_id,f"{game.headers.get('White','Unknown')} — {game.headers.get('Black','Unknown')}",
-                    utcnow(),"imported",dict(game.headers),r.serialize(),pgn,utcnow())
+                    utcnow(),"imported",dict(game.headers),{**r.serialize(),"review_pgn":pgn,"note":game.comment},pgn,utcnow())
                 count += 1
         return count
