@@ -1,4 +1,4 @@
-name: Windows validation and installer
+name: Windows validation and portable package
 on: [push, pull_request, workflow_dispatch]
 jobs:
   windows:
@@ -12,17 +12,15 @@ jobs:
       - run: python -m pytest -q
       - name: Desktop smoke test
         run: python -m chessstream --data-dir build/smoke-data --smoke build/desktop.png
-      - name: Install NSIS
-        run: choco install nsis -y --no-progress
-      - name: Build Windows installer
-        run: python scripts/build_windows.py --makensis 'C:/Program Files (x86)/NSIS/makensis.exe'
+      - name: Build portable ZIP
+        run: python scripts/build_windows.py
       - name: Test packaged runtime imports and GUI
         run: |
           build/windows-portable/runtime/python.exe -c "import chess, cv2, numpy, mss, psutil; from PySide6.QtWidgets import QApplication; from chessstream.vision import TemplateRecognizer; TemplateRecognizer(); print('Bundled imports passed')"
           build/windows-portable/runtime/python.exe -m chessstream --data-dir build/bundle-smoke --smoke build/bundle-desktop.png
       - uses: actions/upload-artifact@v4
         with:
-          name: ChessStream-Windows
+          name: ChessStream-Windows-Portable
           path: |
-            dist/*.exe
+            dist/ChessStream-PGN-Recorder-Portable.zip
             build/*desktop.png

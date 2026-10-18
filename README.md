@@ -2,20 +2,20 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**The implementation and installer are provided. The test host is Linux; the Windows installer has been assembled from official Windows binaries but has not been run on Windows 11 in this environment.** See [known limitations](docs/KNOWN_LIMITATIONS.md) before relying on unattended stream reconstruction.
+**A portable Windows ZIP and complete source are provided. The Windows package has been assembled from official Windows binaries but has not been run on Windows 11 in this environment.** See [known limitations](docs/KNOWN_LIMITATIONS.md) before relying on unattended stream reconstruction.
 
 ![Desktop interface](docs/live-desktop.png)
 
 ## Install on Windows 11 x64
 
-1. Run `dist/ChessStream-PGN-Recorder-Setup.exe` and install for your user. Administrator access and a separate Python installation are unnecessary.
-2. Open **ChessStream PGN Recorder** from Start.
+1. Download and extract `dist/ChessStream-PGN-Recorder-Portable.zip` to a folder you can write to, such as Documents. No installer, administrator access, or separate Python installation is needed.
+2. Double-click `Launch ChessStream.cmd` in the extracted folder. The package includes a private Python runtime; it does not install software system-wide.
 3. Place the app beside the browser or on a second monitor. The captured board must remain visible.
 4. Select **Select capture region**, draw tightly around the 64 squares, and select **Start recording**.
 5. For Chess.com's default Neo set or an unfamiliar set, show the **standard starting position**, choose **Calibrate piece set**, and confirm which color is at the bottom. This is one-time local calibration for that set and size; verify the preview afterward.
 6. Export from the live page or Game library. Unknown names stay `Unknown`.
 
-The unsigned installer may be identified as an unrecognized publisher by Windows. A source-based installation and a Windows CI build workflow are also supplied. No claim of Windows signing or completed Windows runtime validation is made.
+The ZIP contains `pythonw.exe` as part of its private Python runtime, launched by the included `.cmd` shortcut script. No installer executable is required. Windows SmartScreen may still display warnings for unsigned downloaded scripts or binaries. No claim of completed Windows runtime validation is made.
 
 ## Run from source
 
@@ -88,13 +88,13 @@ Omit `--region` to locate the first board automatically. Replay reads frames loc
 
 ## Packaging
 
-The installer contains official CPython 3.13.16 x64, pinned Windows wheels, all source modules and offline recognition assets. It does not require a paid service. To rebuild, install NSIS and run:
+The portable ZIP contains official CPython 3.13.16 x64, pinned Windows wheels, all source modules and offline recognition assets. It does not install system-wide or require a paid service. To rebuild, run:
 
 ```sh
-python scripts/build_windows.py --makensis /path/to/makensis
+python scripts/build_windows.py
 ```
 
-The builder works on Linux and Windows. Windows wheels are downloaded explicitly for `win_amd64`, and a SHA-256 input manifest is included. `.github/workflows/windows.yml` runs Windows tests, GUI rendering, packaged-runtime import checks and installer construction when the project is pushed to GitHub. That workflow has been supplied, not executed from this workspace.
+The builder works on Linux and Windows. Windows wheels are downloaded explicitly for `win_amd64`, and a SHA-256 input manifest is included. An optional NSIS installer can still be built by passing `--makensis /path/to/makensis`; the portable ZIP is the recommended download. `.github/workflows/windows.yml` runs Windows tests, GUI rendering, packaged-runtime import checks and portable package construction when the project is pushed to GitHub. That workflow has been supplied, not executed from this workspace.
 
 ## Data and modules
 

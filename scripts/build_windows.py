@@ -1,4 +1,4 @@
-"""Build a complete offline Windows x64 runtime and NSIS installer, on Linux or Windows.
+"""Build a complete offline Windows x64 portable ZIP, on Linux or Windows.
 
 Uses official CPython embeddable distribution and Windows wheels. No cross-compiled
 Python extensions or host-platform DLLs are copied. A Windows smoke test is still
@@ -20,7 +20,10 @@ VERSION='3.13.16'
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--makensis',default='makensis');parser.add_argument('--skip-download',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--makensis', help='Also build the optional NSIS installer with this makensis executable')
+    parser.add_argument('--skip-download',action='store_true')
+    args=parser.parse_args()
     cache=ROOT/'.cache';wheels=cache/'win-wheels';wheels.mkdir(parents=True,exist_ok=True)
     pure=cache/'wheels';pure.mkdir(exist_ok=True)
     if not args.skip_download:
@@ -62,11 +65,19 @@ def main():
     (package/'Diagnose ChessStream.cmd').write_text('@echo off\r\ncd /d "%~dp0"\r\n"%~dp0runtime\\python.exe" -m chessstream\r\npause\r\n',encoding='utf-8')
     (package/'BUILD-MANIFEST.json').write_text(json.dumps({'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes},indent=2))
     dist=ROOT/'dist';dist.mkdir(exist_ok=True)
-    env=os.environ.copy()
-    if os.name!='nt' and 'nsis/usr/bin' in args.makensis:
-        env['NSISDIR']=str(Path(args.makensis).resolve().parents[1]/'share/nsis')
-    subprocess.run([args.makensis,str(ROOT/'packaging/installer.nsi')],cwd=ROOT,env=env,check=True)
-    print('Built:',dist/'ChessStream-PGN-Recorder-Setup.exe')
+    portable_zip=dist/'ChessStream-PGN-Recorder-Portable.zip'
+    portable_zip.unlink(missing_ok=True)
+    with zipfile.ZipFile(portable_zip,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=3) as z:
+        for path in sorted(package.rglob('*')):
+            if path.is_file():
+                z.write(path,Path('ChessStream-PGN-Recorder')/path.relative_to(package))
+    print('Built portable package:',portable_zip)
+    if args.makensis:
+        env=os.environ.copy()
+        if os.name!='nt' and 'nsis/usr/bin' in args.makensis:
+            env['NSISDIR']=str(Path(args.makensis).resolve().parents[1]/'share/nsis')
+        subprocess.run([args.makensis,str(ROOT/'packaging/installer.nsi')],cwd=ROOT,env=env,check=True)
+        print('Built optional installer:',dist/'ChessStream-PGN-Recorder-Setup.exe')
     print('This artifact contains Windows binaries. Validate on Windows 11 before release.')
 
 
