@@ -2,7 +2,7 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.5.2 previews unverified legal moves on the live board.** The amber preview follows the current candidate while the verified move count and PGN stay unchanged until evidence confirms it. If multiple lines fit, the display identifies the candidate being previewed. Version 1.5.1 hardened model and image loading and updated the image dependency. Version 1.5 also added nearby clock/name reading, PGN variations, FEN recovery, held-piece protection, per-position screenshots, and saved diagnostics. See the [security audit](SECURITY.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and measured [native screenshot checks](docs/context-v1.4.json).
+**Version 1.5.3 ranks provisional boards using square-level recognition scores and clock movement, and better separates reviews from new games.** A position linked to the saved game stays with that PGN. A large unexplained position change must persist for five seconds before a separate FEN-based PGN begins. See the [release notes](docs/RELEASE-v1.5.3.md), [security audit](SECURITY.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and measured [native screenshot checks](docs/context-v1.4.json).
 
 ![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 
@@ -15,7 +15,7 @@ Game library showing clock comments from the retained native browser capture and
 3. Place the app beside the browser or on a second monitor. The captured board must remain visible.
 4. Select **Select capture region**, draw around the board; nearby clocks/names are captured automatically in a temporary margin, and select **Start recording**.
 5. Check the live preview and **Weakest square score**. The bundled model needs no initial calibration for the tested Chess.com/Lichess themes. An uncertain first position stays pending, with affected squares named; stable positions continue to be saved.
-6. Verified moves have a checkmark. The reconstructed board follows the current legal move candidate and marks its last move in amber; that preview is not in the PGN until confirmed. If multiple lines fit, the board labels the candidate being previewed. If a resumed video shows a clear position the saved game cannot reach, the app preserves the old PGN and, after 15 seconds by default, starts a separate PGN from that board’s FEN. You can change or disable the timeout in Settings. Select **Start PGN from visible FEN** to do this immediately. **Copy visible FEN** copies the displayed position; if side to move is unknown, choose White or Black. Export from the live page or Game library. Unknown names stay `Unknown`.
+6. Verified moves have a checkmark. The reconstructed board ranks legal candidates against the classifier score on each square; recent clock movement can break close ties but cannot confirm a move. The amber preview is not in the PGN until confirmed. A board linked to an earlier position or short legal continuation stays with that game as review/analysis. A large unexplained change must remain stable for five seconds before a separate PGN starts from its FEN. Smaller unresolved changes use the separately configurable FEN timeout. Select **Start PGN from visible FEN** to start one immediately. **Copy visible FEN** copies the displayed position; if side to move is unknown, choose White or Black. Export from the live page or Game library. Unknown names stay `Unknown`.
 
 After a detected result, the played main line is frozen. Post-game review can add side variations for two minutes by default. In Game library, select a position to add a legal SAN alternative or comment; exports retain them. **Diagnostics / logs** opens saved status messages and can export a support ZIP without screenshots.
 
@@ -66,7 +66,7 @@ A piece held over a legal square can be visually identical to a dropped piece, e
 
 Midgame pieces alone cannot prove turn, castling rights or an en passant target. The app infers turn from the next shortest legal transition and assumes **no castling rights / no en passant target** unless you provide an exact initial FEN. Earlier moves are not invented. A PGN with unresolved evidence exports only its verified prefix with an explanatory comment.
 
-Opening reviews and new games can be visually indistinguishable. After a nonterminal reset, the app waits for a legal opening that diverges from the prior game; you can explicitly start a separate game sooner. Menus, advertisements, a hidden board and unexplained position changes preserve the current game. Distinct unrelated midgames require confirmation rather than silent reassignment.
+Opening reviews and new games can be visually indistinguishable. The app now checks visible positions against the verified history and short legal branches before splitting. Large, stable unexplained positions start a separate FEN PGN automatically; long reviews beyond bounded search may still be misclassified. Menus, advertisements and hidden boards do not change the saved game.
 
 ## Tests and measured evaluation
 

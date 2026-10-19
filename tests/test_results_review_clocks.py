@@ -44,6 +44,18 @@ def test_result_requires_repeated_evidence_and_lost_text_resets_debounce():
     assert detector.scan(image,'black') is None
 
 
+def test_clock_trend_only_suggests_active_side_when_one_clock_is_falling(tmp_path):
+    manager=GameManager(Store(tmp_path),Settings())
+    manager.observe_context({'clocks':{'white':600,'black':600},'names':{}},'2026-10-19T12:00:00+00:00')
+    manager.observe_context({'clocks':{'white':598,'black':600},'names':{}},'2026-10-19T12:00:02+00:00')
+    assert manager.active_clock_turn() is chess.WHITE
+    manager.observe_context({'clocks':{'white':598,'black':600},'names':{}},'2026-10-19T12:00:03+00:00')
+    assert manager.active_clock_turn() is None
+    manager.observe_context({'clocks':{'white':601,'black':603},'names':{}},'2026-10-19T12:00:04+00:00')
+    assert manager.active_clock_turn() is None
+    manager.store.close()
+
+
 def game_with_pending(store):
     manager=GameManager(store,Settings())
     board=chess.Board();manager.process(Observation.from_board(board))
@@ -126,6 +138,10 @@ def test_names_clocks_spatial_assignment_and_stable_identity_change(tmp_path):
     assert context=={'clocks':{'white':599,'black':270},'names':{'white':'Opponent','black':'Streamer'}}
     stable=ContextStabilizer();assert not stable.observe(context)['names'];assert not stable.observe(context)['names']
     assert stable.observe(context)['names']==context['names']
+    transient=ContextStabilizer();assert not transient.observe(context)['names']
+    assert not transient.observe({'clocks':context['clocks'],'names':{}})['names']
+    assert not transient.observe(context)['names']
+    assert transient.observe(context)['names']==context['names']
     store=Store(tmp_path);manager=GameManager(store,Settings());board=chess.Board();manager.process(Observation.from_board(board));gid=manager.current_id
     manager.observe_context(context,utcnow());assert manager.headers['Black']=='Streamer'
     manager.observe_context({**context,'names':{'white':'NewOpponent','black':'Streamer'}},utcnow())

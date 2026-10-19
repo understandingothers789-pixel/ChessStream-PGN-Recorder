@@ -8,9 +8,10 @@ import threading
 import time
 import logging
 import uuid
+import numpy as np
 import chess
 import chess.pgn
-from .domain import Settings, Observation, utcnow, atomic_text
+from .domain import Settings, Observation, utcnow, atomic_text, board_labels
 from .reconstruction import Reconstructor, LegalSearcher
 from .storage import Store
 from .game_extras import GameExtras
@@ -65,6 +66,10 @@ class GameManager(GameExtras):
         self._unresolved_position=None
         self._unresolved_since=None
         self._unresolved_timestamp=None
+        self._review_position=None
+        self._review_since=None
+        self._review_candidate=None
+        self._review_recorded=None
         self._clock=time.monotonic
         self._reset_extras()
 
@@ -265,16 +270,38 @@ class GameManager(GameExtras):
             return self.snapshot()
 
     def _track_unresolved_position(self,obs,status):
-        """Checkpoint an unchanged, clear unmatched board as a fresh FEN PGN."""
-        seconds=float(self.settings.unresolved_fen_seconds)
-        eligible=(seconds>0 and self.rec is not None
+        """Treat legal history as review; split only a sustained unexplained board."""
+        threshold=max(.80,self.settings.min_confidence)
+        eligible=(self.rec is not None
                   and status.startswith(("unmatched position","search limit","uncertain","review / rewind"))
                   and obs.placement()!=self.rec.board.board_fen()
-                  and obs.confidence>=max(.80,self.settings.min_confidence)
-                  and not obs.uncertain_squares(max(.80,self.settings.min_confidence)))
+                  and obs.confidence>=threshold
+                  and not obs.uncertain_squares(threshold))
         if not eligible:
             self.clear_position_recovery()
             return
+
+        history_path=self._find_history_path(obs)
+        if history_path is not None:
+            self._unresolved_position=self._unresolved_since=self._unresolved_timestamp=None
+            index,moves=history_path
+            self.last_message="Review position • linked to saved game history"
+            if moves and index < len(self.rec.verified):
+                self._track_analysis_branch(obs,index,moves)
+            else:
+                self._review_position=self._review_since=self._review_candidate=None
+            return
+
+        self._review_position=self._review_since=self._review_candidate=None
+        current=board_labels(self.rec.board)
+        target=obs.labels
+        confident=obs.probabilities.max(axis=1)>=threshold
+        changed=int(np.count_nonzero((current!=target)&confident))
+        large_change=changed>=self.settings.new_game_min_changed_squares
+        seconds=(self.settings.new_game_change_seconds if large_change
+                 else self.settings.unresolved_fen_seconds)
+        if seconds<=0:
+            self.clear_position_recovery();return
         now=self._clock()
         if self._unresolved_position!=obs.placement():
             self._unresolved_position=obs.placement()
@@ -282,18 +309,75 @@ class GameManager(GameExtras):
             self._unresolved_timestamp=obs.timestamp
         elapsed=now-self._unresolved_since
         if elapsed>=seconds:
+            reason=(f"stable board differed on {changed} confident squares and was not reachable from saved PGN history"
+                    if large_change else "stable board remained unresolved for configured timeout")
             try:
-                self._start_from_visible(obs,"stable board remained unresolved for configured timeout",self._unresolved_timestamp)
+                self._start_from_visible(obs,reason,self._unresolved_timestamp)
             except ValueError:
                 self.clear_position_recovery()
                 self.last_message=status+' • visible pieces do not form a valid FEN; existing game preserved'
                 logging.warning(self.last_message)
         else:
             remaining=max(1,int(seconds-elapsed+.999))
-            self.last_message=f"{status} • will start a new FEN recording in {remaining}s if this clear position remains unresolved"
+            label="possible new game" if large_change else "unresolved position"
+            self.last_message=f"{status} • {label} ({changed} changed squares); new FEN recording in {remaining}s if stable"
+
+    def _find_history_path(self,obs):
+        """Find an exact or short legal continuation from any verified PGN position."""
+        if not self.rec:return None
+        positions=[];board=chess.Board(self.rec.initial_fen);positions.append(board.copy())
+        for uci in self.rec.verified:
+            board.push_uci(uci);positions.append(board.copy())
+        threshold=max(.80,self.settings.min_confidence)
+        for index in range(len(positions)-1,-1,-1):
+            if obs.matches(positions[index],threshold):return index,()
+        target=obs.labels
+        confident=obs.probabilities.max(axis=1)>=threshold
+        candidates=[]
+        max_changes=4*min(3,self.settings.max_plies)
+        for index,position in enumerate(positions):
+            distance=int(np.count_nonzero((board_labels(position)!=target)&confident))
+            if distance<=max_changes:
+                candidates.append((distance,-index,index,position))
+        candidates.sort(key=lambda item:(item[0],item[1]))
+        started=time.monotonic();used_nodes=0
+        for _,__,index,position in candidates[:40]:
+            remaining=8000-used_nodes
+            if remaining<1000 or (time.monotonic()-started)*1000>45:break
+            searcher=LegalSearcher(min(3,self.settings.max_plies),min(1600,remaining),45,
+                                   threshold,path_limit=32)
+            result=searcher.search(position,obs);used_nodes+=result.nodes
+            if result.paths:
+                path=(tuple(move.uci() for move in result.paths[0])
+                      if result.exhaustive and len(result.paths)==1 else ())
+                return index,path
+        return None
+
+    def _track_analysis_branch(self,obs,index,moves):
+        signature=(index,tuple(moves))
+        if self._review_position!=obs.placement() or self._review_candidate!=signature:
+            self._review_position=obs.placement();self._review_candidate=signature;self._review_since=self._clock();self._review_recorded=None
+            return
+        if self._review_recorded==signature:return
+        if self._clock()-self._review_since<self.settings.new_game_change_seconds:return
+        board=chess.Board(self.rec.initial_fen)
+        for uci in self.rec.verified[:index]:board.push_uci(uci)
+        sans=[]
+        for uci in moves:
+            move=chess.Move.from_uci(uci);sans.append(board.san(move));board.push(move)
+        try:
+            self.annotate(self.current_id,[0]*index,' '.join(sans),
+                          comment='Observed analysis branch; not confirmed as part of the played main line.',
+                          automatic=True)
+            self._review_recorded=signature
+            self.last_message="Review position • legal analysis variation saved"
+        except ValueError:
+            self.last_message="Review position • legal continuation linked to saved game"
 
     def clear_position_recovery(self):
         self._unresolved_position=self._unresolved_since=self._unresolved_timestamp=None
+        self._review_position=self._review_since=self._review_candidate=None
+        self._review_recorded=None
 
     def persist(self):
         if not self.rec:
@@ -332,8 +416,10 @@ class GameManager(GameExtras):
             preview_moves = []
             preview_last_move = self.rec.verified[-1] if self.rec.verified else None
             preview_candidates = 0
+            ranked_branches = (self.rec.rank_branches(self.rec.branches,self.last_observation,
+                               self.active_clock_turn()) if self.last_observation and len(self.rec.branches)>1 else [])
             if not self.rec.incomplete and self.rec.branches:
-                preview_branch = self.rec.branches[0]
+                preview_branch = ranked_branches[0][2] if ranked_branches else self.rec.branches[0]
                 preview_board = preview_branch.board()
                 preview_candidates = len(self.rec.branches) if any(
                     branch.moves for branch in self.rec.branches
@@ -344,7 +430,8 @@ class GameManager(GameExtras):
                     move = chess.Move.from_uci(uci)
                     preview_moves.append(leaf.san(move))
                     leaf.push(move)
-            for branch in self.rec.branches:
+            ordered_branches=[row[2] for row in ranked_branches] if ranked_branches else self.rec.branches
+            for branch in ordered_branches:
                 if branch.moves or len(self.rec.branches)>1:
                     leaf = chess.Board(branch.root_fen)
                     line = []
@@ -356,6 +443,8 @@ class GameManager(GameExtras):
                     "fen":self.rec.board.fen(),"preview_fen":preview_board.fen(),
                     "preview_last_move":preview_last_move,"preview_moves":preview_moves,
                     "preview_candidates":preview_candidates,
+                    "preview_confidence":(float(np.exp(ranked_branches[0][0])*100) if ranked_branches else None),
+                    "preview_clock_support":(ranked_branches[0][1] if ranked_branches else 0),
                     "initial_fen":self.rec.initial_fen,"moves":san,
                     "plies":len(san),"last_move":self.rec.verified[-1] if san else None,
                     "alternatives":alternatives,"incomplete":self.rec.incomplete,"note":self.note,

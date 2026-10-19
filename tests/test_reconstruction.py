@@ -3,7 +3,7 @@ import chess
 import chess.pgn
 import pytest
 from chessstream.domain import Observation
-from chessstream.reconstruction import LegalSearcher, Reconstructor
+from chessstream.reconstruction import LegalSearcher, Reconstructor, Branch
 from chessstream.games import export_pgn
 
 
@@ -79,3 +79,16 @@ def test_recovery_preserves_alternatives():
     copy=Reconstructor.restore(r.serialize())
     assert copy.board.fen()==b.fen()
     b.push_san("e5");assert copy.observe(Observation.from_board(b)).verified==["e7e5"]
+
+
+def test_provisional_preview_ranks_per_square_likelihood_then_clock_tie_break():
+    board=chess.Board()
+    white=Branch(board.fen(),())
+    black_root=chess.Board(board.fen().replace(' w ',' b '))
+    black=Branch(black_root.fen(),())
+    obs=Observation.from_board(board)
+    ranked=Reconstructor.rank_branches([black,white],obs,chess.WHITE)
+    assert ranked[0][2] is white
+    assert ranked[0][0]>-0.01 and ranked[0][1]==1
+    tied=Reconstructor.rank_branches([black,white],obs,chess.BLACK)
+    assert tied[0][2] is black

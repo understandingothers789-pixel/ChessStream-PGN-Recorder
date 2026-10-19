@@ -13,7 +13,7 @@ class GameExtras:
     def _reset_extras(self):
         self.review_pgn='';self.terminal_message=None;self.player_color=None
         self.review_tracker=None;self.review_anchor=None
-        self.move_clocks={};self.clock_evidence={};self.latest_context=None
+        self.move_clocks={};self.clock_evidence={};self.latest_context=None;self._clock_samples=[]
         self.observed_names={};self.pending_identity=None;self.clock_reset_seen=False
 
     def _extra_state(self):
@@ -34,6 +34,11 @@ class GameExtras:
             previous=self.latest_context
             self.latest_context=context
             clocks=context.get('clocks',{})
+            if all(color in clocks for color in ('white','black')):
+                sample=(timestamp,float(clocks['white']),float(clocks['black']))
+                if not self._clock_samples or self._clock_samples[-1][0]!=timestamp:
+                    self._clock_samples.append(sample)
+                    self._clock_samples=self._clock_samples[-12:]
             if previous and all(c in clocks and c in previous.get('clocks',{}) and clocks[c]-previous['clocks'][c]>20 for c in ['white','black']):
                 self.clock_reset_seen=self._clock()
                 logging.info('Both visible clocks reset: %s',clocks)
@@ -53,6 +58,24 @@ class GameExtras:
 
     def clocks_recently_reset(self):
         return bool(self.clock_reset_seen and self._clock()-self.clock_reset_seen<6)
+
+    def active_clock_turn(self):
+        """Return the side whose clock is visibly running, when the evidence is clear."""
+        if len(self._clock_samples)<2:return None
+        try:
+            from datetime import datetime
+            recent=self._clock_samples[-1]
+            prior=next((sample for sample in reversed(self._clock_samples[:-1])
+                        if 0 < (datetime.fromisoformat(recent[0])-datetime.fromisoformat(sample[0])).total_seconds() <= 8),None)
+            if prior is None:return None
+            white_drop=prior[1]-recent[1];black_drop=prior[2]-recent[2]
+            # Clock increments, OCR jitter and resets make small or simultaneous
+            # changes ambiguous. In that case leave visual likelihood in charge.
+            if white_drop>=0.25 and white_drop>black_drop+0.15:return True
+            if black_drop>=0.25 and black_drop>white_drop+0.15:return False
+        except (TypeError,ValueError):
+            return None
+        return None
 
     def _record_clocks(self,obs):
         if self.player_color is None and obs.orientation in ['white','black']:self.player_color=obs.orientation

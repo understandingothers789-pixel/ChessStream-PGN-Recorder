@@ -183,9 +183,9 @@ def extract_context(lines,board_rect,orientation):
 class ContextStabilizer:
     def __init__(self):self.names={}
     def observe(self,context):
-        stable={};current={}
+        stable={};current=dict(self.names)
         for color,name in context.get('names',{}).items():
-            old,count=self.names.get(color,('',0));count=count+1 if old==name else 1
+            old,count=current.get(color,('',0));count=count+1 if old==name else 1
             current[color]=(name,count)
             if count>=3:stable[color]=name
         self.names=current

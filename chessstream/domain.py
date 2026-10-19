@@ -56,6 +56,8 @@ class Settings:
     screenshot_mode: str = "positions"
     confirm_on_reply: bool = True
     unresolved_fen_seconds: float = 15.0
+    new_game_change_seconds: float = 5.0
+    new_game_min_changed_squares: int = 4
     detect_results: bool = True
     read_context: bool = True
     auto_context: bool = True
@@ -90,6 +92,8 @@ class Settings:
             result.adaptive_fps = max(2, min(15, int(result.adaptive_fps)))
             result.max_plies = max(1, min(6, int(result.max_plies)))
             result.unresolved_fen_seconds = max(0.0, min(600.0, float(result.unresolved_fen_seconds)))
+            result.new_game_change_seconds = max(1.0, min(120.0, float(result.new_game_change_seconds)))
+            result.new_game_min_changed_squares = max(1, min(32, int(result.new_game_min_changed_squares)))
             result.context_padding_percent=max(0,min(50,int(result.context_padding_percent)))
             result.review_seconds=max(0,min(3600,int(result.review_seconds)))
             if result.result_player_color not in ["initial-bottom","white","black","unknown"]:result.result_player_color="unknown"

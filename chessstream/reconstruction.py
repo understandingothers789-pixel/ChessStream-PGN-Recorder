@@ -257,6 +257,25 @@ class Reconstructor:
         update.alternatives = [list(b.moves) for b in self.branches if b.moves]
         return update
 
+    @staticmethod
+    def rank_branches(branches, observed: Observation, active_turn=None):
+        """Order visual hypotheses by square likelihood, using the clock only as a tie-break.
+
+        The clock is contextual evidence for which side is currently thinking; it
+        never changes the legal search result or confirms a move by itself.
+        """
+        probabilities = np.clip(observed.probabilities, 1e-8, 1.0)
+        indices = np.arange(64)
+        ranked = []
+        for branch in branches:
+            board = branch.board()
+            labels = board_labels(board)
+            likelihood = float(np.log(probabilities[indices, labels]).mean())
+            clock_match = int(active_turn is not None and board.turn == active_turn)
+            ranked.append((likelihood, clock_match, branch))
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return ranked
+
     def choose(self, index: int) -> list[str]:
         if self.incomplete:
             raise ValueError("Increase search limits or correct the position before selecting a path")
