@@ -2,7 +2,6 @@
 import io
 import chess
 import chess.pgn
-import pytest
 from chessstream.domain import Settings,Observation
 from chessstream.storage import Store
 from chessstream.games import GameManager,export_pgn
@@ -57,17 +56,20 @@ def test_live_multi_move_gap_keeps_one_game_and_hovers_remain_provisional(tmp_pa
     store.close()
 
 
-def test_resumed_equal_shortest_lines_remain_alternatives_without_invented_mainline(tmp_path):
+def test_resumed_equal_shortest_lines_choose_one_deterministically(tmp_path):
     store=Store(tmp_path);first,board=record(store,Settings(),'');first.finish()
     for san in 'Nf3 Nf6 Nc3 Nc6'.split():board.push_san(san)
     resumed=GameManager(store,Settings());resumed.process(Observation.from_board(board))
     assert resumed.current_id==first.current_id and len(store.games())==1
-    assert not resumed.rec.verified and len(resumed.rec.branches)==4
-    assert all(branch.board().board_fen()==board.board_fen() for branch in resumed.rec.branches)
+    assert len(resumed.rec.branches)==1
+    assert resumed.rec.branches[0].board().board_fen()==board.board_fen()
+    assert 'Equal shortest legal paths reached this position' in store.game(first.current_id)['pgn']
     target=chess.pgn.Game();target.setup(board)
     rows=[dict(id='a',started='2026-10-19T10:00:00',pgn=export_pgn(chess.STARTING_FEN,[],{'Result':'*'})),
           dict(id='b',started='2026-10-19T10:04:00',pgn=str(target))]
-    with pytest.raises(ValueError,match='equally short'):join_recordings(rows,LegalSearcher())
+    joined=chess.pgn.read_game(io.StringIO(join_recordings(rows,LegalSearcher())))
+    assert not joined.errors and joined.end().board().board_fen()==board.board_fen()
+    assert len(list(joined.mainline_moves()))==4
     store.close()
 
 

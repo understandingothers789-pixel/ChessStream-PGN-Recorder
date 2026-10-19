@@ -22,6 +22,44 @@ class SearchResult:
     depth: int = 0
 
 
+def capture_path_rank(board: chess.Board, path: tuple[chess.Move, ...] | list[chess.Move]):
+    """Rank equal-length paths by recaptures, then capture continuity/count.
+
+    A capture followed by a capture onto the same square is the strongest
+    cue: it commonly represents a natural recapture (for example cxd4 Qxd4).
+    UCI ordering is applied by callers as a stable final tie-break.
+    """
+    state = board.copy(stack=False)
+    same_square_recaptures = consecutive_captures = captures = 0
+    previous_capture_square = None
+    previous_was_capture = False
+    for move in path:
+        is_capture = state.is_capture(move)
+        if is_capture:
+            captures += 1
+            if previous_was_capture:
+                consecutive_captures += 1
+                if previous_capture_square == move.to_square:
+                    same_square_recaptures += 1
+            previous_capture_square = move.to_square
+        else:
+            previous_capture_square = None
+        previous_was_capture = is_capture
+        state.push(move)
+    return same_square_recaptures, consecutive_captures, captures
+
+
+def select_capture_path(board: chess.Board, paths):
+    """Choose one deterministic path from equally short equivalent results."""
+    paths = list(paths)
+    if len(paths) < 2:
+        return paths
+    ranked = sorted(paths, key=lambda path: (
+        tuple(-score for score in capture_path_rank(board, path)),
+        tuple(move.uci() for move in path)))
+    return [ranked[0]]
+
+
 class LegalSearcher:
     def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128):
         self.max_plies = max_plies
@@ -178,6 +216,7 @@ class ReconstructionUpdate:
     nodes: int = 0
     search_ms: float = 0
     recovered: bool = False
+    tie_broken: bool = False
 
 
 class Reconstructor:
@@ -280,7 +319,21 @@ class Reconstructor:
             return update
         self.incomplete = False
         unique = {(b.root_fen, b.moves): b for b in survivors}
-        self.branches = list(unique.values())
+        # When several shortest move orders explain the same observed endpoint,
+        # prefer a natural capture/recapture sequence and keep one stable line.
+        # Distinct starting roots remain separate hypotheses.
+        grouped = {}
+        for branch in unique.values():
+            endpoint = branch.board().board_fen()
+            grouped.setdefault((branch.root_fen, endpoint), []).append(branch)
+        self.branches = []
+        for (root_fen, _), branches in grouped.items():
+            root = chess.Board(root_fen)
+            update.tie_broken |= len(branches) > 1
+            selected = select_capture_path(root, [tuple(chess.Move.from_uci(m) for m in b.moves)
+                                                    for b in branches])[0]
+            selected_uci = tuple(m.uci() for m in selected)
+            self.branches.append(next(b for b in branches if b.moves == selected_uci))
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
             self.initial_fen = self.branches[0].root_fen
@@ -324,7 +377,8 @@ class Reconstructor:
         """Atomically attach the shortest legal continuation from the saved prefix.
 
         Pending hovers are hypotheses, so search again from the verified board.
-        Equal shortest paths remain separate. A limited search changes nothing.
+        Equal shortest paths to the same endpoint are resolved by capture
+        continuity, then stable UCI ordering. A limited search changes nothing.
         """
         searcher = searcher or self.searcher
         if observed.uncertain_squares(max(.8, searcher.threshold)):

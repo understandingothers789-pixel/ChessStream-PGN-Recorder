@@ -153,7 +153,7 @@ class GameManager(GameExtras):
         The visible image gives us piece placement, but not side to move,
         castling rights, en-passant state, or counters. Match placement against
         the verified/pending endpoint, or infer a bounded continuation from
-        the verified prefix. Equal shortest histories stay as alternatives.
+        the verified prefix. Equal paths use the documented capture tiebreak.
         """
         rows=self.store.query("SELECT id,state,headers FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 1")
         if not rows:return False
@@ -169,6 +169,7 @@ class GameManager(GameExtras):
         before=len(saved.verified)
         previous_pending=[branch.moves for branch in saved.branches]
         bridged=False
+        bridge_update=None
         review=obs.placement() not in placements and obs.placement() in saved.history[:-1]
         if obs.placement() not in placements and not review:
             # A completed result, changed opponent or reset clocks is stronger
@@ -176,13 +177,16 @@ class GameManager(GameExtras):
             if (json.loads(row['headers']).get('Result','*')!='*' or state.get('terminal_message')
                     or self.pending_identity or self.clocks_recently_reset()):return False
             saved.confirmation_plies=int(self.settings.confirm_on_reply)
-            if saved.bridge_gap(obs,self.searcher()) is None:return False
+            bridge_update=saved.bridge_gap(obs,self.searcher())
+            if bridge_update is None:return False
             bridged=True
         unused_session=self.session_id
         self.recover(row["id"],persist=False)
         if bridged:
             self.rec=saved
             self._mark_inferred_gap(before,previous_pending)
+            if bridge_update.tie_broken and len(saved.verified)>before:
+                self._mark_capture_tiebreak(before)
         if unused_session!=self.session_id:
             self.store.finish_session(unused_session)
         self.last_observation=obs
@@ -197,7 +201,7 @@ class GameManager(GameExtras):
         return True
 
     def _mark_inferred_gap(self, before, previous_pending):
-        """Annotate only the common new path; ties stay as pending alternatives."""
+        """Annotate only the common new path across a multi-move gap."""
         added=tuple(self.rec.verified[before:])
         paths=[added+branch.moves for branch in self.rec.branches]
         if not paths:return
@@ -210,6 +214,17 @@ class GameManager(GameExtras):
                 'uci':uci,'comment':'Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded.'}
         self.store.audit('shortest legal gap linked',{'game_id':self.current_id,'after_ply':before,
             'paths':[list(path) for path in paths],'ambiguous':len(paths)>1})
+
+    def _mark_capture_tiebreak(self, before):
+        """Keep the deterministic choice visible in the exported PGN and audit."""
+        for offset,uci in enumerate(self.rec.verified[before:]):
+            self.inferred_moves[str(before+offset+1)]={
+                'uci':uci,
+                'comment':'Equal shortest legal paths reached this position; selected by capture continuity, then stable move order.'}
+        self.store.audit('equal shortest paths resolved',{
+            'game_id':self.current_id,'after_ply':before,
+            'selected':self.rec.verified[before:],
+            'rule':'same-square recaptures, consecutive captures, capture count, then stable UCI order'})
 
     def _visible_roots(self, obs):
         threshold=max(.80,self.settings.min_confidence)
@@ -386,6 +401,8 @@ class GameManager(GameExtras):
                     if (not self.rec.incomplete and unseen>1
                             and all(branch.board().board_fen()==obs.placement() for branch in self.rec.branches)):
                         self._mark_inferred_gap(before,previous_pending)
+                    if update.tie_broken and len(self.rec.verified)>before:
+                        self._mark_capture_tiebreak(before)
                     if update.recovered:
                         self.store.audit("transient candidate replaced",{"game_id":self.current_id,
                             "placement":obs.placement(),"reason":"clear shorter legal continuation from the verified board; no verified moves rewritten"})

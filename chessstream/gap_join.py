@@ -3,6 +3,7 @@ import io
 import chess
 import chess.pgn
 from .domain import Observation
+from .reconstruction import select_capture_path
 
 
 def join_recordings(rows, searcher):
@@ -44,9 +45,11 @@ def join_recordings(rows, searcher):
                 if trial.board_fen()==later.end().board().board_fen():valid.append(path)
         if not valid:
             raise ValueError('No legal connection was found within the configured gap limit.')
-        if len(valid)!=1:
-            raise ValueError('Several equally short connections fit these recordings. Use intervening frames or a manual correction to choose the line.')
-        for move in valid[0]:
+        # All candidates have the same shortest length and lead into the same
+        # recorded continuation. Prefer consecutive recaptures, then use a
+        # stable move-order tie-break so the exported PGN contains one line.
+        chosen = select_capture_path(source, valid)[0]
+        for move in chosen:
             end = end.add_main_variation(move)
             end.comment = 'Inferred across recording gap: shortest legal continuation; intermediate frames were not recorded.'
         if later.comment:end.comment=(end.comment+' Segment note: '+later.comment).strip()

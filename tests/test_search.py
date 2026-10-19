@@ -2,7 +2,7 @@
 import itertools
 import chess
 from chessstream.domain import Observation
-from chessstream.reconstruction import LegalSearcher,Reconstructor
+from chessstream.reconstruction import LegalSearcher,Reconstructor,select_capture_path
 
 
 def play(board,line):
@@ -69,3 +69,13 @@ def test_backward_pawn_positions_are_rejected_before_expanding_a_gap_tree():
     source=play(chess.Board(),'e4');target=play(chess.Board(),'d4')
     result=LegalSearcher(6).search(source,Observation.from_board(target))
     assert result.exhaustive and not result.paths and result.nodes==0
+
+
+def test_capture_recapture_is_the_preferred_equal_length_tiebreak():
+    source=play(chess.Board(),'e4 e6 d4 d5 e5 c5 Bb5+ Bd7 a4')
+    first=source.parse_san('cxd4')
+    after_capture=source.copy();after_capture.push(first)
+    recapture=[first,after_capture.parse_san('Qxd4')]
+    quiet=[first,after_capture.parse_san('Nc3')]
+    selected=select_capture_path(source,[quiet,recapture])
+    assert selected==[recapture]
