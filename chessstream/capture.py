@@ -70,9 +70,22 @@ def windows() -> list[tuple[int,str]]:
 _CHESS_TITLE_TERMS = {
     "chess.com": 8, "lichess": 8, "chess": 7, "hikaru": 6, "magnus": 5,
     "stockfish": 5, "grandmaster": 4, "blitz": 4, "bullet": 4, "rapid": 4,
-    "speedrun": 4, "gambit": 3, "opening": 3, "puzzle": 3, "tactics": 3,
+    "speedrun": 8, "speed": 3, "run": 2, "rating": 4, "climb": 4,
+    "elo": 3, "educational": 3, "gambit": 3, "opening": 3, "puzzle": 3, "tactics": 3,
     "chessable": 4, "titled": 2, "arena": 2,
 }
+
+
+def _chess_title_score(title: str) -> int:
+    words = set(re.findall(r"[a-z0-9]+(?:\.[a-z0-9]+)?", title.casefold()))
+    score = sum(weight for term, weight in _CHESS_TITLE_TERMS.items() if term in words)
+    if {"speed", "run"} <= words:
+        score += 8
+    if {"rating", "climb"} <= words:
+        score += 8
+    if "rating" in words and "road" in words:
+        score += 4
+    return score
 
 
 def rank_youtube_windows(options: list[tuple[int, str]]) -> list[tuple[int, str]]:
@@ -86,10 +99,17 @@ def rank_youtube_windows(options: list[tuple[int, str]]) -> list[tuple[int, str]
         words = set(re.findall(r"[a-z0-9]+(?:\.[a-z0-9]+)?", title.casefold()))
         if "youtube" not in words:
             continue
-        score = sum(weight for term, weight in _CHESS_TITLE_TERMS.items() if term in words)
+        score = _chess_title_score(title)
         ranked.append((-score, index, (hwnd, title)))
     ranked.sort(key=lambda item: (item[0], item[1]))
     return [item[2] for item in ranked]
+
+
+def rank_capture_windows(options: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Put chess-related YouTube windows first in the manual chooser too."""
+    youtube = rank_youtube_windows(options)
+    youtube_handles = {hwnd for hwnd, _ in youtube}
+    return youtube + [(hwnd, title) for hwnd, title in options if hwnd not in youtube_handles]
 
 
 def window_client(hwnd: int) -> Region:
@@ -136,9 +156,10 @@ class RecordingWorker(QThread):
     problem = Signal(str)
     region_changed = Signal(object)
 
-    def __init__(self, manager: GameManager, region: Region):
+    def __init__(self, manager: GameManager, region: Region, preview_only: bool = False):
         super().__init__()
         self.manager, self.region = manager,region
+        self.preview_only=preview_only
         self.stopping=threading.Event()
         self.paused=threading.Event()
         self.commands=queue.SimpleQueue()
@@ -197,6 +218,9 @@ class RecordingWorker(QThread):
                         try:
                             if action=="region":
                                 self.region=value;board_rect=None;last_shape=None;last_pixels=None;context_source_rect=None;self._text_detector.reset()
+                            elif action=="record":
+                                self.preview_only=False;stable_count=0
+                                self.manager.clear_position_recovery()
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
                             elif action=="correct":
@@ -266,7 +290,7 @@ class RecordingWorker(QThread):
                     if board_rect:context_source_rect=board_rect
                     if not settings.detect_board:context_source_rect=(0,0,image.shape[1],image.shape[0])
                     context_image=image;context_rect=context_source_rect
-                    context_due=(self.manager.rec is not None and (settings.read_context or settings.detect_results)
+                    context_due=(not self.preview_only and self.manager.rec is not None and (settings.read_context or settings.detect_results)
                                  and not getattr(self,'_text_failed',False) and time.monotonic()-self._text_detector.last_scan>=1)
                     if context_due and context_rect:
                         try:
@@ -297,7 +321,7 @@ class RecordingWorker(QThread):
                             from .domain import Observation
                             obs=Observation(last_obs.probabilities.copy(),orientation=last_obs.orientation,quality=last_obs.quality)
                         obs.timestamp=timestamp
-                        self.scan_context(context_image,context_rect,obs)
+                        if not self.preview_only:self.scan_context(context_image,context_rect,obs)
                         if settings.detect_board and obs.confidence<.6 and tick-last_detect>2:
                             board_rect=None
                         key=obs.placement()
@@ -325,24 +349,27 @@ class RecordingWorker(QThread):
                                         second=choose_orientation(second,self.manager.rec.board if self.manager.rec else None)
                                     elif settings.orientation=="black":second=second.flipped()
                                     if second.placement()==key:stable_count=2
-                        if stable_count>=2:
+                        if stable_count>=2 and not self.preview_only:
                             snapshot=self.manager.process(obs)
                         else:
                             snapshot={**snapshot,"status":"Waiting for position to settle"}
+                        if self.preview_only:
+                            snapshot.update(status="Previewing selected window • click Start recording",
+                                            preview_fen=obs.placement()+" w - - 0 1",preview_moves=[])
                         self.frame.emit(board_image)
                         snapshot.update(confidence=obs.confidence,orientation=obs.orientation,
                                         weakest_confidence=obs.weakest_confidence,
                                         uncertain_squares=obs.uncertain_squares(max(.80,settings.min_confidence)),
                                         recognition_mode=settings.recognition_mode)
                     else:
-                        self.manager.clear_position_recovery()
-                        self.scan_context(context_image,context_rect,None)
+                        if not self.preview_only:self.manager.clear_position_recovery()
+                        if not self.preview_only:self.scan_context(context_image,context_rect,None)
                         snapshot=self.manager.snapshot()
                         self.frame.emit(image)
                         snapshot.update(status=(self.manager.last_message if self.manager.terminal_message else "Board hidden / not found • game preserved"),confidence=0)
                     # Position-mode storage never suppresses recognition, search
                     # or evidence metadata. Ignore hidden/unstable board images.
-                    if save_due and (not position_mode or obs is not None and stable_count>=2):
+                    if not self.preview_only and save_due and (not position_mode or obs is not None and stable_count>=2):
                         store.save_screenshot(self.manager.session_id,self.manager.current_id,
                             board_image if board_image is not None else image,timestamp,
                             fen=(obs.placement() if obs else None),confidence=(obs.confidence if obs else None),
@@ -360,8 +387,11 @@ class RecordingWorker(QThread):
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
             try:
-                self.manager.finish()
-                store.finish_session(self.manager.session_id)
+                if not self.preview_only:
+                    self.manager.finish()
+                    store.finish_session(self.manager.session_id)
+                elif not self.manager.rec:
+                    store.finish_session(self.manager.session_id)
             except Exception:
                 import logging
                 logging.exception("Could not finalize recording")

@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
 from .domain import Settings, Region, atomic_text
 from .storage import Store
 from .games import GameManager
-from .capture import RecordingWorker, monitors, windows, window_client, containing_window, rank_youtube_windows
+from .capture import (RecordingWorker, monitors, windows, window_client, containing_window,
+                      rank_youtube_windows, rank_capture_windows)
 from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEditor, button, muted
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
@@ -56,7 +57,7 @@ class MainWindow(ReviewTools,QMainWindow):
     def __init__(self,root:Path):
         super().__init__();self.root=root;self.settings=Settings.load(root/"settings.json")
         self.store=Store(root);self.manager=GameManager(self.store,self.settings)
-        self.worker=None;self.tasks=[];self.overlays=[];self.latest_image=None;self.snapshot={}
+        self.worker=None;self._preview_active=False;self.tasks=[];self.overlays=[];self.latest_image=None;self.snapshot={}
         self.retention_task=None;self._closing=False
         self.region=Region(**self.settings.region) if self.settings.region else None
         self.setWindowTitle("ChessStream PGN Recorder")
@@ -74,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.1"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.2"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -155,13 +156,23 @@ class MainWindow(ReviewTools,QMainWindow):
         if hasattr(self,'capture_caption'):self.capture_caption.setText('Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary.' if self.settings.screenshot_mode=='positions' else 'Permanent screenshots: at the selected interval. Analysis frames stay temporary.')
 
     def toggle_start(self):
-        if self.worker and self.worker.isRunning():self.pause();return
+        if self.worker and self.worker.isRunning():
+            if self._preview_active:
+                self.worker.commands.put(("record",None));self._preview_active=False
+                self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True)
+                self.recording_status.setText("●  Starting recording from the live preview")
+            else:self.pause()
+            return
         if self._auto_window_enabled and not self._auto_select_youtube_window():
             # Freeze the fallback region before the user starts recording.
             self._auto_window_enabled=False;self.auto_window_timer.stop()
         if not self.region:self.draw_region();return
         if self.manager.rec and self.manager.ended:
             self.manager=GameManager(self.store,self.settings)
+        elif not self.manager.rec:
+            sessions=self.store.query('SELECT ended FROM sessions WHERE id=?',(self.manager.session_id,))
+            if sessions and sessions[0]['ended']:
+                self.manager.session_id=self.store.session()
         self.worker=RecordingWorker(self.manager,self.region);self.worker.frame.connect(self.on_frame);self.worker.update.connect(self.on_update);self.worker.problem.connect(self.error);self.worker.region_changed.connect(self.auto_region);self.worker.finished.connect(self.worker_finished);self.worker.start()
         self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True);self.recording_status.setText("●  Capturing • waiting for a stable board")
 
@@ -175,7 +186,19 @@ class MainWindow(ReviewTools,QMainWindow):
             self.worker.stop();self.stop_button.setEnabled(False);self.recording_status.setText("Saving recording…")
 
     def worker_finished(self):
-        self.start_button.setEnabled(True);self.pause_button.setEnabled(False);self.pause_button.setText("Pause");self.stop_button.setEnabled(False);self.recording_status.setText("■  Stopped • verified PGN saved");self.refresh_usage()
+        was_preview=self._preview_active;self._preview_active=False
+        self.start_button.setEnabled(True);self.pause_button.setEnabled(False);self.pause_button.setText("Pause");self.stop_button.setEnabled(False)
+        self.recording_status.setText("■  Preview stopped" if was_preview else "■  Stopped • verified PGN saved");self.refresh_usage()
+
+    def start_preview(self):
+        """Show the selected board and recognition result without saving data."""
+        if not self.region or (self.worker and self.worker.isRunning()):return
+        self._preview_active=True
+        self.worker=RecordingWorker(self.manager,self.region,preview_only=True)
+        self.worker.frame.connect(self.on_frame);self.worker.update.connect(self.on_update)
+        self.worker.problem.connect(self.error);self.worker.region_changed.connect(self.auto_region)
+        self.worker.finished.connect(self.worker_finished);self.worker.start()
+        self.recording_status.setText("◉  Live preview • no screenshots or PGN are being saved")
 
     def on_frame(self,image):
         self.latest_image=image;self.live_image.set_array(image)
@@ -216,7 +239,7 @@ class MainWindow(ReviewTools,QMainWindow):
         render_key=(display_fen,snap.get('preview_last_move') or snap.get('last_move'),snap.get('orientation'),preview_active)
         if display_fen and render_key!=getattr(self,'_last_board_render',None):
             self.live_board.show_board(display_fen,snap.get('preview_last_move') or snap.get('last_move'),snap.get('orientation')=='black',preview_active);self._last_board_render=render_key
-        elif not snap.get('fen'):
+        elif not display_fen:
             self.live_board.show_pending();self._last_board_render=None
         self.last_move_label.setText(f"{len(moves)} verified plies  •  Last: {moves[-1] if moves else '—'}" if snap.get('fen') else "Waiting for a reliable first position • recording continues")
         pending=snap.get('pending_moves',[]) if snap.get('provisional') else []
@@ -292,6 +315,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.region=region;self.settings.region=asdict(region);self.settings.save(self.root/"settings.json");self.source_label.setText(self.region_text())
         if self.worker and self.worker.isRunning():self.worker.commands.put(("region",region))
         self.close_overlays()
+        if not self.worker or not self.worker.isRunning():self.start_preview()
 
     def auto_region(self,region):
         self.region=region;self.settings.region=asdict(region);self.settings.save(self.root/'settings.json');self.source_label.setText(self.region_text()+' • reacquired after layout change')
@@ -306,7 +330,7 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def choose_window(self):
         try:
-            options=windows()
+            options=rank_capture_windows(windows())
             if not options:self.error("Window selection requires Windows. Draw a screen region on this platform.");return
             names=[name for _,name in options];name,ok=QInputDialog.getItem(self,"Track application window","Keep the selected window visible. Its position and size are followed.",names,0,False)
             if ok:self.region_selected(window_client(options[names.index(name)][0]))
@@ -324,10 +348,12 @@ class MainWindow(ReviewTools,QMainWindow):
                 continue
             self.region=region
             if hasattr(self,"source_label"):self.source_label.setText(self.region_text())
+            if self.worker and self.worker.isRunning():self.worker.commands.put(("region",region))
             self.auto_window_timer.stop()
             if hasattr(self,"statusBar"):
-                self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • board detection will find the board; click Start recording",10000)
+                self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • live preview started; click Start recording when ready",10000)
             logging.info("Automatically selected YouTube capture window hwnd=%s title=%r",hwnd,title)
+            self.start_preview()
             return True
         return False
 
@@ -547,12 +573,12 @@ class MainWindow(ReviewTools,QMainWindow):
         page,box=self.page("Screenshots, on your terms","Saved screenshots stay here until you delete them or explicitly enable a retention policy. Extra adaptive frames are never stored as images.")
         bar=QHBoxLayout();self.shot_game=QComboBox();self.shot_game.setMinimumWidth(240);self.shot_game.currentIndexChanged.connect(self.refresh_shot_list);bar.addWidget(self.shot_game);bar.addWidget(button("Refresh",self.refresh_screenshots));bar.addStretch();bar.addWidget(button("Open storage folder",lambda:QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.store.images)))));box.addLayout(bar)
         self.storage_info=muted("");box.addWidget(self.storage_info)
-        split=QSplitter(Qt.Horizontal);self.shot_list=QListWidget();self.shot_list.setIconSize(QSize(76,76));self.shot_list.currentRowChanged.connect(self.show_screenshot);split.addWidget(self.shot_list)
+        split=QSplitter(Qt.Horizontal);self.shot_list=QListWidget();self.shot_list.setIconSize(QSize(76,76));self.shot_list.setSelectionMode(QAbstractItemView.ExtendedSelection);self.shot_list.currentRowChanged.connect(self.show_screenshot);self.shot_list.itemSelectionChanged.connect(self.update_screenshot_actions);self.shot_list.setContextMenuPolicy(Qt.CustomContextMenu);self.shot_list.customContextMenuRequested.connect(self.screenshot_row_menu);split.addWidget(self.shot_list)
         detail=QWidget();dbox=QVBoxLayout(detail);self.shot_image=ImageView();self.shot_image.double_clicked.connect(self.full_screenshot);dbox.addWidget(self.shot_image,1)
         shot_detail=QHBoxLayout();self.shot_board=BoardView();self.shot_board.setFixedSize(170,170);shot_detail.addWidget(self.shot_board)
         self.shot_info=muted("Select a screenshot to review its position and move association. Double-click the image for full resolution.");self.shot_info.setTextInteractionFlags(Qt.TextSelectableByMouse);shot_detail.addWidget(self.shot_info,1);dbox.addLayout(shot_detail);split.addWidget(detail);split.setSizes([310,700]);box.addWidget(split,1)
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Timeline"));self.shot_slider=QSlider(Qt.Horizontal);self.shot_slider.valueChanged.connect(self.shot_list.setCurrentRow);timeline.addWidget(self.shot_slider,1);timeline.addWidget(button("Older screenshots",self.older_shots));box.addLayout(timeline)
-        bottom=QHBoxLayout();bottom.addWidget(button("Delete screenshots…",lambda:self.deletion_dialog(False),danger=True));bottom.addWidget(button("Schedule deletion…",lambda:self.deletion_dialog(True)));bottom.addWidget(button("Scheduled jobs…",self.scheduled_jobs));bottom.addStretch();bottom.addWidget(muted("PGNs, moves and game details are preserved"));box.addLayout(bottom)
+        bottom=QHBoxLayout();self.delete_shots_button=button("Delete selected screenshots…",self.delete_selected_screenshots,danger=True);self.delete_shots_button.setEnabled(False);bottom.addWidget(self.delete_shots_button);bottom.addWidget(button("Delete by scope…",lambda:self.deletion_dialog(False),danger=True));bottom.addWidget(button("Schedule deletion…",lambda:self.deletion_dialog(True)));bottom.addWidget(button("Scheduled jobs…",self.scheduled_jobs));bottom.addStretch();bottom.addWidget(muted("PGNs, moves and game details are preserved"));box.addLayout(bottom)
         self.shot_rows=[];self.shot_before=None
 
     def refresh_screenshots(self):
@@ -571,7 +597,41 @@ class MainWindow(ReviewTools,QMainWindow):
             except (OSError,ValueError) as exc:logging.warning('Skipping invalid screenshot path: %s',exc);pix=QPixmap()
             item.setIcon(QIcon(pix.scaled(76,76,Qt.KeepAspectRatio,Qt.SmoothTransformation)));item.setSizeHint(QSize(260,90));self.shot_list.addItem(item)
         self.shot_slider.setRange(0,max(0,len(self.shot_rows)-1))
-        if self.shot_rows:self.shot_list.setCurrentRow(0)
+        if self.shot_rows:
+            self.shot_list.setCurrentRow(0)
+            self.shot_list.clearSelection()
+        self.update_screenshot_actions()
+
+    def update_screenshot_actions(self):
+        if hasattr(self,'delete_shots_button'):
+            self.delete_shots_button.setEnabled(bool(self.shot_list.selectedItems()))
+
+    def screenshot_row_menu(self,position):
+        item=self.shot_list.itemAt(position)
+        if item is None:return
+        if not item.isSelected():
+            self.shot_list.clearSelection();item.setSelected(True);self.shot_list.setCurrentItem(item)
+        menu=QMenu(self.shot_list)
+        delete=menu.addAction('Delete selected screenshot(s)…')
+        delete.triggered.connect(self.delete_selected_screenshots)
+        menu.exec(self.shot_list.mapToGlobal(position))
+
+    def delete_selected_screenshots(self):
+        ids=self.selected_screenshot_ids()
+        if not ids:return
+        estimate=self.store.deletion_estimate({'ids':ids})
+        answer=QMessageBox.warning(self,'Delete selected screenshots?',
+            f'Permanently delete {estimate["count"]} selected screenshot files ({human_bytes(estimate["bytes"])}). '
+            'Screenshot metadata will be marked deleted. PGNs, moves, and game details will be kept.',
+            QMessageBox.Yes|QMessageBox.Cancel)
+        if answer!=QMessageBox.Yes:return
+        self.background(lambda:self.store.delete_screenshots({'ids':ids}),
+            lambda result:(self.refresh_screenshots(),self.statusBar().showMessage(
+                f'Deleted {result["count"]} selected screenshots. PGNs kept.',8000)))
+
+    def selected_screenshot_ids(self):
+        return [int(self.shot_rows[self.shot_list.row(item)]['id']) for item in self.shot_list.selectedItems()
+                if 0<=self.shot_list.row(item)<len(self.shot_rows)]
 
     def older_shots(self):
         if self.shot_rows:self.shot_before=self.shot_rows[-1]['timestamp'];self.refresh_shot_list()

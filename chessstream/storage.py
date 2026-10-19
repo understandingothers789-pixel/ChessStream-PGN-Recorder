@@ -142,11 +142,18 @@ class Store:
             return cur.lastrowid
 
     def screenshot_filter(self, scope: dict) -> tuple[str, list]:
-        unknown=set(scope)-{'game_id','session_id','before','after'}
+        unknown=set(scope)-{'game_id','session_id','before','after','ids'}
         if unknown:raise ValueError('Unknown screenshot scope: '+', '.join(sorted(unknown)))
-        if any(value is None for value in scope.values()):return '0=1',[]
-        if any(not isinstance(value,str) or not value for value in scope.values()):
-            raise ValueError('Screenshot scope values must be nonempty strings')
+        for key,value in scope.items():
+            if key=='ids':continue
+            if value is None:return '0=1',[]
+            if not isinstance(value,str) or not value:
+                raise ValueError('Screenshot scope values must be nonempty strings')
+        ids=scope.get('ids')
+        if ids is not None:
+            if not isinstance(ids,(list,tuple)) or any(type(value) is not int or value<=0 for value in ids):
+                raise ValueError('Screenshot IDs must be positive integers')
+            if not ids:return '0=1',[]
         clauses, args = ["deleted=0"], []
         # Strict allowlist; the caller cannot supply arbitrary SQL or filesystem paths.
         for key, column, op in [("game_id","game_id","="),("session_id","session_id","="),
@@ -154,6 +161,9 @@ class Store:
             if scope.get(key):
                 clauses.append(f"{column}{op}?")
                 args.append(scope[key])
+        if ids is not None:
+            clauses.append('id IN ('+','.join('?' for _ in ids)+')')
+            args.extend(ids)
         return " AND ".join(clauses), args
 
     def screenshots(self, scope=None, limit=2000):

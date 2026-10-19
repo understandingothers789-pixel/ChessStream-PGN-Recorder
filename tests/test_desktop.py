@@ -7,6 +7,7 @@ import cv2
 from chessstream.domain import Region,Observation
 from chessstream.vision import BoardDetector,ScreenshotRecognizer,choose_orientation
 from chessstream.results import LocalTextReader,extract_context,parse_end_message
+from chessstream.capture import rank_capture_windows,rank_youtube_windows
 
 FIXTURES=Path(__file__).parent/'fixtures'
 
@@ -38,9 +39,22 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     from PySide6.QtWidgets import QApplication
     import chessstream.gui as gui
     app=QApplication.instance() or QApplication([])
-    monkeypatch.setattr(gui,'windows',lambda:[(1,'Music - YouTube - Brave'),(2,'Hikaru rapid speedrun - YouTube - Brave')])
+    options=[(1,'ChessStream-PGN-Recorder-main - File Explorer'),
+             (2,'understandingothers789-pixel/ChessStream-PGN-Recorder - Brave'),
+             (3,'Music - YouTube - Brave'),
+             (4,'MASTER SLOWKARU RAPID EDUCATIONAL SPEEDRUN 1 - YouTube - Brave')]
+    monkeypatch.setattr(gui,'windows',lambda:options)
     monkeypatch.setattr(gui,'window_client',lambda hwnd:Region(0,0,1200,800,window=hwnd))
-    window=gui.MainWindow(tmp_path);assert window.region.window==2
+    monkeypatch.setattr(gui.MainWindow,'start_preview',lambda self:setattr(self,'preview_started',True))
+    window=gui.MainWindow(tmp_path);assert window.region.window==4
+    assert window.preview_started
+    assert rank_capture_windows(options)[0][0]==4
+    assert rank_youtube_windows(options)[0][0]==4
+    window.on_update({'preview_fen':chess.Board().fen(),'preview_moves':[],'confidence':.95,
+                      'weakest_confidence':.9,'uncertain_squares':[],'moves':[],
+                      'initial_fen':chess.STARTING_FEN,'orientation':'white',
+                      'status':'Previewing selected window'})
+    assert window.live_board.fen==chess.Board().fen()
     board=chess.Board();window.manager.process(Observation.from_board(board));board.push_san('e4')
     window.on_update(window.manager.process(Observation.from_board(board)))
     assert window.live_board.fen==board.fen() and window.snapshot['pending_moves']==['e4']
@@ -49,4 +63,34 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     actions={action.text():action for action in window.game_row_menu().actions()}
     assert 'Delete saved PGN file(s)…' in actions
     assert actions['Join selected recordings…'].isEnabled()
+    window.close();window.deleteLater();app.processEvents()
+
+
+def test_screenshot_browser_supports_extended_range_and_multiselect(tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QApplication,QAbstractItemView
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui,'windows',lambda:[])
+    window=gui.MainWindow(tmp_path)
+    image=cv2.imread(str(FIXTURES/'results/native-bot-start.png'))
+    for second in (1,2,3):
+        window.store.save_screenshot(window.manager.session_id,None,image,
+            f'2026-10-19T00:00:0{second}.000+00:00',None,.9)
+    window.navigate(2)
+    window.show();app.processEvents()
+    assert window.shot_list.selectionMode()==QAbstractItemView.ExtendedSelection
+    view=window.shot_list.viewport()
+    first=window.shot_list.visualItemRect(window.shot_list.item(0)).center()
+    third=window.shot_list.visualItemRect(window.shot_list.item(2)).center()
+    middle=window.shot_list.visualItemRect(window.shot_list.item(1)).center()
+    QTest.mouseClick(view,Qt.LeftButton,Qt.NoModifier,first)
+    QTest.mouseClick(view,Qt.LeftButton,Qt.ShiftModifier,third)
+    assert len(window.shot_list.selectedItems())==3
+    QTest.mouseClick(view,Qt.LeftButton,Qt.ControlModifier,middle)
+    assert {window.shot_list.row(item) for item in window.shot_list.selectedItems()}=={0,2}
+    assert window.delete_shots_button.isEnabled()
+    ids=window.selected_screenshot_ids()
+    assert len(ids)==2 and len(set(ids))==2
     window.close();window.deleteLater();app.processEvents()

@@ -148,38 +148,72 @@ class GameManager(GameExtras):
         return True
 
     def _resume_latest_game_at_position(self, obs):
-        """Reuse the newest PGN on an exact match or shortest legal bridge.
+        """Reuse a recent PGN on an exact match or shortest legal bridge.
 
         The visible image gives us piece placement, but not side to move,
         castling rights, en-passant state, or counters. Match placement against
         the verified/pending endpoint, or infer a bounded continuation from
-        the verified prefix. Equal paths use the documented capture tiebreak.
+        the verified prefix. If a live FEN checkpoint was just created, also
+        retry the preserved PGN that preceded it before keeping the split.
         """
-        rows=self.store.query("SELECT id,state,headers FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 1")
+        rows=self.store.query("SELECT id,state,headers,session_id,status,name FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 16")
         if not rows:return False
-        row=rows[0]
-        try:
-            state=json.loads(row["state"])
-            saved=Reconstructor.restore(state,self.searcher())
-            placements={saved.board.board_fen()}
-            placements.update(branch.board().board_fen() for branch in saved.branches)
-        except (KeyError,TypeError,ValueError,chess.IllegalMoveError):
-            logging.warning("Could not compare latest saved game position for automatic resume",exc_info=True)
-            return False
-        before=len(saved.verified)
-        previous_pending=[branch.moves for branch in saved.branches]
-        bridged=False
-        bridge_update=None
-        review=obs.placement() not in placements and obs.placement() in saved.history[:-1]
-        if obs.placement() not in placements and not review:
-            # A completed result, changed opponent or reset clocks is stronger
-            # evidence of a new game than a coincidental short legal bridge.
-            if (json.loads(row['headers']).get('Result','*')!='*' or state.get('terminal_message')
-                    or self.pending_identity or self.clocks_recently_reset()):return False
-            saved.confirmation_plies=int(self.settings.confirm_on_reply)
-            bridge_update=saved.bridge_gap(obs,self.searcher())
-            if bridge_update is None:return False
-            bridged=True
+        latest=rows[0]
+
+        def is_checkpoint(row):
+            try:note=json.loads(row['state']).get('note','')
+            except (TypeError,ValueError):return False
+            return 'visible midgame FEN' in note or 'visible board FEN' in note
+
+        is_fen_checkpoint=is_checkpoint(latest)
+        candidates=[]
+        active=next((row for row in rows if row['id']==self.current_id),None)
+        if active and not is_checkpoint(active):candidates.append(active)
+        if is_fen_checkpoint:
+            # Fullscreen/resize recovery can briefly produce an unmatched view
+            # and a FEN checkpoint. Reconsider the game that was preserved just
+            # before that checkpoint, since its endpoint may still bridge to
+            # the newly stable board.
+            prior=[row for row in rows if row['id']!=latest['id']
+                   and row['session_id']==latest['session_id']
+                   and row['status'].startswith('preserved')]
+            candidates.extend(row for row in prior if row['id'] not in {item['id'] for item in candidates})
+        if latest['id'] not in {row['id'] for row in candidates}:candidates.append(latest)
+
+        chosen=None
+        for row in candidates:
+            try:
+                state=json.loads(row['state'])
+                saved=Reconstructor.restore(state,self.searcher())
+                placements={saved.board.board_fen()}
+                placements.update(branch.board().board_fen() for branch in saved.branches)
+            except (KeyError,TypeError,ValueError,chess.IllegalMoveError):
+                logging.warning('Could not compare saved game %s for automatic resume',row['id'],exc_info=True)
+                continue
+            before=len(saved.verified)
+            previous_pending=[branch.moves for branch in saved.branches]
+            bridged=False
+            bridge_update=None
+            review=obs.placement() not in placements and obs.placement() in saved.history[:-1]
+            if obs.placement() not in placements and not review:
+                headers=json.loads(row['headers'])
+                # Visible identity or a declared result blocks reconnecting an
+                # unrelated game. A clock reset alone is weak during window
+                # layout changes; only let it block a standard-start reset.
+                if (headers.get('Result','*')!='*' or state.get('terminal_message')
+                        or self.pending_identity
+                        or (self.clocks_recently_reset()
+                            and obs.placement()==chess.Board().board_fen())):
+                    continue
+                saved.confirmation_plies=int(self.settings.confirm_on_reply)
+                bridge_update=saved.bridge_gap(obs,self.searcher())
+                if bridge_update is None:continue
+                bridged=True
+            chosen=(row,saved,before,previous_pending,bridged,bridge_update,review)
+            break
+        if chosen is None:return False
+        row,saved,before,previous_pending,bridged,bridge_update,review=chosen
+        latest_checkpoint_id=(latest['id'] if row['id']!=latest['id'] and is_fen_checkpoint else None)
         unused_session=self.session_id
         self.recover(row["id"],persist=False)
         if bridged:
@@ -187,6 +221,10 @@ class GameManager(GameExtras):
             self._mark_inferred_gap(before,previous_pending)
             if bridge_update.tie_broken and len(saved.verified)>before:
                 self._mark_capture_tiebreak(before)
+        if latest_checkpoint_id:
+            with self.store.transaction() as db:
+                db.execute('UPDATE games SET status=?,ended=?,updated=? WHERE id=?',
+                    (f"reconnected • see {row['name']}",utcnow(),utcnow(),latest_checkpoint_id))
         if unused_session!=self.session_id:
             self.store.finish_session(unused_session)
         self.last_observation=obs
@@ -195,8 +233,9 @@ class GameManager(GameExtras):
                            "Continued latest saved PGN • visible board matches its verified or pending position")
         self.persist()
         self.store.audit("latest PGN resumed by visible position",{
-            "game_id":self.current_id,"placement":obs.placement(),
-            "matched_pending":obs.placement()!=saved.board.board_fen(),"bridged":bridged,"review":review})
+            "game_id":self.current_id,"checkpoint_game_id":latest_checkpoint_id,
+            "placement":obs.placement(),"matched_pending":obs.placement()!=saved.board.board_fen(),
+            "bridged":bridged,"review":review})
         logging.info("Resumed latest saved PGN %s from matching visible board placement",self.current_id)
         return True
 

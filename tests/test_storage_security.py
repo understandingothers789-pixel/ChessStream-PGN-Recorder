@@ -46,3 +46,15 @@ def test_models_and_image_decoding_keep_integrity_path_and_resource_boundaries(t
     with pytest.raises(ValueError):validate_bgr_image(np.zeros((80,80),np.uint8))
     huge=np.lib.stride_tricks.as_strided(np.zeros((1,1,3),np.uint8),shape=(8193,8193,3),strides=(0,0,1),writeable=False)
     with pytest.raises(ValueError):validate_bgr_image(huge)
+
+
+def test_selected_screenshot_ids_delete_only_images_and_keep_pgn(tmp_path):
+    store=Store(tmp_path);manager=GameManager(store,Settings());board=chess.Board()
+    manager.process(Observation.from_board(board));gid,sid=manager.current_id,manager.session_id
+    image=np.zeros((80,80,3),np.uint8)
+    ids=[store.save_screenshot(sid,gid,image,f'2026-10-19T00:00:0{i}.000+00:00',board.board_fen()) for i in (1,2,3)]
+    result=store.delete_screenshots({'ids':ids[:2]})
+    assert result['count']==2 and len(store.screenshots())==1
+    assert store.game(gid) and (tmp_path/'pgn'/f'{gid}.pgn').exists()
+    with pytest.raises(ValueError):store.screenshot_filter({'ids':[0]})
+    store.close()

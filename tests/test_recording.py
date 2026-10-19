@@ -56,6 +56,26 @@ def test_live_multi_move_gap_keeps_one_game_and_hovers_remain_provisional(tmp_pa
     store.close()
 
 
+def test_live_fen_checkpoint_reconnects_to_preserved_game_after_window_transition(tmp_path):
+    store=Store(tmp_path);settings=Settings(confirm_on_reply=False)
+    manager,board=record(store,settings,'e4 e5 Nf3 Nc6 Bb5 a6')
+    original_id=manager.current_id
+    checkpoint=Observation.from_board(board)
+    manager._start_from_visible(checkpoint,'simulated fullscreen board reacquisition')
+    checkpoint_id=manager.current_id
+    assert checkpoint_id!=original_id
+    # Window/layout changes can make OCR briefly report a clock jump. A legal
+    # midgame continuation should still reconnect to the preserved PGN.
+    manager.clocks_recently_reset=lambda:True
+    board.push_san('Ba4');board.push_san('Nf6')
+    assert manager._resume_latest_game_at_position(Observation.from_board(board))
+    assert manager.current_id==original_id
+    assert manager.rec.verified[-2:]==['b5a4','g8f6']
+    assert manager.store.game(checkpoint_id)['status'].startswith('reconnected • see ')
+    assert chess.pgn.read_game(io.StringIO(manager.store.game(original_id)['pgn'])).end().board().board_fen()==board.board_fen()
+    store.close()
+
+
 def test_resumed_equal_shortest_lines_choose_one_deterministically(tmp_path):
     store=Store(tmp_path);first,board=record(store,Settings(),'');first.finish()
     for san in 'Nf3 Nf6 Nc3 Nc6'.split():board.push_san(san)
