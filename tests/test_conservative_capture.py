@@ -130,14 +130,14 @@ CASES=json.loads((Path(__file__).parent/'fixtures/confirmation/manifest.json').r
 
 
 def test_old_recording_recovers_three_missed_plies_from_real_arrow_frame(tmp_path):
-    # Match the uploaded PGN's midgame FEN and verified prefix, without adding
-    # an unwitnessed 1.e4 or assuming castling rights absent from that PGN.
+    # The visible e4 position uniquely proves the first opening move from the
+    # standard start, so the recovered prefix now includes 1.e4 as well.
     initial=chess.Board('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b - - 0 1')
     store=Store(tmp_path);old=GameManager(store,Settings(confirm_on_reply=False))
     old.process(Observation.from_board(initial));board=initial.copy()
     for san in 'e5 Nf3 Nc6 Bc4 Bc5 d4 Bxd4 c3 Bb6'.split():
         board.push_san(san);old.process(Observation.from_board(board))
-    prefix=list(old.rec.verified);assert len(prefix)==9
+    prefix=list(old.rec.verified);assert len(prefix)==10
     alternatives=[]
     for line in ['Be6 Bd4 Bc4 Bb6 Ng5 Nh6 Qf3','Ng5 Nh6 Qf3']:
         leaf=board.copy(stack=False);play(leaf,line)

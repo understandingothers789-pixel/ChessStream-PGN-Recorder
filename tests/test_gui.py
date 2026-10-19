@@ -1,6 +1,6 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QInputDialog
 from chessstream.gui import MainWindow
@@ -108,6 +108,23 @@ def test_copy_visible_fen_copies_known_and_user_selected_side_to_move(tmp_path,m
     assert chess.Board(copied).board_fen()==board.board_fen()
     assert chess.Board(copied).turn is chess.BLACK
     assert len(choices['items'])==2
+    window.close();window.deleteLater();app.processEvents()
+
+
+def test_library_can_delete_saved_pgn_without_deleting_game_data(tmp_path,monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(tmp_path);window.manager.process(Observation.from_board(chess.Board()))
+    gid=window.manager.current_id;path=tmp_path/'pgn'/f'{gid}.pgn'
+    assert path.exists()
+    window.navigate(1);window.refresh_library();window.game_table.selectRow(0)
+    seen={}
+    def confirm(parent,title,text,buttons):
+        seen['text']=text
+        return QMessageBox.Yes
+    monkeypatch.setattr(QMessageBox,'warning',confirm)
+    window.delete_saved_pgns()
+    assert not path.exists() and window.store.game(gid)
+    assert 'manually exported PGN files are kept' in seen['text']
     window.close();window.deleteLater();app.processEvents()
 
 

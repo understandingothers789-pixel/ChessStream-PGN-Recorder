@@ -12,7 +12,7 @@ import numpy as np
 import chess
 import chess.pgn
 from .domain import Settings, Observation, utcnow, atomic_text, board_labels
-from .reconstruction import Reconstructor, LegalSearcher
+from .reconstruction import Reconstructor, LegalSearcher, Branch
 from .storage import Store
 from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
@@ -116,6 +116,18 @@ class GameManager(GameExtras):
         if obs.placement() == chess.Board().board_fen():
             self._create(chess.Board(), obs.timestamp)
             return True
+        opening_moves = self._infer_short_opening(obs)
+        if opening_moves:
+            note = ("A unique shortest legal opening sequence from the standard starting position was inferred "
+                    "from the first visible board. A different earlier history that transposed to this position "
+                    "cannot be ruled out.")
+            self._create(chess.Board(), obs.timestamp, note=note)
+            self._seed_opening(opening_moves)
+            self.last_message = "Recording • inferred unique shortest opening line: " + " ".join(
+                self._san_line(chess.Board(), opening_moves))
+            self.store.audit("opening prefix inferred", {"game_id":self.current_id,
+                "moves":opening_moves,"method":"unique shortest legal path, exact visible placement"})
+            return True
         roots = []
         for turn in ["w", "b"]:
             b = chess.Board(f"{obs.placement()} {turn} - - 0 1")
@@ -135,6 +147,13 @@ class GameManager(GameExtras):
             raise ValueError("Wait for a clear, stable board before starting from its FEN")
         if obs.placement()==chess.Board().board_fen():
             return chess.Board(),None,""
+        moves=self._infer_short_opening(obs)
+        if moves:
+            sans=self._san_line(chess.Board(),moves)
+            note=("The visible position has a unique shortest legal sequence from the standard starting position: "
+                  + " ".join(sans) + ". This inferred line is included in the PGN; a different earlier history "
+                  "that transposed to the same position cannot be ruled out.")
+            return chess.Board(),None,note
         roots=[]
         for turn in ["w","b"]:
             board=chess.Board(f"{obs.placement()} {turn} - - 0 1")
@@ -146,7 +165,48 @@ class GameManager(GameExtras):
               "are not visible in the image and were not assumed.")
         return chess.Board(roots[0]),roots,note
 
+    def _infer_short_opening(self, obs):
+        """Return only a unique, exact, short legal path from the normal start.
+
+        This recovers a missed opening frame such as 1.e4 e6 without guessing
+        an arbitrary midgame history. Ambiguous, incomplete, or longer searches
+        retain the ordinary visible-FEN behavior.
+        """
+        if self.settings.initial_fen or obs.uncertain_squares(max(.80,self.settings.min_confidence)):
+            return []
+        search=LegalSearcher(max_plies=min(4,max(2,self.settings.max_plies)),
+            node_limit=min(30000,max(1000,self.settings.search_nodes)),
+            time_limit_ms=min(150,max(50,self.settings.search_ms)),
+            threshold=max(.80,self.settings.min_confidence),path_limit=2)
+        result=search.search(chess.Board(),obs)
+        if not result.exhaustive or len(result.paths)!=1 or not result.paths[0]:
+            return []
+        moves=[move.uci() for move in result.paths[0]]
+        board=chess.Board()
+        for uci in moves:
+            board.push_uci(uci)
+        return moves if obs.matches(board,max(.80,self.settings.min_confidence)) else []
+
+    @staticmethod
+    def _san_line(board, moves):
+        result=[]
+        for uci in moves:
+            move=chess.Move.from_uci(uci)
+            result.append(board.san(move));board.push(move)
+        return result
+
+    def _seed_opening(self, moves):
+        if not self.rec or not moves:return
+        for uci in moves:
+            self.rec.board.push_uci(uci)
+            self.rec.verified.append(uci)
+            self.rec.history.append(self.rec.board.board_fen())
+        self.rec.branches=[Branch(self.rec.board.fen(),())]
+        self.rec.status="recording • opening reconstructed from visible position"
+        self._persisted_fingerprint=None
+
     def _start_from_visible(self, obs, reason, since=None):
+        opening_moves=self._infer_short_opening(obs)
         board,roots,note=self._visible_roots(obs)
         previous_id=self.current_id
         if self.rec:
@@ -155,6 +215,7 @@ class GameManager(GameExtras):
         self.rec=None
         self.reset_candidate=None
         self._create(board,obs.timestamp,roots,note)
+        self._seed_opening(opening_moves)
         self.last_message="New PGN started from the visible board position"
         self.clear_position_recovery()
         self.store.audit("visible FEN checkpoint",{"previous_game_id":previous_id,"game_id":self.current_id,

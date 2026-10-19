@@ -83,7 +83,7 @@ After a result, known earlier positions can anchor automatic review variations f
 
 ## Starting in the middle
 
-You can begin at a valid midgame position. The app records from that position and infers the turn from subsequent evidence under its shortest-gap assumption. Earlier moves are unavailable. It assumes no castling rights or en passant target because those facts are not visible in a screenshot. If known, enter the exact full FEN in Settings **before** beginning a new recording. This includes turn, rights, target and counters.
+You can begin at a valid midgame position. The app records from that position and infers the turn from subsequent evidence under its shortest-gap assumption. When the visible position has one exact, legal path of up to four plies from the standard starting position, ChessStream includes that uniquely reconstructed opening instead of starting from a midgame FEN. If the path is ambiguous or the bounded search cannot prove uniqueness, earlier moves are left out and the game starts from a visible FEN. It assumes no castling rights or en passant target for a midgame FEN because those facts are not visible in a screenshot. If known, enter the exact full FEN in Settings **before** beginning a new recording. This includes turn, rights, target and counters.
 
 PGN export uses standard `SetUp` and `FEN` headers. A game awaiting initial-turn inference is provisional and annotated. Use **Copy visible FEN** to send the captured board to Nibbler or another tool. If the board matches a known game position, the app preserves its known turn and rights; otherwise it asks whether White or Black moves and assumes no castling rights or en passant target. The FEN begins the new PGN; moves from before that position are not reconstructed.
 
@@ -118,7 +118,7 @@ The default is **keep indefinitely**. Disk usage and free space appear in the ap
 
 Settings → Automatically delete after enables an explicit age policy. Zero means indefinite. Enabling a positive period requires confirmation and applies to already-saved older screenshots as well as future ones.
 
-Game library → **Delete game data** is independent. It removes the selected game's database record, move history and internal PGN autosave. Screenshots are kept and become unassigned. Exports saved elsewhere are kept. Stop an active recording before deleting its game data.
+Game library → **Delete saved PGN files** removes the selected game's internal autosaved `.pgn` file(s) and matching per-game copies in the configured automatic-export folder. Game details, move history, screenshots and manually exported PGNs remain. The app can recreate an automatic save if you later resume or change that game. **Delete game data** removes the selected game's database record, move history and internal PGN autosave; screenshots are kept and become unassigned. Stop an active recording before either deletion.
 
 ## Diagnostics and saved logs
 

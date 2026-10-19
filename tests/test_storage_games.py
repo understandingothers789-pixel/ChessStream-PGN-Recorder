@@ -43,6 +43,22 @@ def test_filters_dedupe_and_delete_data_only(tmp_path):
     s.close()
 
 
+def test_delete_saved_pgn_file_keeps_game_history_and_blocks_unknown_ids(tmp_path):
+    import pytest
+    export_dir=tmp_path/'exports';export_dir.mkdir()
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False,export_dir=str(export_dir)))
+    m.process(Observation.from_board(chess.Board()));gid=m.current_id
+    pgn=tmp_path/'pgn'/f'{gid}.pgn'
+    exported=export_dir/f'{gid}.pgn'
+    assert pgn.exists() and exported.exists() and s.game(gid)
+    assert s.delete_pgn_files([gid],str(export_dir))==[gid]
+    assert not pgn.exists() and not exported.exists() and s.game(gid)
+    assert s.game(gid)['pgn']
+    assert s.delete_pgn_files([gid],str(export_dir))==[]
+    with pytest.raises(ValueError):s.delete_pgn_files(['../external'])
+    s.close()
+
+
 def test_midgame_setup_and_side_inference(tmp_path):
     s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board()
     for san in 'e4 e5 Nf3 Nc6'.split():b.push_san(san)
@@ -146,7 +162,8 @@ def test_one_click_initial_orientation_correction_repairs_provisional_fen(tmp_pa
 
 
 def test_finishing_game_preserves_uncertainty_in_library_status(tmp_path):
-    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board();b.push_san('e4');b.push_san('e5')
+    s=Store(tmp_path);m=GameManager(s,Settings(confirm_on_reply=False));b=chess.Board()
+    for san in 'Nf3 Nf6 Nc3 Nc6'.split():b.push_san(san)
     m.process(Observation.from_board(b));assert len(m.rec.branches)==2
     m.headers['Result']='1-0';m.finish()
     game=s.game(m.current_id)

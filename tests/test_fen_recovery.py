@@ -133,6 +133,37 @@ def test_valid_capture_region_and_initial_fen_survive_settings_load(tmp_path):
                              'window':0,'offset_x':10,'offset_y':0,'tracking_window':0}
 
 
+def test_unique_two_ply_opening_is_backfilled_into_pgn_instead_of_midgame_fen(tmp_path):
+    store=Store(tmp_path)
+    manager=GameManager(store,Settings(confirm_on_reply=False))
+    visible=play(chess.Board(),'e4 e6')
+    manager.process(Observation.from_board(visible))
+    assert manager.rec.initial_fen==chess.STARTING_FEN
+    assert manager.rec.verified==['e2e4','e7e6']
+    visible.push_san('d4');manager.process(Observation.from_board(visible))
+    visible.push_san('d5');manager.process(Observation.from_board(visible))
+    row=store.game(manager.current_id)
+    game=chess.pgn.read_game(io.StringIO(row['pgn']))
+    assert not game.errors
+    assert 'FEN' not in game.headers and 'SetUp' not in game.headers
+    board=game.board();sans=[]
+    for move in game.mainline_moves():sans.append(board.san(move));board.push(move)
+    assert sans==['e4','e6','d4','d5']
+    assert 'unique shortest legal opening sequence' in game.comment
+    store.close()
+
+
+def test_ambiguous_opening_ancestry_remains_a_visible_fen(tmp_path):
+    store=Store(tmp_path);manager=GameManager(store,Settings(confirm_on_reply=False))
+    visible=play(chess.Board(),'Nf3 Nf6 Nc3 Nc6')
+    manager.process(Observation.from_board(visible))
+    assert manager.rec.initial_fen!=chess.STARTING_FEN
+    assert manager.rec.verified==[]
+    row=store.game(manager.current_id);game=chess.pgn.read_game(io.StringIO(row['pgn']))
+    assert game.headers['SetUp']=='1' and not list(game.mainline_moves())
+    store.close()
+
+
 def test_confident_but_invalid_popup_position_does_not_crash_automatic_recovery(tmp_path):
     store=Store(tmp_path);manager=GameManager(store,Settings(max_plies=1,confirm_on_reply=False,unresolved_fen_seconds=1,new_game_change_seconds=1))
     now=[10.];manager._clock=lambda:now[0]

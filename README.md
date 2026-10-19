@@ -2,7 +2,7 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.5.4 adds safer settings recovery.** If one saved preference is invalid, ChessStream now resets that setting alone instead of discarding all preferences or failing to launch. Invalid saved FENs and capture regions are safely ignored. Version 1.5.3 added per-square provisional ranking and better review/new-game detection. See the [release notes](docs/RELEASE-v1.5.4.md), [security audit](SECURITY.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and measured [native screenshot checks](docs/context-v1.4.json).
+**Version 1.5.5 infers clearly identifiable opening moves and adds saved-PGN deletion.** If recording begins shortly after a unique, legal opening sequence, ChessStream can include the shortest exact line from the standard starting position instead of exporting an unnecessarily midgame FEN. This is an inference from the visible board; a different earlier history that transposed to the same position cannot be ruled out. Ambiguous histories remain FEN-based. The game library can also delete app-saved PGN files while preserving game data. See the [release notes](docs/RELEASE-v1.5.5.md), [security audit](SECURITY.md), [known limitations](docs/KNOWN_LIMITATIONS.md), and measured [native screenshot checks](docs/context-v1.4.json).
 
 ![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 

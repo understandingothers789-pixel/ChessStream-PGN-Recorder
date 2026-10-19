@@ -73,7 +73,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.4"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.5"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -366,6 +366,7 @@ class MainWindow(ReviewTools,QMainWindow):
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Review ply"));self.review_slider=QSlider(Qt.Horizontal);self.review_slider.valueChanged.connect(self.review_game);timeline.addWidget(self.review_slider,1);self.review_label=muted("0");timeline.addWidget(self.review_label);box.addLayout(timeline)
         actions=QHBoxLayout()
         for name,fn in [("Rename / edit headers",self.edit_game),("Copy PGN",self.copy_selected),("Resume recording",self.resume_game),("Screenshots",self.game_screenshots)]:actions.addWidget(button(name,fn))
+        actions.addWidget(button("Delete saved PGN files…",self.delete_saved_pgns,danger=True))
         actions.addStretch();actions.addWidget(button("Delete game data…",self.delete_games,danger=True));box.addLayout(actions)
         variations=QHBoxLayout()
         for label,fn in [('Add alternative line…',self.add_review_variation),('Edit comment…',self.edit_review_comment),('Remove alternative line',self.delete_review_variation)]:variations.addWidget(button(label,fn))
@@ -437,6 +438,23 @@ class MainWindow(ReviewTools,QMainWindow):
             self.store.delete_game(g['id'])
             if g['id']==self.manager.current_id:self.manager=GameManager(self.store,self.settings)
         self.refresh_library()
+
+    def delete_saved_pgns(self):
+        selected=self.selected_games()
+        if not selected:return
+        if any(g['id']==self.manager.current_id for g in selected) and self.worker and self.worker.isRunning():
+            self.error("Stop capture before deleting the active game's PGN file.");return
+        count=len(selected)
+        text=(f"Delete the app-saved PGN file(s) for {count} selected game(s)?\n\n"
+              "This removes ChessStream's local autosave and matching per-game files in the configured automatic-export folder. "
+              "Game details, move history, screenshots, and manually exported PGN files are kept. "
+              "The app can recreate an automatic save if you later resume or change a game.")
+        if QMessageBox.warning(self,"Delete saved PGN files?",text,
+                QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
+        try:
+            deleted=self.store.delete_pgn_files([g['id'] for g in selected],self.settings.export_dir)
+            self.statusBar().showMessage(f"Deleted {len(deleted)} saved PGN file(s); game records kept",8000)
+        except Exception as e:self.error(str(e))
 
     def write_export(self,rows):
         if not rows:self.error("No games selected or recorded yet.");return

@@ -256,6 +256,32 @@ class Store:
         (self.root/"pgn"/(gid+".pgn")).unlink(missing_ok=True)
         self.audit("delete game data", {"game_id":gid,"screenshots":"kept"})
 
+    def delete_pgn_files(self, game_ids, export_dir=""):
+        """Delete selected app-managed PGN copies; keep game records intact."""
+        pgn_dir=(self.root/"pgn").resolve()
+        pgn_dir.mkdir(parents=True,exist_ok=True)
+        export_root=Path(export_dir).expanduser().resolve() if export_dir else None
+        deleted=[]
+        for gid in dict.fromkeys(game_ids):
+            if not isinstance(gid,str) or len(gid)!=32:
+                raise ValueError("Invalid game ID")
+            try:
+                if uuid.UUID(hex=gid).hex!=gid:raise ValueError
+            except (ValueError,AttributeError):
+                raise ValueError("Invalid game ID") from None
+            if not self.game(gid):
+                raise ValueError("The selected game no longer exists")
+            paths=[(pgn_dir/(gid+".pgn"),pgn_dir)]
+            if export_root:paths.append((export_root/(gid+".pgn"),export_root))
+            removed=False
+            for path,allowed_root in paths:
+                if path.resolve().parent!=allowed_root:
+                    raise ValueError("PGN path is outside its app-managed PGN folder")
+                if path.is_file():path.unlink();removed=True
+            if removed:deleted.append(gid)
+        self.audit("delete saved PGN files",{"game_ids":deleted,"game_data":"kept"})
+        return deleted
+
     def close(self):
         with self.lock:
             self.db.close()
