@@ -27,6 +27,7 @@ from .capture import RecordingWorker, monitors, windows, window_client, containi
 from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEditor, button, muted
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
+from .model_security import import_custom_model, validate_custom_model
 
 
 def human_bytes(n):
@@ -72,7 +73,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.0"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.1"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -479,7 +480,9 @@ class MainWindow(ReviewTools,QMainWindow):
         self.shot_rows=self.store.screenshots(scope,limit=200);self.shot_list.clear()
         for s in self.shot_rows:
             item=QListWidgetItem(f"#{s['sequence']:05d}   {local_time(s['timestamp'])}\nSimilarity: {s['confidence']*100:.1f}%" if s['confidence'] is not None else f"#{s['sequence']:05d}   {local_time(s['timestamp'])}\nBoard not found")
-            pix=QPixmap(str(self.root/s['path']));item.setIcon(QIcon(pix.scaled(76,76,Qt.KeepAspectRatio,Qt.SmoothTransformation)));item.setSizeHint(QSize(260,90));self.shot_list.addItem(item)
+            try:pix=QPixmap(str(self.store.screenshot_file(s['path'])))
+            except (OSError,ValueError) as exc:logging.warning('Skipping invalid screenshot path: %s',exc);pix=QPixmap()
+            item.setIcon(QIcon(pix.scaled(76,76,Qt.KeepAspectRatio,Qt.SmoothTransformation)));item.setSizeHint(QSize(260,90));self.shot_list.addItem(item)
         self.shot_slider.setRange(0,max(0,len(self.shot_rows)-1))
         if self.shot_rows:self.shot_list.setCurrentRow(0)
 
@@ -488,7 +491,10 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def show_screenshot(self,index):
         if index<0 or index>=len(self.shot_rows):return
-        s=self.shot_rows[index];self.shot_image.set_file(self.root/s['path']);self.shot_slider.blockSignals(True);self.shot_slider.setValue(index);self.shot_slider.blockSignals(False)
+        s=self.shot_rows[index]
+        try:self.shot_image.set_file(self.store.screenshot_file(s['path']))
+        except (OSError,ValueError) as exc:self.error(f"Could not open saved screenshot: {exc}");return
+        self.shot_slider.blockSignals(True);self.shot_slider.setValue(index);self.shot_slider.blockSignals(False)
         g=self.store.game(s['game_id']) if s['game_id'] else None
         text=f"{local_time(s['timestamp'])}   •   Sequence {s['sequence']}   •   {g['name'] if g else 'Unassigned / game data deleted'}\n"
         text+=f"Observed placement: {s['fen'] or 'Unavailable'}\nVerified ply at capture: {s['move_ply'] or 0}   •   {human_bytes(s['bytes'])}\n{self.root/s['path']}"
@@ -503,7 +509,9 @@ class MainWindow(ReviewTools,QMainWindow):
     def full_screenshot(self):
         i=self.shot_list.currentRow()
         if i<0 or i>=len(self.shot_rows):return
-        d=QDialog(self);d.setWindowTitle('Full-resolution screenshot');d.resize(1000,850);layout=QVBoxLayout(d);scroll=QScrollArea();label=QLabel();label.setPixmap(QPixmap(str(self.root/self.shot_rows[i]['path'])));scroll.setWidget(label);layout.addWidget(scroll);layout.addWidget(muted('Original image, one image pixel per display pixel. Scroll to inspect.'));d.exec()
+        try:path=self.store.screenshot_file(self.shot_rows[i]['path'])
+        except (OSError,ValueError) as exc:self.error(f"Could not open saved screenshot: {exc}");return
+        d=QDialog(self);d.setWindowTitle('Full-resolution screenshot');d.resize(1000,850);layout=QVBoxLayout(d);scroll=QScrollArea();label=QLabel();label.setPixmap(QPixmap(str(path)));scroll.setWidget(label);layout.addWidget(scroll);layout.addWidget(muted('Original image, one image pixel per display pixel. Scroll to inspect.'));d.exec()
 
     def deletion_dialog(self,scheduled):
         d=QDialog(self);d.setWindowTitle("Schedule screenshot deletion" if scheduled else "Delete screenshots");d.setMinimumWidth(530);form=QFormLayout(d)
@@ -579,8 +587,8 @@ class MainWindow(ReviewTools,QMainWindow):
         self.ms=QSpinBox();self.ms.setRange(50,5000);self.ms.setValue(self.settings.search_ms);self.ms.setSuffix(' ms');capture.addRow('Search time / hypothesis',self.ms)
         self.threshold=QDoubleSpinBox();self.threshold.setRange(.5,.99);self.threshold.setSingleStep(.05);self.threshold.setValue(self.settings.min_confidence);capture.addRow('Minimum square score',self.threshold)
         self.initialfen=QLineEdit(self.settings.initial_fen);self.initialfen.setPlaceholderText('Optional full FEN for the first position');capture.addRow('Known initial position',self.initialfen)
-        self.model=QLineEdit(self.settings.onnx_model);self.model.setPlaceholderText('Optional compatible RGB/logit model; leave blank to use the bundled model');capture.addRow('Custom ONNX model path',self.model)
-        capture.addRow(muted('Models must follow the documented 13-class contract. Midgame screenshots cannot prove castling rights or en passant history; an exact FEN supplies them. Larger search limits use more CPU.'))
+        self.model=QLineEdit(self.settings.onnx_model);self.model.setPlaceholderText('Optional compatible RGB/logit model; leave blank to use the bundled model');model_row=QWidget();model_box=QHBoxLayout(model_row);model_box.setContentsMargins(0,0,0,0);model_box.addWidget(self.model);model_box.addWidget(button('Import model…',self.browse_model));capture.addRow('Custom ONNX model',model_row)
+        capture.addRow(muted('Imported models are copied into the app-managed models folder, separate from screenshots and settings. Only load models you trust. Models must follow the documented 13-class contract.'))
         storage=tab('Storage & saving')
         self.dedupe=QCheckBox('Skip saving byte-identical images (recognition still runs)');self.dedupe.setChecked(self.settings.deduplicate);storage.addRow('Optional deduplication',self.dedupe)
         self.retention=QSpinBox();self.retention.setRange(0,36500);self.retention.setValue(self.settings.retention_days);self.retention.setSpecialValueText('Keep indefinitely');self.retention.setSuffix(' days');storage.addRow('Automatically delete after',self.retention)
@@ -596,12 +604,22 @@ class MainWindow(ReviewTools,QMainWindow):
         directory=QFileDialog.getExistingDirectory(self,'Automatic export directory',self.export_path.text())
         if directory:self.export_path.setText(directory)
 
+    def browse_model(self):
+        source,_=QFileDialog.getOpenFileName(self,'Import a trusted ONNX model',self.model.text(),'ONNX models (*.onnx)')
+        if not source:return
+        try:self.model.setText(str(import_custom_model(source,self.root/'models')))
+        except (OSError,ValueError,RuntimeError) as exc:self.error(str(exc))
+
     def save_settings(self):
         try:
             if self.initialfen.text().strip():
                 b=chess.Board(self.initialfen.text().strip())
                 if not b.is_valid():raise ValueError('Initial FEN must be a valid chess position')
-            if self.model.text().strip() and not Path(self.model.text().strip()).is_file():raise ValueError('ONNX model file does not exist')
+            if self.model.text().strip():
+                source=Path(self.model.text().strip())
+                try:validate_custom_model(source,self.root/'models')
+                except ValueError:source=import_custom_model(source,self.root/'models')
+                self.model.setText(str(source))
             days=self.retention.value()
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return

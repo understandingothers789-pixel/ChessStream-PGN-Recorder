@@ -5,6 +5,7 @@ import re
 import time
 import cv2
 import numpy as np
+from .model_security import validate_bgr_image, verify_bundled_model
 
 
 @dataclass(frozen=True)
@@ -62,12 +63,14 @@ class LocalTextReader:
         import onnxruntime as ort
         root=Path(__file__).parent/'assets/models'
         options=ort.SessionOptions();options.intra_op_num_threads=2;options.inter_op_num_threads=1
-        self.det=ort.InferenceSession(str(root/'result-text-det.onnx'),options,providers=['CPUExecutionProvider'])
-        self.rec=ort.InferenceSession(str(root/'result-text-rec.onnx'),options,providers=['CPUExecutionProvider'])
+        detector=verify_bundled_model(root/'result-text-det.onnx',root)
+        recognizer=verify_bundled_model(root/'result-text-rec.onnx',root)
+        self.det=ort.InferenceSession(str(detector),options,providers=['CPUExecutionProvider'])
+        self.rec=ort.InferenceSession(str(recognizer),options,providers=['CPUExecutionProvider'])
         self.characters=['blank']+self.rec.get_modelmeta().custom_metadata_map['character'].splitlines()+[' ']
 
     def read(self,image):
-        h,w=image.shape[:2];scale=min(1.5,736/max(h,w))
+        h,w=validate_bgr_image(image);scale=min(1.5,736/max(h,w))
         rw=max(32,round(w*scale/32)*32);rh=max(32,round(h*scale/32)*32)
         resized=cv2.resize(image,(rw,rh))
         data=(resized.astype(np.float32)/127.5-1).transpose(2,0,1)[None]

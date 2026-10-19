@@ -23,6 +23,8 @@ The default bundled screenshot model supports varied shaded pieces, board textur
 
 Choose **Flip orientation** if automatic detection is wrong. Settings can lock White/Black at the bottom or restore Auto. Automatic mode compares both orientations to the existing position and handles a board flip without adding chess moves.
 
+An optional compatible model can be added in **Settings → Custom ONNX model → Import model**. ChessStream copies it into the private app data `models` folder, separate from screenshots and settings. Only use models you trust. Imported custom models must be self-contained ONNX files under 512 MiB.
+
 ## Capture options
 
 **Monitor** searches a whole selected monitor; **Window** follows a visible application's client area on Windows. Tight regions reduce work. A Windows drawn region remembers its containing window so the worker can attempt full-window reacquisition after a move/resize/fullscreen change.

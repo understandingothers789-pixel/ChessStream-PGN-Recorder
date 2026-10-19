@@ -5,18 +5,23 @@ Legality and repeated stable evidence are required by the recorder as well.
 """
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 import math
+import os
+import tempfile
+import zipfile
 import cv2
 import chess
 import numpy as np
 from .domain import LABELS, Observation
+from .model_security import validate_bgr_image, validate_custom_model, verify_bundled_model
 
 ASSETS = Path(__file__).parent / "assets"
 
 
 def image_to_squares(image: np.ndarray) -> list[np.ndarray]:
-    h, w = image.shape[:2]
+    h, w = validate_bgr_image(image)
     if min(h, w) < 80:
         raise ValueError("Board must be at least 80 pixels across")
     return [image[round(r*h/8):round((r+1)*h/8), round(c*w/8):round((c+1)*w/8)]
@@ -48,7 +53,7 @@ def checker_score(image: np.ndarray) -> float:
 class BoardDetector:
     """Find axis-aligned 2D stream boards. No camera/perspective assumptions."""
     def detect(self, image: np.ndarray) -> tuple[tuple[int, int, int, int] | None, float]:
-        h, w = image.shape[:2]
+        h, w = validate_bgr_image(image)
         factor = min(1.0, 800 / max(h, w))
         small = cv2.resize(image, None, fx=factor, fy=factor) if factor < 1 else image
         sh, sw = small.shape[:2]
@@ -136,9 +141,9 @@ class TemplateRecognizer:
         rgba, labels = [], []
         for bank in banks:
             if bank.exists():
-                with np.load(bank, allow_pickle=False) as data:
-                    rgba.extend(data["rgba"])
-                    labels.extend(data["labels"])
+                rgba_part, labels_part = self._load_bank(bank)
+                rgba.extend(rgba_part)
+                labels.extend(labels_part)
         if not rgba:
             raise RuntimeError("Piece template bank is missing. Run scripts/fetch_assets.py.")
         self.rgba = np.asarray(rgba, dtype=np.float32) / 255
@@ -148,6 +153,38 @@ class TemplateRecognizer:
         self.weight = np.ones((32, 32), dtype=np.float32)
         self.weight[:2] = self.weight[-2:] = .08
         self.weight[:, :2] = self.weight[:, -2:] = .08
+
+    @staticmethod
+    def _load_bank(path: Path) -> tuple[np.ndarray, np.ndarray]:
+        """Load a non-pickle NPZ only after bounding its ZIP expansion."""
+        if path.is_symlink():
+            raise ValueError("Template bank must not be a symbolic link")
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file() or resolved.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("Template bank is missing or exceeds the 8 MiB limit")
+        with resolved.open("rb") as stream:
+            payload = stream.read(8 * 1024 * 1024 + 1)
+        if len(payload) > 8 * 1024 * 1024:
+            raise ValueError("Template bank exceeds the 8 MiB limit")
+        try:
+            with zipfile.ZipFile(BytesIO(payload)) as archive:
+                infos = archive.infolist()
+                sizes = {item.filename: item.file_size for item in infos}
+                if len(infos) != 2 or set(sizes) != {"rgba.npy", "labels.npy"}:
+                    raise ValueError("Template bank contains unexpected entries")
+                if sum(sizes.values()) > 8 * 1024 * 1024 or max(sizes.values(), default=0) > 8 * 1024 * 1024:
+                    raise ValueError("Template bank expands beyond the 8 MiB limit")
+                rgba = np.load(BytesIO(archive.read("rgba.npy")), allow_pickle=False)
+                labels = np.load(BytesIO(archive.read("labels.npy")), allow_pickle=False)
+        except (OSError, zipfile.BadZipFile, KeyError) as exc:
+            raise ValueError(f"Invalid template bank: {resolved.name}") from exc
+        if (rgba.dtype != np.uint8 or rgba.ndim != 4 or rgba.shape[1:] != (32, 32, 4)
+                or not 1 <= rgba.shape[0] <= 1024):
+            raise ValueError("Template bank RGBA array has an unsupported shape or type")
+        if (labels.ndim != 1 or labels.shape[0] != rgba.shape[0]
+                or labels.dtype.kind not in "iu" or np.any(labels < 0) or np.any(labels >= len(LABELS))):
+            raise ValueError("Template bank labels are invalid")
+        return rgba, labels
 
     def classify(self, tiles: list[np.ndarray]) -> np.ndarray:
         results = []
@@ -203,21 +240,29 @@ class TemplateRecognizer:
             samples.append(rgba)
             labels.append(LABELS.index(piece.symbol()))
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.with_suffix(".tmp").open("wb") as f:
-            np.savez_compressed(f, rgba=np.asarray(samples), labels=np.asarray(labels))
-        path.with_suffix(".tmp").replace(path)
+        fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".templates-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                np.savez_compressed(f, rgba=np.asarray(samples), labels=np.asarray(labels))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_name, path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
 
 
 class OnnxRecognizer:
     """User-supplied model contract: float32 RGB [N,3,H,W], 13 logits (LABELS order)."""
-    def __init__(self, path: str):
+    def __init__(self, path: str, trusted_root: Path | None = None):
         try:
             import onnxruntime as ort
         except ImportError as e:
             raise RuntimeError("Install the 'onnx' extra to use an ONNX model") from e
+        path = validate_custom_model(path, trusted_root)
         options = ort.SessionOptions()
         options.intra_op_num_threads = 2
-        self.session = ort.InferenceSession(path, sess_options=options, providers=["CPUExecutionProvider"])
+        self.session = ort.InferenceSession(str(path), sess_options=options, providers=["CPUExecutionProvider"])
         inp = self.session.get_inputs()[0]
         self.name = inp.name
         self.h = inp.shape[2] if isinstance(inp.shape[2], int) else 64
@@ -255,14 +300,16 @@ class ScreenshotRecognizer:
         options = ort.SessionOptions()
         options.intra_op_num_threads = 2
         options.inter_op_num_threads = 1
+        model = verify_bundled_model(ASSETS / "models/chess-tiles-v2.onnx", ASSETS / "models")
         self.session = ort.InferenceSession(
-            str(ASSETS / "models/chess-tiles-v2.onnx"), sess_options=options,
+            str(model), sess_options=options,
             providers=["CPUExecutionProvider"])
         self.order = [self.MODEL_LABELS.index("1" if c == "." else c) for c in LABELS]
 
     @staticmethod
     def tiles(image: np.ndarray) -> np.ndarray:
-        if min(image.shape[:2]) < 80:
+        h, w = validate_bgr_image(image, allow_float=True)
+        if min(h, w) < 80:
             raise ValueError("Board must be at least 80 pixels across")
         # Integer cvtColor rounds before resizing; retain the model's float luma.
         gray = image.astype(np.float32) @ np.array([.114, .587, .299], np.float32)
@@ -291,9 +338,13 @@ class ScreenshotRecognizer:
         return obs.flipped() if orientation == "black" else obs
 
 
-def create_recognizer(settings, custom_bank: Path | None = None):
+def create_recognizer(settings, custom_bank: Path | None = None, custom_model_root: Path | None = None):
     if settings.onnx_model:
-        return OnnxRecognizer(settings.onnx_model)
+        if custom_model_root is None and custom_bank is not None:
+            custom_model_root = custom_bank.parent / "models"
+        if custom_model_root is None:
+            raise ValueError("A trusted app model folder is required for custom ONNX inference")
+        return OnnxRecognizer(settings.onnx_model, custom_model_root)
     if settings.recognition_mode == "calibrated":
         if not custom_bank or not custom_bank.exists():
             raise ValueError("No calibrated piece set exists. Select the bundled screenshot model in Settings.")

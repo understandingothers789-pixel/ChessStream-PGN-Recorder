@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from pathlib import PureWindowsPath
 import hashlib
 import json
 import logging
@@ -153,6 +154,33 @@ class Store:
     def screenshots(self, scope=None, limit=2000):
         where,args = self.screenshot_filter(scope or {})
         return self.query(f"SELECT * FROM screenshots WHERE {where} ORDER BY timestamp DESC LIMIT ?", (*args,limit))
+
+    def screenshot_file(self, relative: str) -> Path:
+        """Resolve an app-created PNG inside screenshot storage before UI decoding."""
+        if not isinstance(relative, str) or not relative:
+            raise ValueError("Screenshot path is invalid")
+        rel = Path(relative)
+        windows_rel = PureWindowsPath(relative)
+        if (rel.is_absolute() or windows_rel.is_absolute() or windows_rel.drive
+                or ".." in rel.parts or ".." in windows_rel.parts):
+            raise ValueError("Screenshot path must stay inside screenshot storage")
+        candidate = self.root / rel
+        if candidate.is_symlink():
+            raise ValueError("Screenshot must not be a symbolic link")
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_relative_to(self.images.resolve(strict=True)) or not resolved.is_file():
+            raise ValueError("Screenshot path must stay inside screenshot storage")
+        if resolved.stat().st_size < 24 or resolved.stat().st_size > 256 * 1024 * 1024:
+            raise ValueError("Screenshot file size is outside the supported range")
+        with resolved.open("rb") as stream:
+            header = stream.read(24)
+        if header[:8] != b"\x89PNG\r\n\x1a\n" or header[8:16] != b"\x00\x00\x00\rIHDR":
+            raise ValueError("Saved screenshot is not a valid PNG")
+        width = int.from_bytes(header[16:20], "big")
+        height = int.from_bytes(header[20:24], "big")
+        if width < 1 or height < 1 or max(width, height) > 16_384 or width * height > 64 * 1024 * 1024:
+            raise ValueError("Screenshot dimensions exceed the 64-megapixel limit")
+        return resolved
 
     def deletion_estimate(self, scope):
         where,args = self.screenshot_filter(scope)
