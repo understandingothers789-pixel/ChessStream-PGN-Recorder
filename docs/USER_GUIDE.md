@@ -97,6 +97,8 @@ A single legal move waiting for the opponent remains provisional and is excluded
 
 Select a game in Game library to see its PGN and board. Drag **Review ply** to step through its verified moves. Ctrl/Shift-click rows for multi-selection.
 
+Right-click a game row for quick **Copy PGN**, **Export selected**, and **Delete saved PGN file(s)** actions. If you right-click a row outside the current selection, that row becomes the selection. Right-clicking a row already in a multi-selection keeps the selection, so the action can apply to all selected games.
+
 - **Export selected**, **Export entire session**, and **Export all** write standard multi-game PGN files.
 - The live page exports or copies the current game.
 - **Rename / edit headers** edits players, ratings, event, site, date, time control and result. Keep unknown players as `Unknown`; the app does not identify streamers.

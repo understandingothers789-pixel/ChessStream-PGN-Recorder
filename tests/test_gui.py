@@ -128,6 +128,18 @@ def test_library_can_delete_saved_pgn_without_deleting_game_data(tmp_path,monkey
     window.close();window.deleteLater();app.processEvents()
 
 
+def test_game_row_context_menu_offers_pgn_deletion(tmp_path,monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(tmp_path);window.manager.process(Observation.from_board(chess.Board()))
+    window.navigate(1);window.refresh_library()
+    row_item=window.game_table.item(0,0)
+    window.select_context_game(0)
+    menu=window.game_row_menu()
+    assert 'Delete saved PGN file(s)…' in [action.text() for action in menu.actions()]
+    assert window.selected_games()[0]['id']==window.manager.current_id
+    window.close();window.deleteLater();app.processEvents()
+
+
 def test_pgn_variation_viewer_navigates_alternative_without_changing_mainline(tmp_path):
     app=QApplication.instance() or QApplication([])
     window=MainWindow(tmp_path);board=chess.Board();window.manager.process(Observation.from_board(board))

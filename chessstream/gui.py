@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QSplitter, QPlainTextEdit, QTextBrowser, QLineEdit, QListWidget, QListWidgetItem,
     QSlider, QFileDialog, QMessageBox, QInputDialog, QDialog, QDialogButtonBox,
-    QFormLayout, QScrollArea, QDateTimeEdit, QTabWidget, QKeySequenceEdit
+    QFormLayout, QScrollArea, QDateTimeEdit, QTabWidget, QKeySequenceEdit, QMenu
 )
 from .domain import Settings, Region, atomic_text
 from .storage import Store
@@ -73,7 +73,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.5"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.6"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -360,7 +360,7 @@ class MainWindow(ReviewTools,QMainWindow):
         bar=QHBoxLayout()
         for name,fn in [("Export selected",self.export_selected),("Export entire session",self.export_session),("Export all",self.export_all),("Open PGN…",self.import_pgn),("Refresh",self.refresh_library)]:bar.addWidget(button(name,fn))
         bar.addStretch();box.addLayout(bar)
-        self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game)
+        self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
         box.addWidget(self.game_table,2)
         detail=QSplitter(Qt.Horizontal);self.library_board=BoardView();detail.addWidget(self.library_board);detail.addWidget(self.make_review_tabs());detail.setSizes([350,650]);box.addWidget(detail,2)
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Review ply"));self.review_slider=QSlider(Qt.Horizontal);self.review_slider.valueChanged.connect(self.review_game);timeline.addWidget(self.review_slider,1);self.review_label=muted("0");timeline.addWidget(self.review_label);box.addLayout(timeline)
@@ -384,6 +384,25 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def selected_games(self):
         return [self.game_rows[i.row()] for i in self.game_table.selectionModel().selectedRows() if i.row()<len(self.game_rows)]
+
+    def game_context_menu(self,pos):
+        item=self.game_table.itemAt(pos)
+        if item is None:return
+        self.select_context_game(item.row())
+        self.game_row_menu().exec(self.game_table.viewport().mapToGlobal(pos))
+
+    def select_context_game(self,row):
+        selected_rows={index.row() for index in self.game_table.selectionModel().selectedRows()}
+        if row not in selected_rows:
+            self.game_table.clearSelection();self.game_table.selectRow(row)
+
+    def game_row_menu(self):
+        menu=QMenu(self)
+        menu.addAction("Copy PGN",self.copy_selected)
+        menu.addAction("Export selected…",self.export_selected)
+        menu.addSeparator()
+        menu.addAction("Delete saved PGN file(s)…",self.delete_saved_pgns)
+        return menu
 
     def show_game(self):
         selected=self.selected_games()
