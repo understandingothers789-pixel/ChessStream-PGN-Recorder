@@ -1,0 +1,265 @@
+{
+  "version": "1.6.4",
+  "environment": {
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+    "python": "3.12.14",
+    "execution": "Linux cloud CPU; local images, excluding desktop capture and GUI"
+  },
+  "baseline": "Identical bundled model and legal search, with the new continuity retry disabled.",
+  "browser_captures": {
+    "unique_images_including_held_drags": 119,
+    "positions_evaluated": 116,
+    "square_classifications_evaluated": 7424,
+    "raw_model_square_errors_before": 0,
+    "raw_model_square_errors_after": 0,
+    "sequences": [
+      {
+        "id": "lichess-fools",
+        "expected_plies": 4,
+        "baseline_verified_plies": 3,
+        "updated_verified_plies": 3,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "lichess-scholar",
+        "expected_plies": 7,
+        "baseline_verified_plies": 6,
+        "updated_verified_plies": 6,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "lichess-opera",
+        "expected_plies": 33,
+        "baseline_verified_plies": 32,
+        "updated_verified_plies": 32,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "chesscom-ruy",
+        "expected_plies": 16,
+        "baseline_verified_plies": 15,
+        "updated_verified_plies": 15,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "chess7",
+        "expected_plies": 7,
+        "baseline_verified_plies": 6,
+        "updated_verified_plies": 6,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "merida",
+        "expected_plies": 7,
+        "baseline_verified_plies": 6,
+        "updated_verified_plies": 6,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "maestro",
+        "expected_plies": 7,
+        "baseline_verified_plies": 6,
+        "updated_verified_plies": 6,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "tatiana",
+        "expected_plies": 7,
+        "baseline_verified_plies": 6,
+        "updated_verified_plies": 6,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "chesscom-ocean",
+        "expected_plies": 7,
+        "baseline_verified_plies": 6,
+        "updated_verified_plies": 6,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "chesscom-ocean-burled.png",
+        "expected_plies": 5,
+        "baseline_verified_plies": 4,
+        "updated_verified_plies": 4,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "chesscom-ocean-arrows.png",
+        "expected_plies": 5,
+        "baseline_verified_plies": 4,
+        "updated_verified_plies": 4,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "chesscom-ocean-cursor.png",
+        "expected_plies": 5,
+        "baseline_verified_plies": 4,
+        "updated_verified_plies": 4,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "italian",
+        "expected_plies": 4,
+        "baseline_verified_plies": 3,
+        "updated_verified_plies": 3,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      },
+      {
+        "id": "bishop-drag",
+        "expected_plies": 2,
+        "baseline_verified_plies": 1,
+        "updated_verified_plies": 1,
+        "baseline_every_verified_prefix_correct": true,
+        "updated_every_verified_prefix_correct": true,
+        "baseline_final_candidate_matches": true,
+        "updated_final_candidate_matches": true
+      }
+    ]
+  },
+  "controlled_classifier_faults": {
+    "method": "Synthetic score faults, not newly captured visual errors: wrong label 0.82, existing legal label 0.16, others share 0.02.",
+    "cases": [
+      {
+        "case": "missing queen",
+        "expected": [
+          "e2e4"
+        ],
+        "baseline": [],
+        "updated": [
+          "e2e4"
+        ],
+        "baseline_correct": false,
+        "updated_correct": true,
+        "uncertain_squares": [
+          "d1"
+        ]
+      },
+      {
+        "case": "queen mistaken for knight",
+        "expected": [
+          "e2e4",
+          "e7e5"
+        ],
+        "baseline": [],
+        "updated": [
+          "e2e4",
+          "e7e5"
+        ],
+        "baseline_correct": false,
+        "updated_correct": true,
+        "uncertain_squares": [
+          "d1"
+        ]
+      },
+      {
+        "case": "queen color flip",
+        "expected": [
+          "e2e4",
+          "e7e5"
+        ],
+        "baseline": [],
+        "updated": [
+          "e2e4",
+          "e7e5"
+        ],
+        "baseline_correct": false,
+        "updated_correct": true,
+        "uncertain_squares": [
+          "d1"
+        ]
+      },
+      {
+        "case": "phantom extra knight",
+        "expected": [
+          "e2e4"
+        ],
+        "baseline": [],
+        "updated": [
+          "e2e4"
+        ],
+        "baseline_correct": false,
+        "updated_correct": true,
+        "uncertain_squares": [
+          "h3"
+        ]
+      },
+      {
+        "case": "capture without queen sacrifice detour",
+        "expected": [
+          "e2e4",
+          "d7d5",
+          "e4d5"
+        ],
+        "baseline": [],
+        "updated": [
+          "e2e4",
+          "d7d5",
+          "e4d5"
+        ],
+        "baseline_correct": false,
+        "updated_correct": true,
+        "uncertain_squares": [
+          "d1"
+        ]
+      }
+    ],
+    "baseline_correct": 0,
+    "updated_correct": 5
+  },
+  "performance": {
+    "model_mean_ms": 8.744798050758021,
+    "baseline_reconstruction_mean_ms": 1.0531468546151366,
+    "updated_reconstruction_mean_ms": 1.0161571138073495,
+    "updated_reconstruction_p95_ms": 1.6076283987786157,
+    "wall_seconds": 3.0586936109975795,
+    "process_cpu_seconds": 5.82,
+    "resident_memory_mb": 133.890625
+  },
+  "limitations": [
+    "The model weights and raw classifier accuracy did not change. These captures already have zero raw square errors; this establishes regression coverage, not an improvement percentage on real videos.",
+    "Fault-injection recovery counts describe only the specified controlled score errors.",
+    "The retry carries at most two uncertain unchanged squares, checks at most two new plies and is bounded by 50 ms and 8000 nodes.",
+    "Strong contradictions, heavy overlays, uncertain move endpoints and unseen themes may still require more evidence or manual correction.",
+    "The initial FEN is known in this reconstruction comparison. Initial detection/recognition remains covered separately by desktop tests.",
+    "Timing and memory are Linux process measurements; Windows/YouTube hardware behavior requires live acceptance."
+  ]
+}

@@ -194,6 +194,12 @@ class Observation:
         return Observation(self.probabilities[::-1].copy(), self.timestamp,
                            "black" if self.orientation == "white" else "white", self.quality)
 
+    def with_unknown(self, squares) -> Observation:
+        """Retain raw evidence separately while marking disputed squares unknown."""
+        probabilities=self.probabilities.copy()
+        probabilities[list(squares)]=1/len(LABELS)
+        return Observation(probabilities,self.timestamp,self.orientation,self.quality)
+
     def placement(self) -> str:
         b = chess.Board(None)
         for s, label in enumerate(self.labels):

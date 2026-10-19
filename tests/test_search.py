@@ -63,6 +63,10 @@ def test_gap_probe_preserves_prefix_pending_policy_and_unchanged_state_on_failur
     distant=play(source.copy(),'Ne7 Nf3 Nbc6')
     assert rec.bridge_gap(Observation.from_board(distant),LegalSearcher(4,node_limit=1)) is None
     assert rec.serialize()==previous
+    state=Reconstructor(chess.Board()).serialize()
+    probe=Reconstructor.restore(state)
+    probe.observe(Observation.from_board(play(chess.Board(),'e4')))
+    assert probe.verified==['e2e4'] and state['verified']==[]
 
 
 def test_backward_pawn_positions_are_rejected_before_expanding_a_gap_tree():

@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.3"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.4"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -227,8 +227,10 @@ class MainWindow(ReviewTools,QMainWindow):
         if 'uncertain_squares' in snap:
             uncertain=snap['uncertain_squares']
             text=("Uncertain: "+", ".join(uncertain[:10])+(f" (+{len(uncertain)-10} more)" if len(uncertain)>10 else "")) if uncertain else "All 64 squares meet the recognition threshold"
+            ignored=snap.get('recognition_ignored_squares',[])
+            if ignored:text='Continuity check • uncertain on '+', '.join(ignored)+'; previous legal pieces retained there'
             self.recognition_details.setText(text)
-            self.recognition_details.setStyleSheet("color:"+("#f4c17a" if uncertain else "#8ee3ce"))
+            self.recognition_details.setStyleSheet("color:"+("#f4c17a" if uncertain or ignored else "#8ee3ce"))
         mode=snap.get('recognition_mode')
         if mode and mode!=getattr(self,'_displayed_recognition_mode',None):
             self.recognizer_setting.setCurrentIndex(1 if mode=='calibrated' else 0)

@@ -14,6 +14,8 @@ The left board is what the screen contains. The middle board previews the highes
 
 ## Piece sets and orientation
 
+During recording, **Continuity check** can identify up to two weakly misrecognized squares, such as a queen suddenly appearing empty or becoming a knight. The recorder retains its previous legal piece on those squares while checking a short continuation. A disputed square is treated as unknown; it cannot supply the missing source or destination of a move. The live warning names the squares, diagnostics retain the raw reading, and moves verified using this continuity assumption receive a PGN comment. Strong contradictions and heavy obstruction still wait for more evidence. This works on position data without saving screenshot images.
+
 The default bundled screenshot model supports varied shaded pieces, board textures and colors. Calibration is not required for the tested Neo and Ocean sets. For an unsupported set, the optional **Calibrate piece set** command switches to manually learned templates:
 
 1. Display a genuine standard starting position with all pieces on their original squares.

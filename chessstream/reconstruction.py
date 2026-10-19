@@ -7,6 +7,7 @@ be recovered from identical images; search assumes the shortest observed gap.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import combinations
 from time import perf_counter
 import chess
 import numpy as np
@@ -217,6 +218,7 @@ class ReconstructionUpdate:
     search_ms: float = 0
     recovered: bool = False
     tie_broken: bool = False
+    ignored_squares: list[int] = field(default_factory=list)
 
 
 class Reconstructor:
@@ -266,6 +268,94 @@ class Reconstructor:
         return result
 
     def observe(self, observed: Observation) -> ReconstructionUpdate:
+        candidates=self._noise_candidates(observed)
+        if candidates and self.searcher.max_plies>2:
+            # Do not invent a longer capture/return detour merely to explain
+            # one weak disappearing piece. First compare short observations
+            # with short continuations that leave that square uncertain.
+            probe=Reconstructor.restore(self.serialize(),LegalSearcher(2,
+                min(8000,self.searcher.node_limit),min(50.,self.searcher.time_limit_ms),
+                self.searcher.threshold,self.searcher.path_limit))
+            short=probe._observe_exact(observed)
+            if short.status=='unmatched position • recording continues':
+                retry=self._retry_noisy_squares(observed,short,candidates)
+                if retry.ignored_squares:return retry
+                candidates=()
+            elif not probe.incomplete and not short.status.startswith(('obstructed','review / rewind')):
+                self._adopt_probe(probe)
+                return short
+        update=self._observe_exact(observed)
+        if update.status != 'unmatched position • recording continues':
+            return update
+        return self._retry_noisy_squares(observed,update,candidates)
+
+    def _noise_candidates(self, observed):
+        if len(self.branches)>8:return ()
+        probabilities=observed.probabilities
+        labels=observed.labels;confidence=probabilities.max(axis=1)
+        if not np.any((confidence>=self.searcher.threshold)&(confidence<.90)):return ()
+        candidates=set()
+        for branch in self.branches:
+            expected=board_labels(branch.board())
+            supported=probabilities[np.arange(64),expected]
+            candidates.update(int(s) for s in np.flatnonzero(
+                (labels!=expected)&(confidence>=self.searcher.threshold)&
+                (confidence<.90)&(supported>=.08)))
+        return tuple(sorted(candidates)) if len(candidates)<=4 else ()
+
+    def _adopt_probe(self, probe):
+        for name in ('initial_fen','board','branches','verified','history','incomplete','status'):
+            setattr(self,name,getattr(probe,name))
+
+    def _retry_noisy_squares(self, observed, original_update, candidates):
+        """Let legal continuity resolve at most two weak, unchanged squares.
+
+        A disappearing piece or a queen/knight misread is not a move. Retain
+        the raw distribution, and only try erasing a small disputed area when
+        an existing legal board label still has model support. The ordinary
+        search requires positive evidence on every changed square, including
+        captures, castling, en passant and promotions. Erasures therefore
+        cannot supply a move's missing source or destination.
+        """
+        if not candidates:return original_update
+        # Bounded fallback only. A limited retry cannot prove that competing
+        # interpretations were exhausted and must leave the recorder intact.
+        started=perf_counter();node_budget=min(8000,self.searcher.node_limit//4)
+        time_budget=min(50.,self.searcher.time_limit_ms*.20)
+        nodes=0;search_ms=0.;state=self.serialize()
+        for count in range(1,min(2,len(candidates))+1):
+            matches=[]
+            for squares in combinations(sorted(candidates),count):
+                remaining_nodes=node_budget-nodes
+                remaining_ms=time_budget-(perf_counter()-started)*1000
+                if remaining_nodes<1 or remaining_ms<=0:return original_update
+                searcher=LegalSearcher(min(2,self.searcher.max_plies),remaining_nodes,
+                    remaining_ms,self.searcher.threshold,self.searcher.path_limit)
+                probe=Reconstructor.restore(state,searcher)
+                evidence=observed.with_unknown(squares)
+                retry=probe._observe_exact(evidence)
+                nodes+=retry.nodes;search_ms+=retry.search_ms
+                if probe.incomplete:return original_update
+                if retry.status.startswith(('unmatched','review / rewind','obstructed','search limit')):
+                    continue
+                if all(evidence.matches(branch.board(),self.searcher.threshold) for branch in probe.branches):
+                    signature=(probe.initial_fen,tuple(probe.verified),
+                               tuple(sorted((b.root_fen,b.moves) for b in probe.branches)))
+                    matches.append((signature,probe,retry,squares))
+            if not matches:continue
+            if len({row[0] for row in matches})!=1:return original_update
+            if (perf_counter()-started)*1000>time_budget:return original_update
+            _,probe,retry,squares=matches[0]
+            self._adopt_probe(probe)
+            retry.ignored_squares=list(squares)
+            retry.nodes=original_update.nodes+nodes
+            retry.search_ms=original_update.search_ms+search_ms
+            self.status=retry.status+' • recognition uncertain on '+', '.join(chess.square_name(s) for s in squares)
+            retry.status=self.status
+            return retry
+        return original_update
+
+    def _observe_exact(self, observed: Observation) -> ReconstructionUpdate:
         update = ReconstructionUpdate()
         if observed.confidence < .50 or (observed.probabilities.max(axis=1) >= self.searcher.threshold).sum() < 60:
             self.status = update.status = "obstructed / low confidence"
@@ -311,6 +401,7 @@ class Reconstructor:
             self.incomplete = True
             self.status = update.status = "search limit • evidence retained"
             return update
+        self.incomplete = False
         if not survivors:
             if observed.placement() in self.history[:-1]:
                 self.status = update.status = "review / rewind • live game preserved"
@@ -449,7 +540,7 @@ class Reconstructor:
         for uci in data["verified"]:
             r.board.push_uci(uci)
             r.history.append(r.board.board_fen())
-        r.verified = data["verified"]
+        r.verified = list(data["verified"])
         r.branches = [Branch(b["root_fen"], tuple(b["moves"])) for b in data["branches"]]
         r.status = data.get("status", "recovered")
         r.incomplete = data.get("incomplete",False)

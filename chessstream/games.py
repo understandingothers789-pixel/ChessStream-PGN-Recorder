@@ -65,6 +65,7 @@ class GameManager(GameExtras):
         self.reset_candidate: Reconstructor | None = None
         self.reset_started: str | None = None
         self.last_observation: Observation | None = None
+        self._recognition_ignored_squares=[]
         self.last_message = "Select a board and start recording"
         self._persisted_fingerprint=None
         self._last_evidence_signature=None
@@ -434,6 +435,8 @@ class GameManager(GameExtras):
     def process(self, obs: Observation) -> dict:
         with self.lock:
             self.last_observation = obs
+            move_evidence=obs
+            self._recognition_ignored_squares=[]
             # An aborted game can end before a single move. A clear legal
             # opening after its popup disappears starts a fresh recording.
             if (self.rec and self.terminal_message and not self.rec.verified
@@ -516,6 +519,14 @@ class GameManager(GameExtras):
                     before=len(self.rec.verified)
                     previous_pending=[branch.moves for branch in self.rec.branches]
                     update = self.rec.observe(obs)
+                    if update.ignored_squares:
+                        move_evidence=obs.with_unknown(update.ignored_squares)
+                        self._recognition_ignored_squares=[chess.square_name(s) for s in update.ignored_squares]
+                        if (self.current_id,obs.placement(),update.status,obs.orientation)!=self._last_evidence_signature:
+                            self.store.audit('recognition continuity recovery',{
+                                'game_id':self.current_id,'raw_placement':obs.placement(),
+                                'ignored_squares':self._recognition_ignored_squares,
+                                'reason':'weak model disagreement; unchanged legal squares carried forward; changed move squares remain positively observed'})
                     paths=[tuple(self.rec.verified[before:])+branch.moves for branch in self.rec.branches]
                     unseen=min((len(path)-max((len(old) for old in previous_pending
                                if path[:len(old)]==old),default=0) for path in paths),default=0)
@@ -524,25 +535,31 @@ class GameManager(GameExtras):
                         self._mark_inferred_gap(before,previous_pending)
                     if update.tie_broken and len(self.rec.verified)>before:
                         self._mark_capture_tiebreak(before)
+                    if update.ignored_squares:
+                        comment=('Recorded with uncertain unchanged square(s): '+', '.join(self._recognition_ignored_squares)+
+                                 '; move source and destination were observed. Position continuity used.')
+                        for ply in range(before,len(self.rec.verified)):
+                            entry=self.inferred_moves.setdefault(str(ply+1),{'uci':self.rec.verified[ply],'comment':''})
+                            if comment not in entry['comment']:entry['comment']=(entry['comment']+' '+comment).strip()
                     if update.recovered:
                         self.store.audit("transient candidate replaced",{"game_id":self.current_id,
                             "placement":obs.placement(),"reason":"clear shorter legal continuation from the verified board; no verified moves rewritten"})
                     self.last_message = update.status
-                    self._track_unresolved_position(obs,update.status)
+                    self._track_unresolved_position(move_evidence,update.status)
                     outcome = self.rec.board.outcome(claim_draw=False)
                     if outcome and not self.result_override:
                         self.headers["Result"] = outcome.result()
                         self.ended = self.ended or obs.timestamp
                         self.last_message = "Complete • " + outcome.termination.name.replace("_"," ").lower()
             if self.rec:
-                self._record_clocks(obs)
+                self._record_clocks(move_evidence)
                 self.persist()
             signature=(self.current_id,obs.placement(),self.last_message,obs.orientation)
             if signature!=self._last_evidence_signature:
                 logging.info('Recorder state %s',json.dumps({'game_id':self.current_id,'status':self.last_message,'placement':obs.placement(),'plies':len(self.rec.verified) if self.rec else 0,'uncertain_squares':obs.uncertain_squares(max(.8,self.settings.min_confidence))}))
                 self.store.save_observation(self.session_id, self.current_id, obs, self.last_message,
                     {"labels":obs.labels.tolist(), "confidence":[round(float(v),3) for v in obs.probabilities.max(axis=1)],
-                     "orientation":obs.orientation})
+                     "orientation":obs.orientation,"ignored_squares":self._recognition_ignored_squares})
                 self._last_evidence_signature=signature
             return self.snapshot()
 
@@ -720,6 +737,7 @@ class GameManager(GameExtras):
                         leaf.push_uci(uci)
                     alternatives.append(" ".join(line) or ("White to move" if leaf.turn else "Black to move"))
             return {"status":self.last_message,"game_id":self.current_id,"name":self.name,
+                    "recognition_ignored_squares":list(self._recognition_ignored_squares),
                     "fen":self.rec.board.fen(),"preview_fen":preview_board.fen(),
                     "preview_last_move":preview_last_move,"preview_moves":preview_moves,
                     "preview_candidates":preview_candidates,
@@ -783,6 +801,7 @@ class GameManager(GameExtras):
             if self.terminal_message:self.ended=row['ended'] or utcnow()
             self.result_override=state.get('result_override',False)
             self.rec = Reconstructor.restore(state,self.searcher())
+            self._recognition_ignored_squares=[]
             self.rec.confirmation_plies=int(self.settings.confirm_on_reply)
             self.clear_position_recovery()
             self.rec.status = "recovered • ready to resume"
