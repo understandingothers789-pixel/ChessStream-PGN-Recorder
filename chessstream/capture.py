@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import logging
+import re
 import cv2
 import numpy as np
 from PySide6.QtCore import QThread, Signal
@@ -64,6 +65,31 @@ def windows() -> list[tuple[int,str]]:
         return True
     ctypes.windll.user32.EnumWindows(callback,0)
     return result
+
+
+_CHESS_TITLE_TERMS = {
+    "chess.com": 8, "lichess": 8, "chess": 7, "hikaru": 6, "magnus": 5,
+    "stockfish": 5, "grandmaster": 4, "blitz": 4, "bullet": 4, "rapid": 4,
+    "speedrun": 4, "gambit": 3, "opening": 3, "puzzle": 3, "tactics": 3,
+    "chessable": 4, "titled": 2, "arena": 2,
+}
+
+
+def rank_youtube_windows(options: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Rank visible window titles for automatic YouTube chess capture.
+
+    Only titles containing YouTube are eligible. Original enumeration order is
+    preserved for ties and is the fallback when titles contain no chess terms.
+    """
+    ranked = []
+    for index, (hwnd, title) in enumerate(options):
+        words = set(re.findall(r"[a-z0-9]+(?:\.[a-z0-9]+)?", title.casefold()))
+        if "youtube" not in words:
+            continue
+        score = sum(weight for term, weight in _CHESS_TITLE_TERMS.items() if term in words)
+        ranked.append((-score, index, (hwnd, title)))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ranked]
 
 
 def window_client(hwnd: int) -> Region:

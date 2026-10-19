@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from .domain import Settings, Region, atomic_text
 from .storage import Store
 from .games import GameManager
-from .capture import RecordingWorker, monitors, windows, window_client, containing_window
+from .capture import RecordingWorker, monitors, windows, window_client, containing_window, rank_youtube_windows
 from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEditor, button, muted
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
@@ -73,13 +73,21 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.6"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.7"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
         self.navigate(0);self.install_hotkeys()
         self.statusBar().showMessage("Ready • screenshots kept until you delete them")
+        # A saved hand-drawn region is an explicit choice. Otherwise, use the
+        # best visible YouTube window automatically and retry while the browser
+        # is still opening. Tracked-window choices are refreshed each launch.
+        self._auto_window_enabled = not self.region or bool(self.region.window)
+        self.auto_window_timer=QTimer(self);self.auto_window_timer.setInterval(2000)
+        self.auto_window_timer.timeout.connect(self._auto_select_youtube_window)
+        if self._auto_window_enabled and not self._auto_select_youtube_window():
+            if sys.platform == "win32":self.auto_window_timer.start()
         self.timer=QTimer(self);self.timer.timeout.connect(self.refresh_usage);self.timer.start(10000)
         self.retention_timer=QTimer(self);self.retention_timer.timeout.connect(self.run_retention);self.retention_timer.start(60000)
         QTimer.singleShot(100,self.run_retention);self.refresh_usage()
@@ -147,6 +155,8 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def toggle_start(self):
         if self.worker and self.worker.isRunning():self.pause();return
+        if self._auto_window_enabled and self.region and self.region.window:
+            self._auto_select_youtube_window()
         if not self.region:self.draw_region();return
         if self.manager.rec and self.manager.ended:
             self.manager=GameManager(self.store,self.settings)
@@ -274,6 +284,8 @@ class MainWindow(ReviewTools,QMainWindow):
         if self.worker and not getattr(self,'overlay_was_paused',True):self.worker.paused.clear()
 
     def region_selected(self,region):
+        self._auto_window_enabled=False
+        self.auto_window_timer.stop()
         if not region.window:region.tracking_window=containing_window(region)
         self.region=region;self.settings.region=asdict(region);self.settings.save(self.root/"settings.json");self.source_label.setText(self.region_text())
         if self.worker and self.worker.isRunning():self.worker.commands.put(("region",region))
@@ -297,6 +309,25 @@ class MainWindow(ReviewTools,QMainWindow):
             names=[name for _,name in options];name,ok=QInputDialog.getItem(self,"Track application window","Keep the selected window visible. Its position and size are followed.",names,0,False)
             if ok:self.region_selected(window_client(options[names.index(name)][0]))
         except Exception as e:self.error(str(e))
+
+    def _auto_select_youtube_window(self):
+        """Select the most chess-relevant visible YouTube browser window."""
+        if not self._auto_window_enabled:
+            self.auto_window_timer.stop();return bool(self.region)
+        for hwnd,title in rank_youtube_windows(windows()):
+            try:
+                region=window_client(hwnd)
+                if region.width < 200 or region.height < 200:continue
+            except (OSError,RuntimeError):
+                continue
+            self.region=region
+            if hasattr(self,"source_label"):self.source_label.setText(self.region_text())
+            self.auto_window_timer.stop()
+            if hasattr(self,"statusBar"):
+                self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • board detection will find the board; click Start recording",10000)
+            logging.info("Automatically selected YouTube capture window hwnd=%s title=%r",hwnd,title)
+            return True
+        return False
 
     def flip_orientation(self):
         current=self.snapshot.get('orientation','white');self.settings.orientation='black' if current=='white' else 'white'

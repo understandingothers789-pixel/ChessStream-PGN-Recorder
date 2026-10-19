@@ -8,6 +8,7 @@ from chessstream.domain import Observation
 import chess
 import cv2
 from pathlib import Path
+from chessstream.domain import Region
 
 
 def test_desktop_pages_game_review_and_screenshots(tmp_path):
@@ -29,6 +30,20 @@ def test_desktop_pages_game_review_and_screenshots(tmp_path):
     assert scroll.verticalScrollBar().maximum()>0
     scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
     assert scroll.verticalScrollBar().value()==scroll.verticalScrollBar().maximum()
+    window.close();window.deleteLater();app.processEvents()
+
+
+def test_startup_automatically_tracks_chessiest_youtube_window(tmp_path,monkeypatch):
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    candidates=[(101,'YouTube - Brave'),(202,'MASTER SLOWKARU RAPID EDUCATIONAL SPEEDRUN | YouTube - Brave'),
+                (303,'ChessStream PGN Recorder - File Explorer')]
+    monkeypatch.setattr(gui,'windows',lambda:candidates)
+    monkeypatch.setattr(gui,'window_client',lambda hwnd:Region(hwnd,20,1200,800,window=hwnd))
+    window=MainWindow(tmp_path)
+    assert window.region.window==202
+    assert 'Tracked window' in window.source_label.text()
+    assert 'Auto-selected YouTube window' in window.statusBar().currentMessage()
     window.close();window.deleteLater();app.processEvents()
 
 
