@@ -16,7 +16,7 @@ The left board is what the screen contains. The middle board previews the highes
 
 ## Piece sets and orientation
 
-Click a move in the live move list to show the position after that move on the reconstructed board. The heading identifies review mode; capture and PGN recording continue. The selected position remains visible as new moves arrive. **Return to live board** restores the current preview. A new active game or a correction that replaces the selected prefix also returns the display to live. Move numbers alone do not change the board.
+Click a move in the live move list to show the position after that move on the reconstructed board. With the move list focused, the **left and right arrow keys** step through PGN plies in order, including across row boundaries. The heading identifies review mode; capture and PGN recording continue. The selected position remains visible as new moves arrive. **Return to live board** restores the current preview. A new active game or a correction that replaces the selected prefix also returns the display to live. Move numbers alone do not change the board.
 
 During recording, **Continuity check** can identify up to two weakly misrecognized squares, such as a queen suddenly appearing empty or becoming a knight. The recorder retains its previous legal piece on those squares while checking a short continuation. A disputed square is treated as unknown; it cannot supply the missing source or destination of a move. The live warning names the squares, diagnostics retain the raw reading, and moves verified using this continuity assumption receive a PGN comment. Strong contradictions and heavy obstruction still wait for more evidence. This works on position data without saving screenshot images.
 
@@ -161,7 +161,7 @@ Progress is saved after state changes. After a crash or restart, open the saved 
 - **Search limit**: enable adaptive frames or raise limits moderately. Review the screenshots and supply missing SAN if necessary.
 - **Wrong verified move**: use Repair PGN for redundant piece excursions. For an explicit replacement, pause, right-click the live move list → Edit moves manually, undo the affected recent plies, enter the correct sequence, then resume.
 - **Window moved / resized**: use tracked Window mode or Adjust. Source HWND replacement and unusual scaling may need re-selection.
-- **Cannot launch installed app**: run `Diagnose ChessStream.cmd` in the installation directory. The rotating `application.log` in the data directory records worker failures. Packaged inference and GUI startup are tested by Windows CI; hardware-specific failures still need checking on your PC.
+- **Cannot launch the app**: on the portable download, run `Diagnose ChessStream.cmd` from its extracted folder. It starts the same app using the bundled console Python, so startup errors remain visible in a command window; that window pauses after the app exits. Close the normal ChessStream window first to avoid opening a second copy on the same saved data. This command does not perform a separate scan or create a support bundle. The source ZIP does not contain this portable launcher; it expects a local Python setup. The rotating `application.log` in the data directory also records worker failures.
 
 See `KNOWN_LIMITATIONS.md` and `evaluation.json` for exact tested scope.
 

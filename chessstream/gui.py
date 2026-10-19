@@ -53,6 +53,16 @@ class Task(QThread):
         except Exception as e:logging.exception("Background task failed");self.failed.emit(str(e))
 
 
+class MoveTableWidget(QTableWidget):
+    step_move=Signal(int)
+
+    def keyPressEvent(self,event):
+        if event.key() in (Qt.Key_Left,Qt.Key_Right) and event.modifiers()==Qt.NoModifier:
+            self.step_move.emit(-1 if event.key()==Qt.Key_Left else 1)
+            event.accept();return
+        super().keyPressEvent(event)
+
+
 class MainWindow(ReviewTools,QMainWindow):
     def __init__(self,root:Path):
         super().__init__();self.root=root;self.settings=Settings.load(root/"settings.json")
@@ -76,7 +86,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.16"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.17"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -144,7 +154,7 @@ class MainWindow(ReviewTools,QMainWindow):
             action.setStyleSheet("padding:7px 4px;font-size:11px")
             pgn_actions.addWidget(action)
         moves_card.box.addLayout(pgn_actions)
-        self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);self.move_table.setContextMenuPolicy(Qt.CustomContextMenu);self.move_table.customContextMenuRequested.connect(self.live_moves_context_menu);moves_card.box.addWidget(self.move_table,1)
+        self.move_table=MoveTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);self.move_table.setContextMenuPolicy(Qt.CustomContextMenu);self.move_table.customContextMenuRequested.connect(self.live_moves_context_menu);self.move_table.step_move.connect(self.navigate_live_move);self.move_table.setToolTip('Click a move to review it. Use the left and right arrow keys to step through moves in order.');moves_card.box.addWidget(self.move_table,1)
         self.move_table.itemClicked.connect(self.review_live_move)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
@@ -370,6 +380,21 @@ class MainWindow(ReviewTools,QMainWindow):
         self._live_review={'game_id':snap.get('game_id'),'initial_fen':initial,'ply':ply,
             'prefix':tuple(line[:ply]),'fen':board.fen(),'last_move':board.peek().uci()}
         self.on_update(snap)
+
+    def navigate_live_move(self,direction):
+        snap=self.snapshot
+        line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
+        if not line:return
+        selected=self.move_table.currentItem()
+        current=(self._live_review.get('ply') if self._live_review else
+                 selected.data(Qt.UserRole) if selected and selected.data(Qt.UserRole) else None)
+        target=max(1,min(len(line),(current if current is not None else (0 if direction>0 else len(line)+1))+direction))
+        initial=chess.Board(snap.get('initial_fen',chess.STARTING_FEN))
+        table_index=target-1+(1 if not initial.turn else 0)
+        item=self.move_table.item(table_index//2,1+table_index%2)
+        if item:
+            self.move_table.setCurrentItem(item);self.move_table.scrollToItem(item)
+            self.review_live_move(item)
 
     def return_to_live_board(self):
         self._live_review=None;self._last_board_render=None
