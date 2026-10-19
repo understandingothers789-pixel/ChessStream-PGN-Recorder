@@ -377,3 +377,59 @@ def test_reported_rook_and_bishop_detour_is_replaced_by_nc5_without_losing_openi
     assert game.end().board().fen()==target.fen()
     assert manager.current_id==gid and len(store.games())==1
     store.close()
+
+
+REWIND_OPENING='d4 a6 e4 b5 Bd3 Bb7 Nf3 e6 O-O Nf6 Re1'
+
+
+def test_rewind_does_not_append_rook_detours_and_resumes_live_game_after_restart(tmp_path):
+    store=Store(tmp_path);manager,live=record(store,Settings(confirm_on_reply=False),REWIND_OPENING)
+    gid=manager.current_id;prefix=manager.rec.verified[:]
+    previous=chess.Board()
+    for san in 'd4 a6 e4 b5 Bd3 Bb7 Nf3'.split():previous.push_san(san)
+    now=[0.];manager._clock=lambda:now[0]
+    manager.process(Observation.from_board(previous))
+    assert manager.rewind_state and manager.rec.verified==prefix
+    # Pause on the historical board well beyond the normal acceptance timer.
+    now[0]=10.;manager.process(Observation.from_board(previous))
+    manager.recover(gid)
+    assert manager.rewind_state
+    for san in 'e6 O-O Nf6'.split():
+        previous.push_san(san);now[0]+=1.
+        manager.process(Observation.from_board(previous))
+        assert manager.rec.verified==prefix
+    previous.push_san('Re1');manager.process(Observation.from_board(previous))
+    assert manager.rewind_state is None
+    live.push_san('g6');manager.process(Observation.from_board(live))
+    game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+    assert game.end().board().fen()==live.fen()
+    assert manager.rec.verified[:len(prefix)]==prefix
+    assert all(n.san() not in ('Ra7','Rf1','Ra8') for n in game.mainline())
+    assert len(store.games())==1
+    store.close()
+
+
+def test_confirmed_rewind_removes_only_a_recent_inferred_rook_round_trip(tmp_path):
+    store=Store(tmp_path);manager,board=record(store,Settings(confirm_on_reply=False),
+        'd4 a6 e4 b5 Bd3 Bb7 Nf3 e6 O-O Nf6')
+    before=len(manager.rec.verified)
+    for san in 'Re1 Ra7 Rf1 Ra8 Re1 g6'.split():
+        board.push_san(san);manager.process(Observation.from_board(board))
+    for p in range(before+1,before+5):
+        manager.inferred_moves[str(p)]={'uci':manager.rec.verified[p-1],'comment':'Inferred across capture gap'}
+    manager.move_clocks[str(before+5)]=570;manager.persist()
+    rewound=chess.Board()
+    for san in 'd4 a6 e4 b5 Bd3 Bb7 Nf3'.split():rewound.push_san(san)
+    manager.process(Observation.from_board(rewound))
+    game=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
+    assert [n.san() for n in game.mainline()][-2:]==['Re1','g6']
+    assert len(manager.rec.verified)==before+2 and manager.move_clocks[str(before+1)]==570
+    assert game.end().board().board_fen()==board.board_fen()
+    store.close()
+
+
+def test_real_single_move_repetition_is_not_mistaken_for_video_rewind(tmp_path):
+    store=Store(tmp_path);manager,board=record(store,Settings(confirm_on_reply=False),'Nf3 Nf6 Ng1 Ng8 Nf3 Nf6')
+    assert len(manager.rec.verified)==6 and manager.rewind_state is None
+    assert manager.rec.board.fen()==board.fen()
+    store.close()

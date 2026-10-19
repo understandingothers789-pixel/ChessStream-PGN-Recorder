@@ -166,3 +166,12 @@ Castling moves the king and rook together and is accepted after 0.5 seconds unch
 Live comparisons run at least twice per second, independently of screenshot saving. The default adaptive rate is two frames per second; an existing faster setting is preserved. Acceptance measures 0.5 seconds from the first captured observation, including the animation-settling gate.
 
 If later evidence contradicts a guessed capture or detour, recovery can retry from before a recent inferred move, at most eight recorded plies back. Searches remain bounded and only replace the suffix when a legal sequence reaches the exact observed placement. The correction is marked as inferred, and diagnostics record both the replaced and replacement moves. Earlier moves before the repair point are kept. A longer historical error may still require manual correction or joining recordings.
+
+
+### Rewinding the video
+
+The recorder checks earlier saved positions before trying to reconstruct new moves. If the displayed board matches an earlier position and is not a legal next move from the current endpoint, it enters rewind review. The main PGN keeps the pre-rewind game while the board preview follows the historical video. Pending additions are removed, and historical clocks are not attached to new moves.
+
+Return to the saved endpoint to resume, or advance to a legal continuation beyond it. Rewind protection survives reopening a recording. A terminal-game reset still allows a new game. Normal one-move repetitions, including a legal return to the starting board, continue recording normally.
+
+When rewind evidence also reveals a recent **inferred** four-ply, noncapturing rook round trip, the recorder can delete that loop from the main PGN and shift subsequent clock/move metadata. The diagnostic log records the removed moves. It does not delete arbitrary older verified history or silently collapse real repetitions. If both the historical and live continuation remain plausible, it keeps the PGN protected until clearer evidence arrives.

@@ -532,6 +532,15 @@ class GameManager(GameExtras):
             self.last_observation = obs
             move_evidence=obs
             self._recognition_ignored_squares=[]
+            if self.rec and self._handle_rewind(obs):
+                self.reset_settling()
+                self.persist()
+                self.store.save_observation(self.session_id,self.current_id,obs,self.last_message,
+                    {'rewind':True,'anchor_ply':self.rewind_state['anchor_ply'] if self.rewind_state else None})
+                snapshot=self.snapshot()
+                snapshot.update(preview_fen=obs.placement()+' w - - 0 1',preview_moves=[],
+                                preview_last_move=None)
+                return snapshot
             # An aborted game can end before a single move. A clear legal
             # opening after its popup disappears starts a fresh recording.
             if (self.rec and self.terminal_message and not self.rec.verified
@@ -579,7 +588,9 @@ class GameManager(GameExtras):
                 self.rec.searcher = self.searcher()
                 self.rec.confirmation_plies=int(self.settings.confirm_on_reply)
                 is_start = obs.placement() == chess.Board().board_fen()
-                if is_start and (self.rec.verified or self.terminal_message) and self.rec.board.board_fen() != obs.placement():
+                if (is_start and (self.rec.verified or self.terminal_message) and self.rec.board.board_fen() != obs.placement()
+                        and not (not self.terminal_message and self.headers.get('Result','*')=='*'
+                                 and LegalSearcher(1,2000,30,self.settings.min_confidence).search(self.rec.board,obs).paths)):
                     if self.terminal_message or self.clocks_recently_reset() or self.rec.board.is_game_over(claim_draw=False) or self.headers["Result"] != "*":
                         self.finish("complete")
                         self._create(chess.Board(), obs.timestamp)
@@ -667,6 +678,91 @@ class GameManager(GameExtras):
                      "orientation":obs.orientation,"ignored_squares":self._recognition_ignored_squares})
                 self._last_evidence_signature=signature
             return self.snapshot()
+
+    def _discard_inferred_rook_cycles(self):
+        """On confirmed rewind, remove recent guessed four-ply rook round trips."""
+        old=list(self.rec.verified)
+        positions=[chess.Board(self.rec.initial_fen)];rook_moves=[]
+        for uci in old:
+            board=positions[-1].copy();move=chess.Move.from_uci(uci)
+            rook_moves.append(board.piece_type_at(move.from_square)==chess.ROOK and not board.is_capture(move))
+            board.push(move);positions.append(board)
+        for start in range(max(0,len(old)-12),len(old)-3):
+            end=start+4
+            if (not all(rook_moves[start:end]) or
+                    not all(str(p+1) in self.inferred_moves for p in range(start,end)) or
+                    positions[start].board_fen()!=positions[end].board_fen()):continue
+            retained=old[:start]+old[end:]
+            probe=self.reconstructor(chess.Board(self.rec.initial_fen))
+            for uci in retained:
+                move=chess.Move.from_uci(uci)
+                if move not in probe.board.legal_moves:break
+                probe.board.push(move);probe.verified.append(uci);probe.history.append(probe.board.board_fen())
+            else:
+                probe.branches=[Branch(probe.board.fen(),())]
+                def shifted(values):
+                    return {str(int(k)-4 if int(k)>end else int(k)):v for k,v in values.items()
+                            if not start<int(k)<=end}
+                self.move_clocks=shifted(self.move_clocks);self.inferred_moves=shifted(self.inferred_moves)
+                self._trim_timed_review(start)
+                self.rec=probe;self._timed_base=None;self._timed_end=0
+                self.store.audit('rewind additions deleted',{'game_id':self.current_id,'after_ply':start,
+                    'removed':old[start:end],'reason':'inferred rook round trip contradicted by rewind evidence'})
+                return
+
+    def _handle_rewind(self, obs):
+        """Check saved history before forward search can invent a return detour."""
+        if obs.confidence<.8 or obs.uncertain_squares(self.settings.min_confidence):
+            return bool(self.rewind_state)
+        placement=obs.placement();live={self.rec.board.board_fen()}
+        live.update(branch.board().board_fen() for branch in self.rec.branches)
+        if placement in live:
+            if self.rewind_state:
+                self.store.audit('video rewind ended',{'game_id':self.current_id,'placement':placement})
+                self.rewind_state=None
+            return False
+        # A genuine terminal/new-game reset is handled by the ordinary game logic.
+        if placement==chess.Board().board_fen() and (self.terminal_message or self.headers.get('Result','*')!='*' or self.clocks_recently_reset()):
+            self.rewind_state=None;return False
+        history=[i for i,p in enumerate(self.rec.history[:-1]) if p==placement]
+        direct=LegalSearcher(1,2000,30,self.settings.min_confidence).search(self.rec.board,obs)
+        if history and not direct.paths:
+            cursor=max(history)
+            if not self.rewind_state:
+                self._discard_inferred_rook_cycles()
+                history=[i for i,p in enumerate(self.rec.history[:-1]) if p==placement]
+                if history:cursor=max(history)
+                self.rewind_state={'anchor_ply':len(self.rec.verified),'cursor':cursor}
+                self.store.audit('video rewind detected',{'game_id':self.current_id,'anchor_ply':len(self.rec.verified),
+                    'review_ply':cursor,'placement':placement,'reason':'earlier saved board, not a legal next move'})
+                # Remove unconfirmed additions; no earlier accepted mainline is deleted.
+                pending=[list(branch.moves) for branch in self.rec.branches if branch.moves]
+                if pending:
+                    self.store.audit('rewind pending additions removed',{'game_id':self.current_id,'moves':pending})
+                self.rec.branches=[Branch(self.rec.board.fen(),())]
+                self.rec.incomplete=False
+                self._timed_base=None;self._timed_end=0
+            self.rewind_state['cursor']=cursor
+            self.rec.status=self.last_message='Review position • video rewind detected; PGN protected'
+            return True
+        if not self.rewind_state:return False
+        # Seeking forward can skip the exact anchor image. Reconnect only when
+        # it extends the live endpoint and is not just another review step.
+        if direct.paths:
+            self.rewind_state=None
+            self.store.audit('video rewind ended',{'game_id':self.current_id,'reason':'legal next move from live endpoint'})
+            return False
+        cursor=chess.Board(self.rec.initial_fen)
+        for uci in self.rec.verified[:self.rewind_state['cursor']]:cursor.push_uci(uci)
+        review=LegalSearcher(2,4000,40,self.settings.min_confidence).search(cursor,obs,first_shortest=True)
+        forward=LegalSearcher(self.settings.max_plies,min(12000,self.settings.search_nodes),
+                             min(100,self.settings.search_ms),self.settings.min_confidence).search(self.rec.board,obs,first_shortest=True)
+        if forward.paths and not review.paths:
+            self.rewind_state=None
+            self.store.audit('video rewind ended',{'game_id':self.current_id,'reason':'legal continuation beyond live endpoint'})
+            return False
+        self.rec.status=self.last_message='Review position • rewind in progress; PGN protected'
+        return True
 
     def _revise_timed_hover(self, obs):
         """Prefer a corrected last drop over a reversible multi-move detour."""
