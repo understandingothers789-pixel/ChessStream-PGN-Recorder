@@ -4,6 +4,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import logging
+import math
 import os
 import tempfile
 import chess
@@ -87,21 +89,72 @@ class Settings:
             return cls()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            result = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-            result.interval = max(0.1, min(60, float(result.interval)))
-            result.adaptive_fps = max(2, min(15, int(result.adaptive_fps)))
-            result.max_plies = max(1, min(6, int(result.max_plies)))
-            result.unresolved_fen_seconds = max(0.0, min(600.0, float(result.unresolved_fen_seconds)))
-            result.new_game_change_seconds = max(1.0, min(120.0, float(result.new_game_change_seconds)))
-            result.new_game_min_changed_squares = max(1, min(32, int(result.new_game_min_changed_squares)))
-            result.context_padding_percent=max(0,min(50,int(result.context_padding_percent)))
-            result.review_seconds=max(0,min(3600,int(result.review_seconds)))
-            if result.result_player_color not in ["initial-bottom","white","black","unknown"]:result.result_player_color="unknown"
-            result.search_ms = max(50, min(5000, int(result.search_ms)))
-            result.search_nodes = max(1000, min(1000000, int(result.search_nodes)))
-            return result
-        except (ValueError, TypeError):
+            if not isinstance(data, dict):
+                logging.warning("Saved settings are not an object; using defaults")
+                return cls()
+        except (OSError,UnicodeError,json.JSONDecodeError):
+            logging.warning("Could not read saved settings; using defaults",exc_info=True)
             return cls()
+
+        # A single hand-edited or truncated value should not discard every other
+        # user preference or prevent the desktop from launching.
+        result=cls()
+        for key in cls.__dataclass_fields__:
+            if key in data:setattr(result,key,data[key])
+
+        def bounded(key,cast,low,high):
+            try:
+                value=cast(getattr(result,key))
+                if isinstance(value,float) and not math.isfinite(value):raise ValueError
+            except (ValueError,TypeError,OverflowError):
+                value=getattr(cls(),key)
+                logging.warning("Invalid saved setting %s; using its safe default",key)
+            setattr(result,key,max(low,min(high,value)))
+
+        bounded("interval",float,.1,60)
+        bounded("adaptive_fps",int,2,15)
+        bounded("max_plies",int,1,6)
+        bounded("unresolved_fen_seconds",float,0,600)
+        bounded("new_game_change_seconds",float,1,120)
+        bounded("new_game_min_changed_squares",int,1,32)
+        bounded("context_padding_percent",int,0,50)
+        bounded("review_seconds",int,0,3600)
+        bounded("search_ms",int,50,5000)
+        bounded("search_nodes",int,1000,1000000)
+        bounded("min_confidence",float,.5,.99)
+        bounded("retention_days",int,0,36500)
+        for key,allowed,fallback in (
+            ("result_player_color",["initial-bottom","white","black","unknown"],"unknown"),
+            ("screenshot_mode",["positions","interval"],"positions"),
+            ("orientation",["auto","white","black"],"auto"),
+            ("recognition_mode",["neural","calibrated"],"neural")):
+            if getattr(result,key) not in allowed:
+                setattr(result,key,fallback);logging.warning("Invalid saved setting %s; using its safe default",key)
+        for key in ("adaptive","deduplicate","confirm_on_reply","detect_results","read_context","auto_context",
+                    "detect_board","auto_export"):
+            if not isinstance(getattr(result,key),bool):
+                setattr(result,key,getattr(cls(),key));logging.warning("Invalid saved setting %s; using its safe default",key)
+        for key in ("export_dir","onnx_model","initial_fen","start_hotkey","stop_hotkey","region_hotkey"):
+            if not isinstance(getattr(result,key),str):
+                setattr(result,key,getattr(cls(),key));logging.warning("Invalid saved setting %s; using its safe default",key)
+        if result.initial_fen:
+            try:
+                if not chess.Board(result.initial_fen).is_valid():
+                    result.initial_fen="";logging.warning("Invalid saved initial FEN; ignoring it")
+            except ValueError:
+                result.initial_fen="";logging.warning("Invalid saved initial FEN; ignoring it")
+        if result.region is not None:
+            try:
+                if not isinstance(result.region,dict):raise ValueError
+                required=("left","top","width","height")
+                if any(key not in result.region for key in required):raise ValueError
+                fields=Region.__dataclass_fields__
+                values={key:int(value) for key,value in result.region.items() if key in fields}
+                region=Region(**values)
+                result.region=asdict(region) if region.valid() else None
+            except (TypeError,ValueError,OverflowError):
+                result.region=None;logging.warning("Invalid saved capture region; asking the user to select it again")
+        return result
 
     def save(self, path: Path) -> None:
         atomic_text(path, json.dumps(asdict(self), indent=2))

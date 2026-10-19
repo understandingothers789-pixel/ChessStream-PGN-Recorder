@@ -109,6 +109,30 @@ def test_recovery_timeout_load_is_bounded_and_old_settings_default_safe(tmp_path
     assert Settings.load(settings_file).unresolved_fen_seconds==600
 
 
+def test_one_bad_setting_or_capture_region_does_not_discard_valid_preferences(tmp_path,caplog):
+    settings_file=tmp_path/'settings.json'
+    settings_file.write_text(json.dumps({
+        'interval':2.5,'orientation':'sideways','screenshot_mode':'unknown',
+        'initial_fen':'not a FEN','region':{'width':800},'adaptive_fps':'fast'}))
+    settings=Settings.load(settings_file)
+    assert settings.interval==2.5
+    assert settings.orientation=='auto' and settings.screenshot_mode=='positions'
+    assert settings.initial_fen=='' and settings.region is None
+    assert settings.adaptive_fps==Settings().adaptive_fps
+    assert 'invalid saved setting orientation' in caplog.text.lower()
+    assert 'invalid saved capture region' in caplog.text.lower()
+
+
+def test_valid_capture_region_and_initial_fen_survive_settings_load(tmp_path):
+    settings_file=tmp_path/'settings.json';fen=play(chess.Board(),'e4 e5').fen()
+    settings_file.write_text(json.dumps({'initial_fen':fen,
+        'region':{'left':-1200,'top':20,'width':800,'height':800,'offset_x':10}}))
+    settings=Settings.load(settings_file)
+    assert settings.initial_fen==fen
+    assert settings.region=={'left':-1200,'top':20,'width':800,'height':800,
+                             'window':0,'offset_x':10,'offset_y':0,'tracking_window':0}
+
+
 def test_confident_but_invalid_popup_position_does_not_crash_automatic_recovery(tmp_path):
     store=Store(tmp_path);manager=GameManager(store,Settings(max_plies=1,confirm_on_reply=False,unresolved_fen_seconds=1,new_game_change_seconds=1))
     now=[10.];manager._clock=lambda:now[0]
