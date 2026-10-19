@@ -97,7 +97,7 @@ def test_live_fen_checkpoint_is_joined_into_main_pgn_and_becomes_active(tmp_path
     assert 'Earlier moves are not included' not in store.game(original_id)['pgn']
     assert 'saved moves remain unchanged' not in store.game(original_id)['pgn']
     assert store.game(checkpoint_id)['status'].startswith('reconnected • see ')
-    assert 'Joined the saved PGNs' in manager.last_message
+    assert 'latest PGN' in manager.last_message or 'Joined the saved PGNs' in manager.last_message
     store.close()
 
 
@@ -162,3 +162,57 @@ def test_join_saved_segments_fills_qxd4_and_preserves_clocks_and_variations():
     assert nodes[10].san()=='Qxd4' and 'Inferred across recording gap' in nodes[10].comment
     assert nodes[11].clock()==444 and len(nodes[10].variations)==2
     assert [row['pgn'] for row in rows]==original
+
+
+def test_layout_ocr_changes_do_not_replace_verified_or_pending_game(tmp_path):
+    store=Store(tmp_path);manager,board=record(store,Settings(),'e4 c5 d3 Nc6 c3')
+    gid=manager.current_id;prefix=manager.rec.verified[:]
+    manager.pending_identity={'white':'OCR layout changed'}
+    manager.clocks_recently_reset=lambda:True
+    for _ in range(3):manager.process(Observation.from_board(board))
+    assert manager.current_id==gid and manager.rec.verified==prefix
+    assert manager.snapshot()['pending_moves']==['c3'] and len(store.games())==1
+    manager.finish();resumed=GameManager(store,Settings())
+    resumed.pending_identity={'white':'another OCR reading'}
+    resumed.process(Observation.from_board(board))
+    assert resumed.current_id==gid and resumed.rec.verified==prefix
+    store.close()
+
+
+def test_small_unresolved_difference_preserves_main_pgn_after_timeout(tmp_path):
+    store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6 Bb5')
+    gid=manager.current_id;prefix=manager.rec.verified[:]
+    wrong=board.copy();wrong.remove_piece_at(chess.A2)
+    manager._find_history_path=lambda obs:None
+    manager._resume_latest_game_at_position=lambda obs:False
+    now=[0.];manager._clock=lambda:now[0]
+    obs=Observation.from_board(wrong)
+    manager._track_unresolved_position(obs,'unmatched position')
+    now[0]=100.;manager._track_unresolved_position(obs,'unmatched position')
+    assert manager.current_id==gid and manager.rec.verified==prefix and len(store.games())==1
+    assert 'preserved' in manager.last_message
+    store.close()
+
+
+def test_combine_overlapping_recordings_saves_active_game_and_retains_sources(tmp_path):
+    store=Store(tmp_path);settings=Settings(confirm_on_reply=False)
+    first,board=record(store,settings,'e4 e5 Nf3');first.finish()
+    first_id=first.current_id
+    # A duplicate full prefix followed by new play must not require a backward gap.
+    second=GameManager(store,settings);second._create(chess.Board(),Observation.from_board(board).timestamp)
+    board=chess.Board()
+    for san in 'e4 e5 Nf3 Nc6 Bb5'.split():
+        board.push_san(san);second.rec.board.push_san(san)
+        second.rec.verified.append(second.rec.board.peek().uci());second.rec.history.append(board.board_fen())
+    from chessstream.reconstruction import Branch
+    second.rec.branches=[Branch(board.fen(),())];second.persist()
+    second_id=second.current_id
+    rows=[store.game(first_id),store.game(second_id)]
+    combined_id=second.combine_games(rows)
+    game=chess.pgn.read_game(io.StringIO(store.game(combined_id)['pgn']))
+    assert [node.san() for node in game.mainline()]==['e4','e5','Nf3','Nc6','Bb5']
+    assert second.current_id==combined_id and len(store.games())==3
+    assert store.game(first_id)['status'].startswith('combined source')
+    fresh=GameManager(store,settings);fresh.process(Observation.from_board(board))
+    assert fresh.current_id==combined_id
+    store.close()

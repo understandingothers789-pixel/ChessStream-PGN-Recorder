@@ -288,8 +288,15 @@ class RecordingWorker(QThread):
                     timestamp=utcnow()
                     captured_at=time.monotonic()
                     if settings.detect_board:
-                        if image.shape != last_shape or board_rect is None and tick-last_detect>2:
+                        if image.shape != last_shape or tick-last_detect>2:
+                            previous_rect=board_rect
                             board_rect,quality=detector.detect(image)
+                            if board_rect!=previous_rect or image.shape!=last_shape:
+                                # Fullscreen can move the board without resizing the
+                                # browser client. Reacquire geometry, never game state.
+                                stable_key=None;stable_count=0;last_pixels=None
+                                self.manager.clear_position_recovery()
+                                self._text_detector.reset()
                             last_detect=tick
                             last_shape=image.shape
                             if board_rect is None and self.region.tracking_window:

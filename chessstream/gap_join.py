@@ -28,30 +28,46 @@ def join_recordings(rows, searcher):
             raise ValueError('The earlier game has a declared result. Correct it before joining further play.')
         end = combined.end()
         source = end.board()
-        # A later recorded move establishes its root's side to move. A bare
-        # FEN checkpoint may still have both turns as unconfirmed hypotheses.
-        turn=later.board().turn if later.variations else None
-        result = searcher.search(source,Observation.from_board(later.board()),target_turn=turn)
-        if not result.exhaustive:
-            raise ValueError('The gap search reached its limit. Increase the search limits in Settings and retry.')
-        valid = []
-        for path in result.paths:
-            trial = source.copy()
-            for move in path:trial.push(move)
-            for move in later.mainline_moves():
-                if move not in trial.legal_moves:break
-                trial.push(move)
-            else:
-                if trial.board_fen()==later.end().board().board_fen():valid.append(path)
-        if not valid:
-            raise ValueError('No legal connection was found within the configured gap limit.')
-        # All candidates have the same shortest length and lead into the same
-        # recorded continuation. Prefer consecutive recaptures, then use a
-        # stable move-order tie-break so the exported PGN contains one line.
-        chosen = select_capture_path(source, valid)[0]
-        for move in chosen:
-            end = end.add_main_variation(move)
-            end.comment = 'Inferred across recording gap: shortest legal continuation; intermediate frames were not recorded.'
+        # Repeated/overlapping recordings need no invented return to the root.
+        # Only accept overlap when the shared mainline agrees move for move.
+        overlap=None
+        later_moves=list(later.mainline_moves())
+        for node in [combined,*combined.mainline()]:
+            board=node.board();root=later.board()
+            if board.board_fen()!=root.board_fen() or (later_moves and board.turn!=root.turn):continue
+            cursor=node;compatible=True
+            for move in later_moves:
+                if not cursor.variations:break
+                if cursor.variations[0].move!=move:compatible=False;break
+                cursor=cursor.variations[0]
+            if compatible:overlap=node;break
+        if overlap is not None:
+            end=overlap
+        else:
+            # A later recorded move establishes its root's side to move. A bare
+            # FEN checkpoint may still have both turns as unconfirmed hypotheses.
+            turn=later.board().turn if later.variations else None
+            result = searcher.search(source,Observation.from_board(later.board()),target_turn=turn)
+            if not result.exhaustive:
+                raise ValueError('The gap search reached its limit. Increase the search limits in Settings and retry.')
+            valid = []
+            for path in result.paths:
+                trial = source.copy()
+                for move in path:trial.push(move)
+                for move in later.mainline_moves():
+                    if move not in trial.legal_moves:break
+                    trial.push(move)
+                else:
+                    if trial.board_fen()==later.end().board().board_fen():valid.append(path)
+            if not valid:
+                raise ValueError('No legal connection was found within the configured gap limit.')
+            # All candidates have the same shortest length and lead into the same
+            # recorded continuation. Prefer consecutive recaptures, then use a
+            # stable move-order tie-break so the exported PGN contains one line.
+            chosen = select_capture_path(source, valid)[0]
+            for move in chosen:
+                end = end.add_main_variation(move)
+                end.comment = 'Inferred across recording gap: shortest legal continuation; intermediate frames were not recorded.'
         if later.comment:end.comment=(end.comment+' Segment note: '+later.comment).strip()
 
         def copy_tree(old,new,board):
@@ -60,9 +76,10 @@ def join_recordings(rows, searcher):
                     raise ValueError('An analysis variation is incompatible with the earlier game state.')
                 target = next((node for node in new.variations if node.move==child.move),None)
                 if target is None:target=new.add_variation(child.move)
-                target.comment=child.comment
-                target.starting_comment=child.starting_comment
-                target.nags=set(child.nags)
+                if child.comment and child.comment not in target.comment:
+                    target.comment=(target.comment+' '+child.comment).strip()
+                if child.starting_comment:target.starting_comment=child.starting_comment
+                target.nags.update(child.nags)
                 next_board=board.copy();next_board.push(child.move)
                 copy_tree(child,target,next_board)
 

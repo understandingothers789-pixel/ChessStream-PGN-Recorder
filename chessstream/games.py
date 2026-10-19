@@ -161,7 +161,7 @@ class GameManager(GameExtras):
         the verified prefix. If a live FEN checkpoint was just created, also
         retry the preserved PGN that preceded it before keeping the split.
         """
-        rows=self.store.query("SELECT id,state,headers,session_id,status,name FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 16")
+        rows=self.store.query("SELECT id,state,headers,session_id,status,name FROM games WHERE status!='imported' AND status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC,updated DESC LIMIT 16")
         if not rows:return False
         latest=rows[0]
 
@@ -184,6 +184,9 @@ class GameManager(GameExtras):
                    and row['status'].startswith('preserved')]
             candidates.extend(row for row in prior if row['id'] not in {item['id'] for item in candidates})
         if latest['id'] not in {row['id'] for row in candidates}:candidates.append(latest)
+        # A newer temporary segment must not hide the last real game.
+        candidates.extend(row for row in rows if row['status'].startswith('preserved')
+                          and row['id'] not in {item['id'] for item in candidates})
 
         chosen=None
         joined=None
@@ -226,11 +229,10 @@ class GameManager(GameExtras):
             review=obs.placement() not in placements and obs.placement() in saved.history[:-1]
             if obs.placement() not in placements and not review:
                 headers=json.loads(row['headers'])
-                # Visible identity or a declared result blocks reconnecting an
-                # unrelated game. A clock reset alone is weak during window
+                # A declared result blocks reconnecting an unrelated game.
+                # Identity OCR alone cannot override a legal continuation. A clock reset alone is weak during window
                 # layout changes; only let it block a standard-start reset.
                 if (headers.get('Result','*')!='*' or state.get('terminal_message')
-                        or self.pending_identity
                         or (self.clocks_recently_reset()
                             and obs.placement()==chess.Board().board_fen())):
                     continue
@@ -508,7 +510,7 @@ class GameManager(GameExtras):
             self.finish("preserved • continued from visible FEN")
         self.rec=None
         self.reset_candidate=None
-        self._create(board,obs.timestamp,roots,note)
+        self._create(board,obs.timestamp,roots,note+" Temporary visible board FEN segment.")
         self._seed_opening(opening_moves)
         self.persist()
         self.last_message="New PGN started from the visible board position"
@@ -534,11 +536,17 @@ class GameManager(GameExtras):
                 opening=LegalSearcher(1,self.settings.search_nodes,self.settings.search_ms,self.settings.min_confidence).search(chess.Board(),obs)
                 if opening.exhaustive and len(opening.paths)==1:
                     self._create(chess.Board(),obs.timestamp)
-            if self.rec and self.pending_identity and obs.confidence>=.8 and not obs.uncertain_squares(max(.8,self.settings.min_confidence)):
+            if (self.rec and self.pending_identity and self.clocks_recently_reset()
+                    and obs.placement()==chess.Board().board_fen()
+                    and obs.confidence>=.8 and not obs.uncertain_squares(max(.8,self.settings.min_confidence))):
                 names=self.pending_identity
                 self._start_from_visible(obs,'visible player names changed')
                 self.observed_names=names
                 for color,name in names.items():self.headers[color.title()]=name
+            if (self.rec and ('visible midgame FEN' in self.note or 'visible board FEN' in self.note)
+                    and not obs.uncertain_squares(max(.8,self.settings.min_confidence))
+                    and self.store.query("SELECT id FROM games WHERE id!=? AND session_id=? AND status LIKE 'preserved%' LIMIT 1",(self.current_id,self.session_id))):
+                self._resume_latest_game_at_position(obs)
             if not self.rec:
                 self._initialize(obs)
             else:
@@ -696,6 +704,11 @@ class GameManager(GameExtras):
             if self._resume_latest_game_at_position(obs):
                 self.clear_position_recovery()
                 return
+            # Small disagreements and ambiguous legal paths are recovery work,
+            # not evidence of a new game. Preserve the active prefix indefinitely.
+            if not large_change or status.startswith(('uncertain','search limit')):
+                self.last_message=status+' • existing PGN preserved; waiting for clearer continuation'
+                return
             try:
                 self._start_from_visible(obs,reason,self._unresolved_timestamp)
             except ValueError:
@@ -705,7 +718,7 @@ class GameManager(GameExtras):
         else:
             remaining=max(1,int(seconds-elapsed+.999))
             label="possible new game" if large_change else "unresolved position"
-            self.last_message=f"{status} • {label} ({changed} changed squares); new FEN recording in {remaining}s if stable"
+            self.last_message=f"{status} • {label} ({changed} changed squares); checking saved PGNs in {remaining}s if stable"
 
     def _find_history_path(self,obs):
         """Find an exact or short legal continuation from any verified PGN position."""
@@ -967,6 +980,30 @@ class GameManager(GameExtras):
                 if headers.get('Result','*')!=json.loads(row['headers']).get('Result','*'):state['result_override']=True
                 pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""),state.get("review_pgn",""),state.get("move_clocks",{}),state.get('inferred_moves',{}))
                 self.store.save_game(gid,row["session_id"],name,row["started"],row["status"],headers,state,pgn,row["ended"])
+
+    def combine_games(self, rows, pgn=None):
+        """Save a validated combined game; source records and files remain intact."""
+        with self.lock:
+            pgn = pgn or join_recordings(rows,self.searcher())
+            game=chess.pgn.read_game(io.StringIO(pgn))
+            if game is None or game.errors:raise ValueError('Combined PGN is invalid.')
+            rec=self.reconstructor(game.board())
+            for move in game.mainline_moves():
+                rec.board.push(move);rec.verified.append(move.uci());rec.history.append(rec.board.board_fen())
+            rec.branches=[Branch(rec.board.fen(),())]
+            gid=uuid.uuid4().hex
+            started=min(row['started'] for row in rows)
+            state={**rec.serialize(),'review_pgn':pgn,'note':game.comment,
+                   'combined_source_ids':[row['id'] for row in rows]}
+            self.store.save_game(gid,self.session_id,'Combined game',started,'combined',dict(game.headers),state,pgn,None)
+            with self.store.transaction() as db:
+                for row in rows:
+                    db.execute('UPDATE games SET status=? WHERE id=?',(f'combined source • see {gid}',row['id']))
+            self.recover(gid,persist=False)
+            self.last_message='Selected PGNs combined • originals kept'
+            self.persist()
+            self.store.audit('PGNs combined',{'game_id':gid,'sources':[row['id'] for row in rows]})
+            return gid
 
     def import_pgn(self, path: Path) -> int:
         count = 0

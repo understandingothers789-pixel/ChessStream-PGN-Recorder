@@ -44,7 +44,7 @@ class GameExtras:
                 logging.info('Both visible clocks reset: %s',clocks)
             names=context.get('names',{})
             if not self.rec:return
-            changed=any(color in self.observed_names and self.observed_names[color].casefold()!=name.casefold() for color,name in names.items())
+            changed=any(color in self.observed_names and ''.join(self.observed_names[color].casefold().split())!=''.join(name.casefold().split()) for color,name in names.items())
             if changed:
                 self.pending_identity=names
                 logging.info('Stable visible player identity changed: %s -> %s',self.observed_names,names)

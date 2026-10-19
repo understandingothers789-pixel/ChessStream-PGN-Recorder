@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.5"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.6"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -438,7 +438,7 @@ class MainWindow(ReviewTools,QMainWindow):
     def build_library(self):
         page,box=self.page("Your game library","Every game is saved locally. Screenshot deletion leaves these games and PGNs intact.")
         bar=QHBoxLayout()
-        for name,fn in [("Export selected",self.export_selected),("Export entire session",self.export_session),("Export all",self.export_all),("Open PGN…",self.import_pgn),("Refresh",self.refresh_library)]:bar.addWidget(button(name,fn))
+        for name,fn in [("Combine selected PGNs",self.join_selected),("Export selected",self.export_selected),("Export entire session",self.export_session),("Export all",self.export_all),("Open PGN…",self.import_pgn),("Refresh",self.refresh_library)]:bar.addWidget(button(name,fn))
         bar.addStretch();box.addLayout(bar)
         self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
         box.addWidget(self.game_table,2)
@@ -571,8 +571,14 @@ class MainWindow(ReviewTools,QMainWindow):
         selected=self.selected_games()
         if len(selected)<2:
             self.error('Ctrl-click two or more recordings, then choose Join selected recordings.');return
-        self.background(lambda:join_recordings(selected,self.manager.searcher()),
-                        lambda pgn:self.write_export([{'pgn':pgn}]))
+        if self.worker and self.worker.isRunning():
+            self.error('Stop capture before combining recordings.');return
+        def saved(pgn):
+            self.manager.combine_games(selected,pgn)
+            self.refresh_library()
+            self.on_update(self.manager.snapshot())
+            self.navigate(0)
+        self.background(lambda:join_recordings(selected,self.manager.searcher()),saved)
     def export_all(self):self.write_export(list(reversed(self.store.games())))
     def export_session(self):
         selected=self.selected_games()
