@@ -95,3 +95,18 @@ def test_opening_first_shortest_proves_depth_and_prefers_pawns_without_enumerati
     limited=LegalSearcher(6,node_limit=1).search(chess.Board(),Observation.from_board(target),
                                               first_shortest=True,pawn_first=True)
     assert not limited.shortest_proven and not limited.paths
+
+
+def test_guesses_put_double_pawn_push_before_single_push_in_fast_and_exhaustive_paths():
+    target=play(chess.Board(),'c3 e5 d4')
+    search=LegalSearcher(3)
+    exact=search.search(chess.Board(),Observation.from_board(target))
+    assert exact.exhaustive
+    for paths in (select_capture_path(chess.Board(),exact.paths),
+                  search.search(chess.Board(),Observation.from_board(target),first_shortest=True).paths):
+        assert [m.uci() for m in paths[0]]==['d2d4','e7e5','c2c3']
+    from chessstream.reconstruction import guess_move_priority
+    source=play(chess.Board(),'e4 d5')
+    assert guess_move_priority(source,source.parse_san('exd5')) < guess_move_priority(source,source.parse_san('d4'))
+    assert guess_move_priority(source,source.parse_san('d4')) < guess_move_priority(source,source.parse_san('d3'))
+    assert guess_move_priority(source,source.parse_san('d3')) < guess_move_priority(source,source.parse_san('Nf3'))

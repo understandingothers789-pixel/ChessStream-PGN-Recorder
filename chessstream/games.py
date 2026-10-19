@@ -475,7 +475,7 @@ class GameManager(GameExtras):
         self.move_clocks={str(ply):node.clock() for ply,node in enumerate(game.mainline(),1) if node.clock() is not None}
         self.inferred_moves={str(int(ply)+len(prefix)):value for ply,value in self.inferred_moves.items()}
         for ply,uci in enumerate(prefix,1):
-            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix restored before an earlier FEN recording; pawn moves prioritized.'}
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix restored before an earlier FEN recording; captures and double pawn pushes prioritized.'}
         self.note=self._opening_note()+' An earlier application-created FEN start was replaced; its recorded continuation was retained.'
         self._persisted_fingerprint=None
         self.store.audit('opening prefix backfilled',{'game_id':self.current_id,'previous_initial_fen':old.initial_fen,
@@ -495,7 +495,7 @@ class GameManager(GameExtras):
         pending=1 if self.settings.confirm_on_reply else 0
         confirmed=moves[:-pending] if pending else moves
         for ply,uci in enumerate(moves,1):
-            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix: shortest legal path, pawn moves prioritized; earlier move order may differ.'}
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix: shortest legal path; captures, double pawn pushes, single pawn pushes, then pieces prioritized; earlier move order may differ.'}
         for uci in confirmed:
             self.rec.board.push_uci(uci)
             self.rec.verified.append(uci)

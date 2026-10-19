@@ -262,3 +262,20 @@ def test_settled_gap_uses_first_legal_path_and_three_second_errors_keep_prefix(t
     manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(wrong))
     assert manager._settled_since==20.
     store.close()
+
+
+def test_castling_both_colors_and_wings_settles_without_an_opponent_reply(tmp_path):
+    from chessstream.domain import utcnow
+    for color in ('w','b'):
+        for san in ('O-O','O-O-O'):
+            store=Store(tmp_path/(color+san));manager=GameManager(store,Settings())
+            board=chess.Board(f'r3k2r/ppp2ppp/8/3pp3/3PP3/8/PPP2PPP/R3K2R {color} KQkq - 0 10')
+            now=[0.];manager._clock=lambda:now[0]
+            manager._create(board.copy(),utcnow());board.push_san(san)
+            manager.process(Observation.from_board(board))
+            now[0]=2.;manager.process(Observation.from_board(board))
+            game=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
+            assert [n.san() for n in game.mainline()]==[san]
+            assert game.end().board().fen()==board.fen()
+            assert not manager.snapshot()['pending_moves']
+            store.close()

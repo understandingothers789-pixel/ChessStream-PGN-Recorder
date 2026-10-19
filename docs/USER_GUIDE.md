@@ -152,3 +152,10 @@ Progress is saved after state changes. After a crash or restart, open the saved 
 - **Cannot launch installed app**: run `Diagnose ChessStream.cmd` in the installation directory. The rotating `application.log` in the data directory records worker failures. Packaged inference and GUI startup are tested by Windows CI; hardware-specific failures still need checking on your PC.
 
 See `KNOWN_LIMITATIONS.md` and `evaluation.json` for exact tested scope.
+
+
+### Guess ordering and castling
+
+When several legal shortest sequences reach the same board, guesses prefer capture/recapture continuity, then captures, two-square pawn pushes, one-square pawn pushes, and other piece moves. Quick first-match recovery uses this ordering too. For example, `d4` is preferred before `c3` when both move orders fit. These preferences describe likely move order; they do not prove it.
+
+Castling moves the king and rook together and is accepted after two seconds unchanged, like other legal moves. Both colors and both castling sides are covered by tests. Recordings begun from a midgame FEN with unknown castling rights still require an accurate FEN to enable castling; a home king and rook alone do not prove those rights.

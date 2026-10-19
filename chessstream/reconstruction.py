@@ -29,7 +29,7 @@ def capture_path_rank(board: chess.Board, path: tuple[chess.Move, ...] | list[ch
 
     A capture followed by a capture onto the same square is the strongest
     cue: it commonly represents a natural recapture (for example cxd4 Qxd4).
-    UCI ordering is applied by callers as a stable final tie-break.
+    Pawn advance preferences and UCI ordering provide the remaining tie-breaks.
     """
     state = board.copy(stack=False)
     same_square_recaptures = consecutive_captures = captures = 0
@@ -51,6 +51,24 @@ def capture_path_rank(board: chess.Board, path: tuple[chess.Move, ...] | list[ch
     return same_square_recaptures, consecutive_captures, captures
 
 
+def guess_move_priority(board, move, previous_capture_square=None):
+    """User preference for guesses; never changes legal reachability."""
+    capture=board.is_capture(move)
+    pawn=board.piece_type_at(move.from_square)==chess.PAWN
+    double=pawn and abs(move.to_square-move.from_square)==16
+    return (0 if capture and move.to_square==previous_capture_square else
+            1 if capture else 2 if double else 3 if pawn else 4)
+
+
+def guess_path_priority(board, path):
+    state=board.copy(stack=False);previous=None;order=[]
+    for move in path:
+        order.append(guess_move_priority(state,move,previous))
+        previous=move.to_square if state.is_capture(move) else None
+        state.push(move)
+    return tuple(order)
+
+
 def select_capture_path(board: chess.Board, paths):
     """Choose one deterministic path from equally short equivalent results."""
     paths = list(paths)
@@ -58,6 +76,7 @@ def select_capture_path(board: chess.Board, paths):
         return paths
     ranked = sorted(paths, key=lambda path: (
         tuple(-score for score in capture_path_rank(board, path)),
+        guess_path_priority(board,path),
         tuple(move.uci() for move in path)))
     return [ranked[0]]
 
@@ -177,12 +196,19 @@ class LegalSearcher:
                         2 * bool(mismatch & chess.BB_SQUARES[move.from_square]) +
                         bool(mismatch & chess.BB_SQUARES[move.to_square]))
 
-            moves = state.legal_moves
-            if pawn_first:
-                moves=sorted(moves,key=lambda move:(state.piece_type_at(move.from_square)!=chess.PAWN,
-                    -priority(move),-int(abs(move.to_square-move.from_square)==16),
-                    abs(3.5-chess.square_file(move.to_square)),move.uci()))
-            elif remaining > 1:moves = sorted(moves,key=priority,reverse=True)
+            # Apply the same preference to quick first-match searches and to
+            # exhaustive tie-breaking: captures, double pawn pushes, single
+            # pawn pushes, then pieces. Target progress breaks remaining ties.
+            previous_capture_square=None
+            if path:
+                last=path[-1]
+                state.pop()
+                was_capture=state.is_capture(last)
+                state.push(last)
+                if was_capture:previous_capture_square=last.to_square
+            moves=sorted(state.legal_moves,key=lambda move:(
+                guess_move_priority(state,move,previous_capture_square),
+                -priority(move),abs(3.5-chess.square_file(move.to_square)),move.uci()))
             found = False
             for move in moves:
                 if remaining == 1:
@@ -206,7 +232,7 @@ class LegalSearcher:
             if not found:dead.add(key)
             return found
 
-        # All alternatives at the shortest matching depth must be examined.
+        # Normal searches enumerate shortest alternatives; quick guesses stop at the first match.
         state = board.copy(stack=False)
         for depth in range(1, self.max_plies+1):
             if target_turn is not None and (board.turn ^ bool(depth & 1))!=target_turn:continue
