@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.11"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.12"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -129,7 +129,18 @@ class MainWindow(ReviewTools,QMainWindow):
         self.recognition_details=muted("Bundled screenshot model • waiting for a capture");capture_card.box.addWidget(self.recognition_details)
         internal=Card("RECONSTRUCTED BOARD");self.board_heading=internal.box.itemAt(0).widget();self.live_board=BoardView();internal.box.addWidget(self.live_board,1);self.last_move_label=muted("Waiting for the first verified position");internal.box.addWidget(self.last_move_label)
         self.live_board.show_pending()
-        moves_card=Card("MOVES");self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);moves_card.box.addWidget(self.move_table,1)
+        moves_card=Card("MOVES")
+        # Keep the common PGN actions beside the move list, where they remain
+        # reachable even when the live page is taller than the window.
+        pgn_actions=QHBoxLayout();pgn_actions.setSpacing(6)
+        self.live_copy_pgn=button("Copy PGN",self.copy_current);self.live_copy_pgn.setToolTip("Copy the current recording as PGN")
+        self.live_export_pgn=button("Export PGN",self.export_current);self.live_export_pgn.setToolTip("Save the current recording as a PGN file")
+        self.live_copy_fen=button("Copy FEN",self.copy_visible_fen);self.live_copy_fen.setToolTip("Copy the visible board position as FEN")
+        for action in [self.live_copy_pgn,self.live_export_pgn,self.live_copy_fen]:
+            action.setStyleSheet("padding:7px 4px;font-size:11px")
+            pgn_actions.addWidget(action)
+        moves_card.box.addLayout(pgn_actions)
+        self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);self.move_table.setContextMenuPolicy(Qt.CustomContextMenu);self.move_table.customContextMenuRequested.connect(self.live_moves_context_menu);moves_card.box.addWidget(self.move_table,1)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
         self.choose_path=button("Confirm selected sequence",self.choose_sequence);self.choose_path.hide();moves_card.box.addWidget(self.choose_path)
@@ -139,7 +150,18 @@ class MainWindow(ReviewTools,QMainWindow):
         splitter.setSizes([430,430,265]);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
         self.recovery=muted("Search uses the shortest legal gap. Unseen repetitions and identical transpositions may need review.");box.addWidget(self.recovery)
-        footer=QHBoxLayout();footer.addWidget(button("Export current PGN",self.export_current,primary=True));footer.addWidget(button("Copy PGN",self.copy_current));footer.addWidget(button("Copy visible FEN",self.copy_visible_fen));footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
+        footer=QHBoxLayout();footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
+
+    def live_moves_context_menu(self,position):
+        menu=QMenu(self.move_table)
+        copy=menu.addAction("Copy current PGN")
+        export=menu.addAction("Export current PGN…")
+        menu.addSeparator()
+        fen=menu.addAction("Copy visible FEN")
+        selected=menu.exec(self.move_table.viewport().mapToGlobal(position))
+        if selected==copy:self.copy_current()
+        elif selected==export:self.export_current()
+        elif selected==fen:self.copy_visible_fen()
 
     def region_text(self):
         r=self.region
