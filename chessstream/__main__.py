@@ -22,14 +22,18 @@ def main():
     configure_logging(root)
     from .capture import enable_dpi_awareness
     enable_dpi_awareness()
+    from .desktop import set_application_identity
+    set_application_identity()
     if args.replay:
         from .replay import replay_video
         replay_video(args.replay,root,args.region,args.interval,args.orientation)
         return
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QIcon
     from .gui import MainWindow
     app=QApplication(sys.argv[:1]);app.setApplicationName('ChessStream PGN Recorder');app.setStyle('Fusion')
+    app.setWindowIcon(QIcon(str(Path(__file__).parent/'assets/icon.ico')))
     window=MainWindow(root);window.show()
     if args.smoke:
         window.resize(1460,940)

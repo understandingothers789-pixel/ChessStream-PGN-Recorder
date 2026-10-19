@@ -4,6 +4,8 @@
 
 Download `ChessStream-PGN-Recorder-Portable.zip` from the repository's GitHub Releases page. Extract it to Documents or another writable folder, then open `Launch ChessStream.cmd`. No installer, administrator rights or separate Python setup is required. If Windows blocks the downloaded launcher, right-click the ZIP → Properties → Unblock (if offered), apply, then extract again. An organization-managed block requires the device administrator; do not disable system security.
 
+On Windows, the first launch creates or refreshes a **ChessStream PGN Recorder** desktop shortcut with the app's knight-and-play icon. Use that shortcut for everyday launches. It points to this extracted copy, so launch an updated copy once to refresh the shortcut after moving or updating the app. **Settings → Hotkeys & help → Create / refresh desktop shortcut** recreates it if needed. Keep the extracted app folder in place. The generic icon of a `.cmd` file or Python itself is independent of the ChessStream desktop shortcut.
+
 ## First recording
 
 Keep the browser and board visible. Put ChessStream beside it or on another monitor; a window placed over the board becomes part of the screenshot.

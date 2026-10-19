@@ -68,7 +68,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.resize(max(minimum_width,min(1460,available.width()-48)),max(minimum_height,min(940,available.height()-48)))
         self.setStyleSheet(STYLE)
         self.global_hotkeys=GlobalHotkeys(QApplication.instance())
-        icon=Path(__file__).parent/"assets/icon.png"
+        icon=Path(__file__).parent/"assets/icon.ico"
         if icon.exists():self.setWindowIcon(QIcon(str(icon)))
         outer=QWidget();self.setCentralWidget(outer);layout=QHBoxLayout(outer);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
         side=QWidget();side.setObjectName("sidebar");side.setFixedWidth(208);sidebar=QVBoxLayout(side);sidebar.setContentsMargins(16,28,16,20)
@@ -76,12 +76,13 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.15"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.16"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
         self.navigate(0);self.install_hotkeys()
+        if sys.platform=='win32':QTimer.singleShot(250,self.refresh_desktop_shortcut)
         self.statusBar().showMessage("Ready • screenshots kept until you delete them")
         # Prefer the best visible YouTube window at every launch, including
         # over a stale saved source. If none is available, retain the saved
@@ -863,6 +864,7 @@ class MainWindow(ReviewTools,QMainWindow):
         storage.addRow('Data directory',muted(str(self.root)));storage.addRow(muted('Verified progress is always saved atomically in the local database and per-game PGN files. The export folder provides an additional copy. Screenshots and metadata are separate.'))
         shortcuts=tab('Hotkeys & help');self.start_key=QKeySequenceEdit(QKeySequence(self.settings.start_hotkey));self.stop_key=QKeySequenceEdit(QKeySequence(self.settings.stop_hotkey));self.region_key=QKeySequenceEdit(QKeySequence(self.settings.region_hotkey));shortcuts.addRow('Start / pause / resume',self.start_key);shortcuts.addRow('Stop recording',self.stop_key);shortcuts.addRow('Select capture region',self.region_key);shortcuts.addRow(muted('On Windows, single-key or modifier hotkeys are registered globally when available; otherwise they work with app focus. Capturing protected video or a minimized/covered browser is not supported. Keep the browser visible and position this window beside it or on another monitor.'))
         shortcuts.addRow(button('Open user guide',self.open_guide));shortcuts.addRow(button('Open application data',lambda:QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.root)))))
+        if sys.platform=='win32':shortcuts.addRow(button('Create / refresh desktop shortcut',lambda:self.refresh_desktop_shortcut(manual=True)))
         box.addWidget(button('Save settings',self.save_settings,primary=True),0,Qt.AlignRight)
 
     def browse_export(self):
@@ -903,6 +905,19 @@ class MainWindow(ReviewTools,QMainWindow):
             if sequence:
                 if self.global_hotkeys.register(sequence,fn):continue
                 key=QShortcut(QKeySequence(sequence),self);key.activated.connect(fn);self.shortcuts.append(key)
+
+    def refresh_desktop_shortcut(self,manual=False):
+        if self._closing:return
+        from .desktop import create_desktop_shortcut
+        def create():
+            try:return create_desktop_shortcut(self.root,force=manual)
+            except Exception:
+                logging.exception('Could not refresh ChessStream desktop shortcut')
+                return None
+        def done(path):
+            if manual:self.statusBar().showMessage('ChessStream desktop shortcut refreshed' if path else
+                'Could not create desktop shortcut; see Diagnostics / logs',8000)
+        self.background(create,done)
 
     def refresh_usage(self):
         if self._closing:return

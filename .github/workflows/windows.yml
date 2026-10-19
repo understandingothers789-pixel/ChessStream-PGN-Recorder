@@ -32,6 +32,18 @@ jobs:
           $deadline = (Get-Date).AddSeconds(30)
           while (!(Test-Path "build/launcher-desktop.png") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
           if (!(Test-Path "build/launcher-desktop.png")) { throw "Portable command launcher failed to render the desktop" }
+      - name: Test desktop shortcut branding
+        if: env.PACKAGE_WINDOWS == 'true'
+        run: |
+          build/windows-portable/runtime/python.exe -c "from pathlib import Path; from chessstream.desktop import create_desktop_shortcut; p=create_desktop_shortcut(Path('build/shortcut-smoke'),force=True); assert p and p.is_file(); print('Desktop shortcut created')"
+          $stamp = Get-Content 'build/shortcut-smoke/desktop-shortcut.json' | ConvertFrom-Json
+          $shell = New-Object -ComObject WScript.Shell
+          $shortcut = $shell.CreateShortcut($stamp.shortcut)
+          if (!($shortcut.TargetPath.EndsWith('pythonw.exe'))) { throw 'Shortcut target is not the GUI launcher' }
+          if (!($shortcut.Arguments.Contains('-m chessstream'))) { throw 'Shortcut arguments are missing' }
+          if (!($shortcut.IconLocation.EndsWith('.ico,0'))) { throw 'Shortcut does not use ChessStream artwork' }
+          $icon = $shortcut.IconLocation -replace ',0$', ''
+          if (!(Test-Path $icon)) { throw 'Shortcut artwork is missing' }
       - uses: actions/upload-artifact@v4
         if: env.PACKAGE_WINDOWS == 'true'
         with:
