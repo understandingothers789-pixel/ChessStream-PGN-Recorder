@@ -249,7 +249,7 @@ class RecordingWorker(QThread):
                                 self.region=value;board_rect=None;last_shape=None;last_pixels=None;context_source_rect=None;self._text_detector.reset()
                             elif action=="record":
                                 self.preview_only=False;stable_count=0
-                                self.manager.clear_position_recovery()
+                                self.manager.clear_position_recovery();self.manager.reset_settling()
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
                             elif action=="correct":
@@ -267,7 +267,7 @@ class RecordingWorker(QThread):
                             logging.exception("Capture command %s failed",action)
                             self.problem.emit(str(e))
                     if self.paused.is_set():
-                        self.manager.clear_position_recovery()
+                        self.manager.clear_position_recovery();self.manager.reset_settling()
                         self._text_detector.reset()
                         self.stopping.wait(.1)
                         continue
@@ -295,7 +295,7 @@ class RecordingWorker(QThread):
                                 # Fullscreen can move the board without resizing the
                                 # browser client. Reacquire geometry, never game state.
                                 stable_key=None;stable_count=0;last_pixels=None
-                                self.manager.clear_position_recovery()
+                                self.manager.clear_position_recovery();self.manager.reset_settling()
                                 self._text_detector.reset()
                             last_detect=tick
                             last_shape=image.shape
@@ -392,7 +392,7 @@ class RecordingWorker(QThread):
                                         uncertain_squares=obs.uncertain_squares(max(.80,settings.min_confidence)),
                                         recognition_mode=settings.recognition_mode)
                     else:
-                        if not self.preview_only:self.manager.clear_position_recovery()
+                        if not self.preview_only:self.manager.clear_position_recovery();self.manager.reset_settling()
                         if not self.preview_only:self.scan_context(context_image,context_rect,None)
                         snapshot=self.manager.snapshot()
                         self.frame.emit(image)

@@ -77,6 +77,8 @@ class GameManager(GameExtras):
         self._review_since=None
         self._review_candidate=None
         self._review_recorded=None
+        self._settled_key=None;self._settled_since=None;self._settled_error=None
+        self._timed_base=None;self._timed_end=0
         self._clock=time.monotonic
         self._reset_extras()
 
@@ -89,6 +91,8 @@ class GameManager(GameExtras):
 
     def _create(self, board, timestamp, roots=None, note=""):
         self._reset_extras()
+        self._timed_base=None;self._timed_end=0
+        self._settled_key=None;self._settled_since=None
         self.reset_candidate=None;self.reset_started=None
         self.current_id = uuid.uuid4().hex
         self.started = timestamp
@@ -614,6 +618,9 @@ class GameManager(GameExtras):
                 else:
                     before=len(self.rec.verified)
                     previous_pending=[branch.moves for branch in self.rec.branches]
+                    self._revise_timed_hover(obs)
+                    before=len(self.rec.verified)
+                    previous_pending=[branch.moves for branch in self.rec.branches]
                     update = self.rec.observe(obs)
                     if update.ignored_squares:
                         move_evidence=obs.with_unknown(update.ignored_squares)
@@ -648,6 +655,7 @@ class GameManager(GameExtras):
                         self.ended = self.ended or obs.timestamp
                         self.last_message = "Complete • " + outcome.termination.name.replace("_"," ").lower()
             if self.rec:
+                self._settle_position(move_evidence)
                 self._record_clocks(move_evidence)
                 self.persist()
             signature=(self.current_id,obs.placement(),self.last_message,obs.orientation)
@@ -658,6 +666,106 @@ class GameManager(GameExtras):
                      "orientation":obs.orientation,"ignored_squares":self._recognition_ignored_squares})
                 self._last_evidence_signature=signature
             return self.snapshot()
+
+    def _revise_timed_hover(self, obs):
+        """Prefer a corrected last drop over a reversible multi-move detour."""
+        if (not self._timed_base or len(self.rec.verified)!=self._timed_end
+                or obs.matches(self.rec.board,self.settings.min_confidence)):
+            return
+        probe=Reconstructor.restore(self._timed_base,self.searcher())
+        result=LegalSearcher(1,min(2000,self.settings.search_nodes),min(30,self.settings.search_ms),
+                            self.settings.min_confidence).search(probe.board,obs,first_shortest=True)
+        if not result.paths:return
+        before=len(probe.verified)
+        self.rec=probe
+        self.inferred_moves={k:v for k,v in self.inferred_moves.items() if int(k)<=before}
+        self.move_clocks={k:v for k,v in self.move_clocks.items() if int(k)<=before}
+        self._trim_timed_review(before)
+        self._timed_base=None;self._timed_end=0
+        self.store.audit('timed move corrected',{'game_id':self.current_id,'after_ply':before,
+            'placement':obs.placement(),'reason':'alternate legal last drop; earlier prefix retained'})
+
+    def _trim_timed_review(self, before):
+        if not self.review_pgn:return
+        game=chess.pgn.read_game(io.StringIO(self.review_pgn))
+        if not game:return
+        node=game
+        for _ in range(before):
+            if not node.variations:break
+            node=node.variations[0]
+        if node.variations:node.remove_variation(node.variations[0])
+        self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+
+    def _settle_position(self, obs):
+        """Two seconds of board evidence permits a labeled, revisable guess."""
+        now=self._clock();key=(self.current_id,obs.placement())
+        if obs.confidence<.8 or obs.uncertain_squares(self.settings.min_confidence):
+            self._settled_key=None;self._settled_since=None
+            return
+        if self._settled_key!=key:
+            self._settled_key=key;self._settled_since=now;self._settled_error=None
+            return
+        elapsed=now-self._settled_since
+        if elapsed<2 or self.terminal_message:return
+        if obs.matches(self.rec.board,self.settings.min_confidence):return
+        if obs.placement() in self.rec.history[:-1]:return  # review is not play
+        # A reply that extends the committed suffix removes its rollback privilege.
+        if self._timed_base and len(self.rec.verified)>self._timed_end:
+            self._timed_base=None
+        candidates=[b for b in self.rec.branches if b.moves and obs.matches(b.board(),self.settings.min_confidence)]
+        base=None;chosen=None
+        if candidates:
+            # Preserve the existing capture-continuity ordering on known paths.
+            branch=candidates[0]
+            base=self.rec.serialize()
+            probe=Reconstructor.restore(base,self.searcher())
+            probe.incomplete=False
+            probe.choose(self.rec.branches.index(branch))
+            chosen=probe
+        else:
+            # Search only until the first shortest endpoint match. Exhausting all
+            # equivalent move orders is unnecessary for an explicitly guessed line.
+            states=([self._timed_base] if self._timed_base else [])+[self.rec.serialize()]
+            budget_started=time.monotonic();used=0
+            for state in states:
+                probe=Reconstructor.restore(state,self.searcher())
+                remaining_ms=self.settings.search_ms-(time.monotonic()-budget_started)*1000
+                remaining_nodes=self.settings.search_nodes-used
+                if remaining_ms<=0 or remaining_nodes<=0:break
+                search=LegalSearcher(max(6,self.settings.max_plies),remaining_nodes,remaining_ms,self.settings.min_confidence)
+                result=search.search(probe.board,obs,first_shortest=True)
+                used+=result.nodes
+                if not result.paths:continue
+                before=len(probe.verified)
+                for move in result.paths[0]:
+                    probe.board.push(move);probe.verified.append(move.uci());probe.history.append(probe.board.board_fen())
+                if not obs.matches(probe.board,self.settings.min_confidence):continue
+                probe.branches=[Branch(probe.board.fen(),())];probe.incomplete=False
+                base=state;chosen=probe
+                break
+        if chosen is not None:
+            before=len(base['verified'])
+            if self._timed_base and before<len(self.rec.verified):
+                # Discard only annotations attached to the replaceable guessed suffix.
+                self.inferred_moves={k:v for k,v in self.inferred_moves.items() if int(k)<=before}
+                self.move_clocks={k:v for k,v in self.move_clocks.items() if int(k)<=before}
+                self._trim_timed_review(before)
+            self._timed_base=base;self._timed_end=len(chosen.verified)
+            self.rec=chosen
+            for ply in range(before,len(chosen.verified)):
+                self.inferred_moves[str(ply+1)]={'uci':chosen.verified[ply],
+                    'comment':'Inferred: position unchanged for at least 2 seconds; best-effort legal order, not independently verified.'}
+            self.rec.status='recording • accepted after 2 seconds (inferred)'
+            self.last_message=self.rec.status
+            self.store.audit('settled position accepted',{'game_id':self.current_id,'after_ply':before,
+                'moves':chosen.verified[before:],'placement':obs.placement(),'elapsed':elapsed})
+            self.clear_position_recovery()
+        elif elapsed>=3:
+            self.last_message='Recovery error • position unresolved for 3 seconds; PGN kept; retrying legal gap'
+            if self._settled_error!=key:
+                self.store.audit('settled position recovery error',{'game_id':self.current_id,'placement':obs.placement(),
+                    'elapsed':elapsed,'reason':'No legal connection found within resource limits; saved prefix retained'})
+                self._settled_error=key
 
     def _track_unresolved_position(self,obs,status):
         """Treat legal history as review; split only a sustained unexplained board."""
@@ -772,6 +880,9 @@ class GameManager(GameExtras):
         except ValueError:
             self.last_message="Review position • legal continuation linked to saved game"
 
+    def reset_settling(self):
+        self._settled_key=None;self._settled_since=None;self._settled_error=None
+
     def clear_position_recovery(self):
         self._unresolved_position=self._unresolved_since=self._unresolved_timestamp=None
         self._review_position=self._review_since=self._review_candidate=None
@@ -783,13 +894,14 @@ class GameManager(GameExtras):
         comment = self.note
         pending = any(b.moves for b in self.rec.branches) or len(self.rec.branches)>1 or self.rec.incomplete
         if pending:
-            comment += (" Final move awaits opponent response or explicit confirmation; only the verified prefix is exported."
+            comment += (" Final move awaits a reply, 2 seconds unchanged, or explicit confirmation; only accepted moves are exported."
                         if self.rec.confirmation_plies and len(self.rec.branches)==1 and len(self.rec.branches[0].moves)==1
                         else " Unresolved observations exist; only the verified prefix is exported.")
         status = ("aborted" if self.terminal_message["reason"]=="aborted" else "complete") if self.terminal_message else ("complete" if self.ended and self.headers["Result"] != "*" else self.rec.status)
         if pending:status+=' • unresolved'
         data = self.rec.serialize()
         data["note"] = self.note
+        data["timed_base"]=self._timed_base;data["timed_end"]=self._timed_end
         data.update(self._extra_state())
         data['result_override']=self.result_override
         fingerprint=json.dumps([self.current_id,self.name,self.headers,data,self.ended,self.settings.export_dir,self.settings.auto_export],sort_keys=True)
@@ -846,7 +958,7 @@ class GameManager(GameExtras):
                     "preview_clock_support":(ranked_branches[0][1] if ranked_branches else 0),
                     "initial_fen":self.rec.initial_fen,"moves":san,
                     "guessed_plies":sorted(int(ply) for ply,item in self.inferred_moves.items()
-                        if str(ply).isdigit() and 0<int(ply)<=len(san) and 'Guessed opening prefix' in item.get('comment','')),
+                        if str(ply).isdigit() and 0<int(ply)<=len(san) and ('Guessed opening prefix' in item.get('comment','') or 'Inferred:' in item.get('comment',''))),
                     "plies":len(san),"last_move":self.rec.verified[-1] if san else None,
                     "alternatives":alternatives,"incomplete":self.rec.incomplete,"note":self.note,
                     "result":self.headers.get("Result","*"),"terminal_message":self.terminal_message,"clocks":(self.latest_context or {}).get("clocks",{}),"players":{"white":self.headers.get('White','Unknown'),"black":self.headers.get('Black','Unknown')},
@@ -900,6 +1012,8 @@ class GameManager(GameExtras):
             self.ended=(row['ended'] or utcnow()) if self.headers.get('Result','*')!='*' else None
             state = json.loads(row["state"])
             self.note = state.get("note", "")
+            self._timed_base=state.get("timed_base");self._timed_end=state.get("timed_end",0)
+            self._settled_key=None;self._settled_since=None
             self._load_extras(state)
             if self.terminal_message:self.ended=row['ended'] or utcnow()
             self.result_override=state.get('result_override',False)

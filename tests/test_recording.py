@@ -216,3 +216,49 @@ def test_combine_overlapping_recordings_saves_active_game_and_retains_sources(tm
     fresh=GameManager(store,settings);fresh.process(Observation.from_board(board))
     assert fresh.current_id==combined_id
     store.close()
+
+
+def test_two_second_settling_exports_without_reply_and_revises_latest_guess(tmp_path):
+    store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6')
+    now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
+    gid=manager.current_id;before=len(manager.rec.verified)
+    manager.process(Observation.from_board(board))
+    now[0]=1.99;manager.process(Observation.from_board(board))
+    assert len(manager.rec.verified)==before
+    now[0]=2.;manager.process(Observation.from_board(board))
+    assert manager.rec.verified[-1]=='b8c6' and not manager.snapshot()['pending_moves']
+    assert 'not independently verified' in store.game(gid)['pgn']
+    assert len(manager.rec.verified) in manager.snapshot()['guessed_plies']
+    manager.recover(gid)  # replaceable suffix survives a restart/recovery
+    # The apparent Nc6 was a hover; Black actually drops the knight on f6.
+    board.pop();board.push_san('Nf6')
+    now[0]=3.;manager.process(Observation.from_board(board))
+    now[0]=5.;manager.process(Observation.from_board(board))
+    assert manager.current_id==gid and manager.rec.verified[-1]=='g8f6'
+    game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+    assert game.end().board().fen()==board.fen() and len(store.games())==1
+    assert 'Nc6' not in [node.san() for node in game.mainline()]
+    store.close()
+
+
+def test_settled_gap_uses_first_legal_path_and_three_second_errors_keep_prefix(tmp_path):
+    store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6')
+    now=[0.];manager._clock=lambda:now[0]
+    gid=manager.current_id
+    for san in 'Bc4 Bc5 d3'.split():board.push_san(san)
+    obs=Observation.from_board(board)
+    # Force an unresolved normal search to exercise the non-exhaustive fallback.
+    from chessstream.reconstruction import ReconstructionUpdate
+    manager.rec.observe=lambda obs:ReconstructionUpdate(status='search limit • evidence retained')
+    manager.process(obs);now[0]=2.;manager.process(obs)
+    assert manager.rec.board.board_fen()==board.board_fen()
+    assert manager.current_id==gid and 'Inferred:' in store.game(gid)['pgn']
+    prefix=manager.rec.verified[:]
+    wrong=board.copy();wrong.remove_piece_at(chess.E1)
+    now[0]=3.;manager.process(Observation.from_board(wrong))
+    now[0]=6.;manager.process(Observation.from_board(wrong))
+    assert 'Recovery error' in manager.last_message and manager.rec.verified==prefix
+    assert manager.current_id==gid
+    manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(wrong))
+    assert manager._settled_since==20.
+    store.close()
