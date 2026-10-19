@@ -58,6 +58,13 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     window=gui.MainWindow(tmp_path);assert window.region.window==4
     assert window.preview_started
     assert window.settings.save_screenshots is False
+    # The common correction actions operate inline, without the old SAN dialog.
+    actions=[]
+    with monkeypatch.context() as action_patch:
+        action_patch.setattr(window.manager,'repair_current',lambda:actions.append('repair'))
+        action_patch.setattr(window.manager,'join_previous_recording',lambda:actions.append('join'))
+        window.repair_pgn_button.click();window.join_previous_button.click()
+    assert actions==['repair','join']
     from PySide6.QtWidgets import QPushButton
     assert any(b.text()=='Combine selected PGNs' for b in window.findChildren(QPushButton))
     assert not window.save_screenshots.isChecked()

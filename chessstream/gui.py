@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.13"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.14"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -145,7 +145,15 @@ class MainWindow(ReviewTools,QMainWindow):
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
         self.choose_path=button("Confirm selected sequence",self.choose_sequence);self.choose_path.hide();moves_card.box.addWidget(self.choose_path)
         moves_card.box.addWidget(button("Start PGN from visible FEN",self.new_game))
-        moves_card.box.addWidget(button("Correct moves…",self.correct_moves))
+        repair_actions=QHBoxLayout();repair_actions.setSpacing(6)
+        self.repair_pgn_button=button("Repair PGN",lambda:self.run_pgn_action('repair'))
+        self.repair_pgn_button.setToolTip('Remove redundant piece round trips when the remaining legal moves reach the same final position. The original PGN is retained in diagnostics.')
+        self.join_previous_button=button("Join previous",lambda:self.run_pgn_action('join_previous'))
+        self.join_previous_button.setToolTip('Try joining this recording to either of the two previous PGNs. Make the combined game active and keep the originals.')
+        for action in (self.repair_pgn_button,self.join_previous_button):
+            action.setStyleSheet('padding:7px 4px;font-size:11px')
+            repair_actions.addWidget(action,1)
+        moves_card.box.addLayout(repair_actions)
         for card in [capture_card,internal,moves_card]:splitter.addWidget(card)
         splitter.setSizes([430,430,265]);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
@@ -158,10 +166,23 @@ class MainWindow(ReviewTools,QMainWindow):
         export=menu.addAction("Export current PGN…")
         menu.addSeparator()
         fen=menu.addAction("Copy visible FEN")
+        menu.addSeparator()
+        manual=menu.addAction("Edit moves manually…")
         selected=menu.exec(self.move_table.viewport().mapToGlobal(position))
         if selected==copy:self.copy_current()
         elif selected==export:self.export_current()
         elif selected==fen:self.copy_visible_fen()
+        elif selected==manual:self.correct_moves()
+
+    def run_pgn_action(self,action):
+        if self.worker and self.worker.isRunning():
+            self._pgn_action_pending=True
+            self.worker.commands.put((action,None))
+            self.recording_status.setText('Checking PGN…')
+            return
+        if action=='repair':self.manager.repair_current()
+        else:self.manager.join_previous_recording()
+        self.on_update(self.manager.snapshot())
 
     def region_text(self):
         r=self.region
@@ -243,7 +264,8 @@ class MainWindow(ReviewTools,QMainWindow):
         if diagnostic_key!=getattr(self,'_last_diagnostic',None):
             logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks']}))
             self._last_diagnostic=diagnostic_key
-        if not self.worker or not self.worker.paused.is_set():
+        if not self.worker or not self.worker.paused.is_set() or getattr(self,'_pgn_action_pending',False):
+            self._pgn_action_pending=False
             status=snap.get('status','Recording');self.recording_status.setText("●  "+status)
             warning=any(word in status.lower() for word in ['uncertain','unmatched','limit','obstructed','hidden','reset','review','waiting','unknown','provisional'])
             self.recording_status.setStyleSheet(f"color:{'#f4c17a' if warning else '#8ee3ce'};font-weight:600;padding:8px;")

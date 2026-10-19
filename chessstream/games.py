@@ -18,6 +18,7 @@ from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
 from .gap_join import join_recordings
 from .opening import infer_visible_opening
+from .repair import simplify_shuffles,retained_annotations
 
 
 def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None, inferred_moves=None) -> str:
@@ -767,6 +768,8 @@ class GameManager(GameExtras):
                         self.last_message = "Complete • " + outcome.termination.name.replace("_"," ").lower()
             if self.rec:
                 self._settle_position(move_evidence)
+                if obs.matches(self.rec.board,max(.8,self.settings.min_confidence)):
+                    self.repair_current(automatic=True)
                 if not self.terminal_message and not self.result_override:
                     outcome=self.rec.board.outcome(claim_draw=False)
                     if outcome:
@@ -1315,6 +1318,83 @@ class GameManager(GameExtras):
             if not self.last_observation:
                 raise ValueError("Capture a clear board first")
             self._start_from_visible(self.last_observation,"started manually from visible board")
+
+    def repair_current(self,automatic=False):
+        """Collapse removable excursions; retain the original PGN in the audit."""
+        with self.lock:
+            if not self.rec:
+                self.last_message='Repair PGN • capture a board first';return 0
+            if automatic and (self.terminal_message or self.rewind_state or self.premove_state
+                    or self.rec.initial_fen!=chess.STARTING_FEN or len(self.rec.verified)>20
+                    or not any('Guessed opening prefix' in item.get('comment','') for item in self.inferred_moves.values())):
+                return 0
+            old=list(self.rec.verified)
+            eligible=({i for i in range(len(old)) if str(i+1) not in self.move_clocks}
+                      if automatic else None)
+            kept=simplify_shuffles(self.rec.initial_fen,old,eligible,time_limit_ms=80 if automatic else 250)
+            if len(kept)==len(old):
+                if not automatic:self.last_message='Repair PGN • no removable piece round trips found'
+                return 0
+            removed=set(range(len(old)))-set(kept)
+            # Automatic cleanup needs inferred evidence or a back-rank ghost
+            # excursion. Ordinary observed repetitions remain recorded.
+            if automatic:
+                if len(removed)>4:return 0
+                board=chess.Board(self.rec.initial_fen);ghost=False
+                for i,uci in enumerate(old):
+                    move=chess.Move.from_uci(uci)
+                    if i in removed and chess.square_rank(move.to_square)==(7 if board.turn else 0):ghost=True
+                    board.push(move)
+                if not ghost and not all(str(i+1) in self.inferred_moves for i in removed):return 0
+            self.persist();previous=self.store.game(self.current_id)['pgn']
+            review=retained_annotations(previous,kept)
+            probe=self.reconstructor(chess.Board(self.rec.initial_fen))
+            for index in kept:
+                probe.board.push_uci(old[index]);probe.verified.append(old[index]);probe.history.append(probe.board.board_fen())
+            probe.branches=[Branch(probe.board.fen(),branch.moves) for branch in self.rec.branches]
+            mapping={index+1:new+1 for new,index in enumerate(kept)}
+            def remap(values):
+                return {str(mapping[int(key)] if int(key)<=len(old) else len(kept)+int(key)-len(old)):value
+                        for key,value in values.items() if int(key)>len(old) or int(key) in mapping}
+            self.store.audit('PGN piece shuffles repaired',{'game_id':self.current_id,'automatic':automatic,
+                'removed':[old[i] for i in sorted(removed)],'previous_pgn':previous,
+                'previous_state':self.rec.serialize(),'retained_indices':kept})
+            self.rec=probe;self.review_pgn=review
+            self.move_clocks=remap(self.move_clocks);self.inferred_moves=remap(self.inferred_moves)
+            self.cancel_background_recovery();self.reset_settling()
+            self._timed_base=None;self._timed_end=0;self.rewind_state=None;self.clock_evidence={}
+            self.last_message=self.rec.status=f'Repaired PGN • removed {len(removed)} redundant plies; final position preserved'
+            self.persist()
+            return len(removed)
+
+    def join_previous_recording(self):
+        """One-click bounded join; keep both source records and pending preview."""
+        with self.lock:
+            if not self.rec:
+                self.last_message='Join previous • capture a board first';return False
+            self.persist();current=self.store.game(self.current_id)
+            rows=self.store.query("SELECT * FROM games WHERE id!=? AND started<=? AND status!='imported' AND status NOT LIKE 'combined source%' AND status NOT LIKE 'reconnected%' ORDER BY started DESC,updated DESC LIMIT 2",
+                                  (self.current_id,current['started']))
+            pending=[branch.moves for branch in self.rec.branches]
+            for previous in rows:
+                if previous['id'] in self.separated_from:continue
+                try:pgn=join_recordings([previous,current],LegalSearcher(6,60000,500,self.settings.min_confidence))
+                except ValueError:continue
+                self.cancel_background_recovery()
+                self.combine_games([previous,current],pgn)
+                branches=[]
+                for moves in pending:
+                    board=self.rec.board.copy()
+                    for uci in moves:
+                        move=chess.Move.from_uci(uci)
+                        if move not in board.legal_moves:break
+                        board.push(move)
+                    else:branches.append(Branch(self.rec.board.fen(),moves))
+                if branches:self.rec.branches=branches
+                self.last_message='Joined previous PGN • combined recording is now active; originals kept'
+                self.persist();return True
+            self.last_message='Join previous • no compatible connection found in the two previous PGNs'
+            return False
 
     def visible_fens(self):
         """FEN candidates for the last screen position, preserving known rights if available."""

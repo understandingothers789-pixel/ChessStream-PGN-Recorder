@@ -265,6 +265,8 @@ class RecordingWorker(QThread):
                                 self.manager.clear_position_recovery();self.manager.reset_settling()
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
+                            elif action=="repair":self.manager.repair_current()
+                            elif action=="join_previous":self.manager.join_previous_recording()
                             elif action=="correct":
                                 if isinstance(value,tuple):self.manager.correct_line(*value)
                                 else:self.manager.correct_line(value)
