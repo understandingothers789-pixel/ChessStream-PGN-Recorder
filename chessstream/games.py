@@ -17,6 +17,7 @@ from .storage import Store
 from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
 from .gap_join import join_recordings
+from .opening import infer_visible_opening
 
 
 def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None, inferred_moves=None) -> str:
@@ -67,6 +68,7 @@ class GameManager(GameExtras):
         self.last_observation: Observation | None = None
         self._recognition_ignored_squares=[]
         self._opening_cache=None
+        self._new_opening_position=None;self._new_opening_since=None
         self.last_message = "Select a board and start recording"
         self._persisted_fingerprint=None
         self._last_evidence_signature=None
@@ -96,6 +98,7 @@ class GameManager(GameExtras):
         self._reset_extras()
         self._timed_base=None;self._timed_end=0
         self._settled_key=None;self._settled_since=None
+        self._new_opening_position=None;self._new_opening_since=None
         self.reset_candidate=None;self.reset_started=None
         self.current_id = uuid.uuid4().hex
         self.started = timestamp
@@ -169,6 +172,7 @@ class GameManager(GameExtras):
         retry the preserved PGN that preceded it before keeping the split.
         """
         rows=self.store.query("SELECT id,state,headers,session_id,status,name FROM games WHERE status!='imported' AND status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC,updated DESC LIMIT 16")
+        rows=[row for row in rows if row['id'] not in self.separated_from]
         if not rows:return False
         latest=rows[0]
 
@@ -368,7 +372,7 @@ class GameManager(GameExtras):
         threshold=max(.80,self.settings.min_confidence)
         if not obs.uncertain_squares(threshold) and obs.placement()==chess.Board().board_fen():
             return chess.Board(),None,""
-        moves=self._infer_short_opening(obs,max_plies=4)
+        moves=self._infer_short_opening(obs)
         if moves:
             sans=self._san_line(chess.Board(),moves)
             note=self._opening_note()+' Selected line: '+' '.join(sans)+'.'
@@ -388,11 +392,11 @@ class GameManager(GameExtras):
 
     @staticmethod
     def _opening_note():
-        return ('Opening prefix guessed from the standard starting position using a shortest legal path. '
-                'Pawn moves were prioritized, then direct target progress and central pawn advances. '
+        return ('Opening prefix guessed from the standard starting position using a bounded legal path. '
+                'Pawn moves were prioritized where visual progress was equal; captures and castling were checked legally. '
                 'The actual earlier move order may differ; this is an inferred opening, not recorded history.')
 
-    def _infer_short_opening(self, obs, max_plies=6, target_turn=None):
+    def _infer_short_opening(self, obs, max_plies=14, target_turn=None):
         """Choose one bounded shortest opening; ambiguity is explicitly guessed.
 
         A few unknown unchanged squares do not invalidate the whole opening.
@@ -408,17 +412,24 @@ class GameManager(GameExtras):
         if obs.matches(initial,threshold):return []
         occupied=int(np.count_nonzero((labels!=0)&confident))
         displaced=int(np.count_nonzero((expected!=0)&(labels!=expected)&confident))
-        if not 28<=occupied<=32 or not 1<=displaced<=6:return []
+        if not 30<=occupied<=32 or not 1<=displaced<=14:return []
         if np.any(obs.probabilities[np.arange(64)[~confident],expected[~confident]]<.05):return []
         key=(obs.probabilities.tobytes(),max_plies,target_turn,threshold,
              self.settings.search_nodes,self.settings.search_ms)
         if self._opening_cache and self._opening_cache[0]==key:return list(self._opening_cache[1])
-        search=LegalSearcher(max_plies=max_plies,
-            node_limit=min(60000,max(1000,self.settings.search_nodes)),
-            time_limit_ms=min(400,max(50,self.settings.search_ms)),threshold=threshold)
-        result=search.search(initial,obs,target_turn=target_turn,first_shortest=True,pawn_first=True)
-        if not result.shortest_proven or not result.paths or not result.paths[0]:return []
-        moves=[move.uci() for move in result.paths[0]]
+        moves=[]
+        if displaced<=6:
+            search=LegalSearcher(max_plies=min(6,max_plies),
+                node_limit=min(60000,max(1000,self.settings.search_nodes)),
+                time_limit_ms=min(400,max(50,self.settings.search_ms)),threshold=threshold)
+            result=search.search(initial,obs,target_turn=target_turn,first_shortest=True,pawn_first=True)
+            if result.shortest_proven and result.paths and result.paths[0]:
+                moves=[move.uci() for move in result.paths[0]]
+        if not moves and not np.any(~confident) and max_plies>6:
+            moves=infer_visible_opening(obs,max_plies=min(14,max_plies),target_turn=target_turn)
+        if not moves:
+            self._opening_cache=(key,())
+            return []
         board=chess.Board()
         for uci in moves:
             board.push_uci(uci)
@@ -498,7 +509,7 @@ class GameManager(GameExtras):
         pending=1 if self.settings.confirm_on_reply else 0
         confirmed=moves[:-pending] if pending else moves
         for ply,uci in enumerate(moves,1):
-            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix: shortest legal path; captures, double pawn pushes, single pawn pushes, then pieces prioritized; earlier move order may differ.'}
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix: bounded legal path to the visible position; captures and double pawn pushes were prioritized where possible; earlier move order may differ.'}
         for uci in confirmed:
             self.rec.board.push_uci(uci)
             self.rec.verified.append(uci)
@@ -509,7 +520,7 @@ class GameManager(GameExtras):
         self._persisted_fingerprint=None
 
     def _start_from_visible(self, obs, reason, since=None):
-        opening_moves=self._infer_short_opening(obs,max_plies=4)
+        opening_moves=self._infer_short_opening(obs)
         board,roots,note=self._visible_roots(obs)
         previous_id=self.current_id
         if self.rec:
@@ -529,11 +540,91 @@ class GameManager(GameExtras):
         with self.store.transaction() as db:
             db.execute("UPDATE observations SET game_id=? WHERE session_id=? AND timestamp>=?",(self.current_id,self.session_id,start))
 
+    def _consider_new_opening(self,obs):
+        """Prefer a fresh opening after a short stable divergence from recent PGNs."""
+        if (self.settings.initial_fen or not self.rec or self.premove_state or obs.confidence<.85
+                or obs.uncertain_squares(max(.80,self.settings.min_confidence))):
+            self._new_opening_position=self._new_opening_since=None
+            return False
+        names=(self.latest_context or {}).get('names',{})
+        changed_name=any(color in self.observed_names and
+                         ''.join(self.observed_names[color].casefold().split())!=''.join(name.casefold().split())
+                         for color,name in names.items())
+        strong_boundary=changed_name and self.clocks_recently_reset()
+        placement=obs.placement()
+        if not strong_boundary and (placement in self.rec.history or
+                any(branch.board().board_fen()==placement for branch in self.rec.branches)):
+            self._new_opening_position=self._new_opening_since=None
+            return False
+        visible=chess.Board(f'{placement} w - - 0 1')
+        changed=sum(self.rec.board.piece_at(square)!=visible.piece_at(square) for square in chess.SQUARES)
+        if (not strong_boundary and changed<=4
+                and LegalSearcher(1,2000,30,self.settings.min_confidence).search(self.rec.board,obs).paths):
+            self._new_opening_position=self._new_opening_since=None
+            return False
+        opening=self._infer_short_opening(obs)
+        if len(opening)<(1 if strong_boundary else 2):
+            self._new_opening_position=self._new_opening_since=None
+            return False
+        if self._new_opening_position!=placement:
+            self._new_opening_position=placement;self._new_opening_since=self._clock()
+            return False
+        if self._clock()-self._new_opening_since<1.0:return False
+        rows=self.store.query("SELECT id,state,headers FROM games WHERE status!='imported' AND status NOT LIKE 'combined source%' ORDER BY started DESC,updated DESC LIMIT 3")
+        # Current plus the two most recent saved PGNs. A known position is
+        # review/replay evidence, even when a guessed opening order differs.
+        for row in rows:
+            if row['id'] in self.separated_from:continue
+            try:
+                saved=Reconstructor.restore(json.loads(row['state']),self.searcher())
+            except (TypeError,ValueError,KeyError,chess.IllegalMoveError):continue
+            known=set(saved.history)
+            known.update(branch.board().board_fen() for branch in saved.branches)
+            if placement in known and not strong_boundary:
+                if row['id']!=self.current_id:self._resume_latest_game_at_position(obs)
+                return False
+        # A legal continuation from the active endpoint has priority over a
+        # split, unless fresh identity and reset clocks show a new game.
+        if not self.terminal_message and not strong_boundary:
+            line=infer_visible_opening(obs,start_board=self.rec.board,max_plies=14,
+                                       time_limit_ms=250,node_limit=30000)
+            if line:
+                before=len(self.rec.verified)
+                accepted=line[:-1] if self.settings.confirm_on_reply else line
+                for uci in accepted:
+                    self.rec.board.push_uci(uci);self.rec.verified.append(uci)
+                    self.rec.history.append(self.rec.board.board_fen())
+                self.rec.branches=[Branch(self.rec.board.fen(),tuple(line[len(accepted):]))]
+                self.rec.incomplete=False
+                self.rec.status=self.last_message='Opening continuation linked to current PGN • skipped moves inferred'
+                for ply,uci in enumerate(line,before+1):
+                    self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred across a skipped opening; one legal order was selected from the visible position.'}
+                self.store.audit('opening continuation linked',{'game_id':self.current_id,'after_ply':before,'moves':line})
+                self.rewind_state=None
+                self._new_opening_position=self._new_opening_since=None
+                self.persist()
+                return True
+        previous=self.current_id
+        excluded=[row['id'] for row in rows if row['id']!=previous][:2] if strong_boundary else []
+        if strong_boundary:excluded.insert(0,previous)
+        self._start_from_visible(obs,'stable opening could not be linked to either of the two recent PGNs',obs.timestamp)
+        self.separated_from=excluded
+        if names:
+            self.observed_names=dict(names)
+            for color,name in names.items():
+                if color in ('white','black'):self.headers[color.title()]=name
+        self.last_message='New opening detected • PGN guessed from visible position'
+        self.store.audit('new opening split',{'previous_game_id':previous,'game_id':self.current_id,
+            'placement':placement,'inferred_opening':opening})
+        self.persist()
+        return True
+
     def process(self, obs: Observation) -> dict:
         with self.lock:
             self.last_observation = obs
             move_evidence=obs
             self._recognition_ignored_squares=[]
+            if self.rec:self._consider_new_opening(obs)
             if self.rec and self._handle_rewind(obs):
                 self.reset_settling()
                 self.persist()
