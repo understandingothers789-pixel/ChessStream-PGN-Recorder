@@ -2,7 +2,7 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.5.7 can select a YouTube chess window automatically.** On launch, ChessStream ranks visible YouTube window titles for chess-related terms (such as Hikaru, chess, blitz, rapid, and speedrun), tracks the strongest match, and retries briefly if the browser is still opening. You can still choose a monitor, window, or drawn capture region at any time. See the [release notes](docs/RELEASE-v1.5.7.md), [user guide](docs/USER_GUIDE.md), [security audit](SECURITY.md), and [known limitations](docs/KNOWN_LIMITATIONS.md).
+**Version 1.5.8 automatically selects a YouTube chess window.** On launch, ChessStream ranks visible YouTube window titles for chess-related terms (such as Hikaru, chess, blitz, rapid, and speedrun), tracks the strongest match, and retries briefly if the browser is still opening. A matching YouTube window takes priority over an older saved source; a manual source selection during the current run takes effect immediately. See the [release notes](docs/RELEASE-v1.5.8.md), [user guide](docs/USER_GUIDE.md), [security audit](SECURITY.md), and [known limitations](docs/KNOWN_LIMITATIONS.md).
 
 ![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 

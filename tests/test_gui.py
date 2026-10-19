@@ -47,6 +47,18 @@ def test_startup_automatically_tracks_chessiest_youtube_window(tmp_path,monkeypa
     window.close();window.deleteLater();app.processEvents()
 
 
+def test_startup_youtube_match_replaces_saved_capture_region(tmp_path,monkeypatch):
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    (tmp_path/'settings.json').write_text('{"region":{"left":10,"top":20,"width":400,"height":300}}')
+    monkeypatch.setattr(gui,'windows',lambda:[(77,'ChessStream PGN Recorder - File Explorer'),
+                                                (88,'Chess puzzle analysis - YouTube - Chrome')])
+    monkeypatch.setattr(gui,'window_client',lambda hwnd:Region(hwnd,30,1280,720,window=hwnd))
+    window=MainWindow(tmp_path)
+    assert window.region.window==88
+    window.close();window.deleteLater();app.processEvents()
+
+
 def test_pending_recognition_is_not_shown_as_a_reconstructed_start(tmp_path):
     app=QApplication.instance() or QApplication([])
     window=MainWindow(tmp_path)

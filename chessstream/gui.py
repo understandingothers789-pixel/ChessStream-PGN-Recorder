@@ -73,17 +73,17 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.7"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.8"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
         self.navigate(0);self.install_hotkeys()
         self.statusBar().showMessage("Ready • screenshots kept until you delete them")
-        # A saved hand-drawn region is an explicit choice. Otherwise, use the
-        # best visible YouTube window automatically and retry while the browser
-        # is still opening. Tracked-window choices are refreshed each launch.
-        self._auto_window_enabled = not self.region or bool(self.region.window)
+        # Prefer the best visible YouTube window at every launch, including
+        # over a stale saved source. If none is available, retain the saved
+        # source while briefly retrying in case the browser is still opening.
+        self._auto_window_enabled = True
         self.auto_window_timer=QTimer(self);self.auto_window_timer.setInterval(2000)
         self.auto_window_timer.timeout.connect(self._auto_select_youtube_window)
         if self._auto_window_enabled and not self._auto_select_youtube_window():
@@ -155,8 +155,9 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def toggle_start(self):
         if self.worker and self.worker.isRunning():self.pause();return
-        if self._auto_window_enabled and self.region and self.region.window:
-            self._auto_select_youtube_window()
+        if self._auto_window_enabled and not self._auto_select_youtube_window():
+            # Freeze the fallback region before the user starts recording.
+            self._auto_window_enabled=False;self.auto_window_timer.stop()
         if not self.region:self.draw_region();return
         if self.manager.rec and self.manager.ended:
             self.manager=GameManager(self.store,self.settings)
