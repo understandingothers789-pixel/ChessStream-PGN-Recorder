@@ -57,6 +57,7 @@ class Settings:
     deduplicate: bool = False
     screenshot_mode: str = "positions"
     save_screenshots: bool = False
+    auto_record_opening: bool = True
     confirm_on_reply: bool = True
     unresolved_fen_seconds: float = 15.0
     new_game_change_seconds: float = 5.0
@@ -131,7 +132,7 @@ class Settings:
             ("recognition_mode",["neural","calibrated"],"neural")):
             if getattr(result,key) not in allowed:
                 setattr(result,key,fallback);logging.warning("Invalid saved setting %s; using its safe default",key)
-        for key in ("adaptive","deduplicate","save_screenshots","confirm_on_reply","detect_results","read_context","auto_context",
+        for key in ("adaptive","deduplicate","save_screenshots","auto_record_opening","confirm_on_reply","detect_results","read_context","auto_context",
                     "detect_board","auto_export"):
             if not isinstance(getattr(result,key),bool):
                 setattr(result,key,getattr(cls(),key));logging.warning("Invalid saved setting %s; using its safe default",key)

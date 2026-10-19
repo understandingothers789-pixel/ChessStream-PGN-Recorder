@@ -83,3 +83,15 @@ def test_capture_recapture_is_the_preferred_equal_length_tiebreak():
     quiet=[first,after_capture.parse_san('Nc3')]
     selected=select_capture_path(source,[quiet,recapture])
     assert selected==[recapture]
+
+
+def test_opening_first_shortest_proves_depth_and_prefers_pawns_without_enumerating_orders():
+    target=play(chess.Board(),'e4 c5 d3 Nc6 c3')
+    result=LegalSearcher(6).search(chess.Board(),Observation.from_board(target),
+                                 first_shortest=True,pawn_first=True)
+    assert result.shortest_proven and not result.exhaustive
+    assert [move.uci() for move in result.paths[0]]==[move.uci() for move in target.move_stack]
+    assert result.depth==5 and result.nodes<1000
+    limited=LegalSearcher(6,node_limit=1).search(chess.Board(),Observation.from_board(target),
+                                              first_shortest=True,pawn_first=True)
+    assert not limited.shortest_proven and not limited.paths

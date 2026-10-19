@@ -66,6 +66,7 @@ class GameManager(GameExtras):
         self.reset_started: str | None = None
         self.last_observation: Observation | None = None
         self._recognition_ignored_squares=[]
+        self._opening_cache=None
         self.last_message = "Select a board and start recording"
         self._persisted_fingerprint=None
         self._last_evidence_signature=None
@@ -104,38 +105,40 @@ class GameManager(GameExtras):
         self.store.associate_screenshots(self.session_id,self.current_id,initial_placement=board.board_fen())
 
     def _initialize(self, obs):
-        # The mean of 64 scores hides missing pieces and queen/knight mistakes.
-        # Every square must be sufficiently supported before freezing a root FEN.
+        # Arbitrary root FENs need all 64 squares. A bounded standard-opening
+        # hypothesis can instead carry at most two unchanged squares as unknown.
         uncertain = obs.uncertain_squares(max(.80, self.settings.min_confidence))
+        if self.settings.initial_fen:
+            b = chess.Board(self.settings.initial_fen)
+            if uncertain or not obs.matches(b, self.settings.min_confidence):
+                self.last_message = "Observed board does not match the configured initial FEN"
+                return False
+            self._create(b, obs.timestamp)
+            return True
+        opening_moves=self._infer_short_opening(obs)
+        if (len(uncertain)<=2 and obs.confidence>=max(.80,self.settings.min_confidence)
+                and self._resume_latest_game_at_position(obs,allow_completed_review=not bool(opening_moves))):
+            return True
+        if not uncertain and obs.placement() == chess.Board().board_fen():
+            self._create(chess.Board(), obs.timestamp)
+            return True
+        if opening_moves:
+            note=self._opening_note()
+            if uncertain:note+=' Uncertain unchanged squares retained from the starting position: '+', '.join(uncertain)+'.'
+            self._create(chess.Board(), obs.timestamp, note=note)
+            self._seed_opening(opening_moves)
+            self._recognition_ignored_squares=uncertain
+            self.last_message = "Recording • guessed opening line: " + " ".join(
+                self._san_line(chess.Board(), opening_moves))
+            self.store.audit("opening prefix inferred", {"game_id":self.current_id,
+                "moves":opening_moves,"method":"shortest legal path; pawn moves first; move order guessed",
+                "uncertain_unchanged_squares":uncertain})
+            return True
         if uncertain:
             self.last_message = ("Waiting for reliable recognition • uncertain squares: "
                                  + ", ".join(uncertain[:8])
                                  + (f" (+{len(uncertain)-8} more)" if len(uncertain)>8 else ""))
             return False
-        if self.settings.initial_fen:
-            b = chess.Board(self.settings.initial_fen)
-            if not obs.matches(b, self.settings.min_confidence):
-                self.last_message = "Observed board does not match the configured initial FEN"
-                return False
-            self._create(b, obs.timestamp)
-            return True
-        if self._resume_latest_game_at_position(obs):
-            return True
-        if obs.placement() == chess.Board().board_fen():
-            self._create(chess.Board(), obs.timestamp)
-            return True
-        opening_moves = self._infer_short_opening(obs)
-        if opening_moves:
-            note = ("A unique shortest legal opening sequence from the standard starting position was inferred "
-                    "from the first visible board. A different earlier history that transposed to this position "
-                    "cannot be ruled out.")
-            self._create(chess.Board(), obs.timestamp, note=note)
-            self._seed_opening(opening_moves)
-            self.last_message = "Recording • inferred unique shortest opening line: " + " ".join(
-                self._san_line(chess.Board(), opening_moves))
-            self.store.audit("opening prefix inferred", {"game_id":self.current_id,
-                "moves":opening_moves,"method":"unique shortest legal path, exact visible placement"})
-            return True
         roots = []
         for turn in ["w", "b"]:
             b = chess.Board(f"{obs.placement()} {turn} - - 0 1")
@@ -149,7 +152,7 @@ class GameManager(GameExtras):
         self._create(chess.Board(roots[0]), obs.timestamp, roots, note)
         return True
 
-    def _resume_latest_game_at_position(self, obs):
+    def _resume_latest_game_at_position(self, obs, allow_completed_review=True):
         """Reuse a recent PGN on an exact match or shortest legal bridge.
 
         The visible image gives us piece placement, but not side to move,
@@ -208,6 +211,8 @@ class GameManager(GameExtras):
             if chosen is not None:break
             try:
                 state=json.loads(row['state'])
+                if not allow_completed_review and (json.loads(row['headers']).get('Result','*')!='*' or state.get('terminal_message')):
+                    continue
                 saved=Reconstructor.restore(state,self.searcher())
                 placements={saved.board.board_fen()}
                 placements.update(branch.board().board_fen() for branch in saved.branches)
@@ -269,10 +274,12 @@ class GameManager(GameExtras):
         if unused_session!=self.session_id:
             self.store.finish_session(unused_session)
         self.last_observation=obs
+        backfilled=self._backfill_opening_prefix()
         self.last_message=("Joined the saved PGNs • continuing the combined game" if joined is not None else
                            "Review position • linked to latest saved PGN history" if review else
                            "Gap linked to latest PGN • shortest legal continuation • "+self.rec.status if bridged else
                            "Continued latest saved PGN • visible board matches its verified or pending position")
+        if backfilled:self.last_message='Opening prefix guessed and restored • '+self.last_message
         self.persist()
         self.store.audit("latest PGN resumed by visible position",{
             "game_id":self.current_id,"checkpoint_game_id":latest_checkpoint_id,
@@ -350,17 +357,15 @@ class GameManager(GameExtras):
 
     def _visible_roots(self, obs):
         threshold=max(.80,self.settings.min_confidence)
-        if obs.confidence<threshold or obs.uncertain_squares(threshold):
-            raise ValueError("Wait for a clear, stable board before starting from its FEN")
-        if obs.placement()==chess.Board().board_fen():
+        if not obs.uncertain_squares(threshold) and obs.placement()==chess.Board().board_fen():
             return chess.Board(),None,""
-        moves=self._infer_short_opening(obs)
+        moves=self._infer_short_opening(obs,max_plies=4)
         if moves:
             sans=self._san_line(chess.Board(),moves)
-            note=("The visible position has a unique shortest legal sequence from the standard starting position: "
-                  + " ".join(sans) + ". This inferred line is included in the PGN; a different earlier history "
-                  "that transposed to the same position cannot be ruled out.")
+            note=self._opening_note()+' Selected line: '+' '.join(sans)+'.'
             return chess.Board(),None,note
+        if obs.confidence<threshold or obs.uncertain_squares(threshold):
+            raise ValueError("Wait for a clear, stable board before starting from its FEN")
         roots=[]
         for turn in ["w","b"]:
             board=chess.Board(f"{obs.placement()} {turn} - - 0 1")
@@ -372,27 +377,104 @@ class GameManager(GameExtras):
               "are not visible in the image and were not assumed.")
         return chess.Board(roots[0]),roots,note
 
-    def _infer_short_opening(self, obs):
-        """Return only a unique, exact, short legal path from the normal start.
+    @staticmethod
+    def _opening_note():
+        return ('Opening prefix guessed from the standard starting position using a shortest legal path. '
+                'Pawn moves were prioritized, then direct target progress and central pawn advances. '
+                'The actual earlier move order may differ; this is an inferred opening, not recorded history.')
 
-        This recovers a missed opening frame such as 1.e4 e6 without guessing
-        an arbitrary midgame history. Ambiguous, incomplete, or longer searches
-        retain the ordinary visible-FEN behavior.
+    def _infer_short_opening(self, obs, max_plies=6, target_turn=None):
+        """Choose one bounded shortest opening; ambiguity is explicitly guessed.
+
+        A few unknown unchanged squares do not invalidate the whole opening.
+        The legal search still requires positive evidence for every move's
+        changed squares. Sparse endgames and heavily changed roots are not
+        interpreted as a handful of moves from the standard starting board.
         """
-        if self.settings.initial_fen or obs.uncertain_squares(max(.80,self.settings.min_confidence)):
-            return []
-        search=LegalSearcher(max_plies=min(4,max(2,self.settings.max_plies)),
-            node_limit=min(30000,max(1000,self.settings.search_nodes)),
-            time_limit_ms=min(150,max(50,self.settings.search_ms)),
-            threshold=max(.80,self.settings.min_confidence),path_limit=2)
-        result=search.search(chess.Board(),obs)
-        if not result.exhaustive or len(result.paths)!=1 or not result.paths[0]:
-            return []
+        if self.settings.initial_fen:return []
+        threshold=max(.80,self.settings.min_confidence)
+        confident=obs.probabilities.max(axis=1)>=threshold
+        if obs.confidence<threshold or np.count_nonzero(~confident)>2:return []
+        initial=chess.Board();expected=board_labels(initial);labels=obs.labels
+        if obs.matches(initial,threshold):return []
+        occupied=int(np.count_nonzero((labels!=0)&confident))
+        displaced=int(np.count_nonzero((expected!=0)&(labels!=expected)&confident))
+        if not 28<=occupied<=32 or not 1<=displaced<=6:return []
+        if np.any(obs.probabilities[np.arange(64)[~confident],expected[~confident]]<.05):return []
+        key=(obs.probabilities.tobytes(),max_plies,target_turn,threshold,
+             self.settings.search_nodes,self.settings.search_ms)
+        if self._opening_cache and self._opening_cache[0]==key:return list(self._opening_cache[1])
+        search=LegalSearcher(max_plies=max_plies,
+            node_limit=min(60000,max(1000,self.settings.search_nodes)),
+            time_limit_ms=min(400,max(50,self.settings.search_ms)),threshold=threshold)
+        result=search.search(initial,obs,target_turn=target_turn,first_shortest=True,pawn_first=True)
+        if not result.shortest_proven or not result.paths or not result.paths[0]:return []
         moves=[move.uci() for move in result.paths[0]]
         board=chess.Board()
         for uci in moves:
             board.push_uci(uci)
-        return moves if obs.matches(board,max(.80,self.settings.min_confidence)) else []
+        if not obs.matches(board,threshold):return []
+        self._opening_cache=(key,tuple(moves))
+        return moves
+
+    def opening_ready(self, obs):
+        with self.lock:
+            return bool(self._infer_short_opening(obs))
+
+    def _backfill_opening_prefix(self):
+        """Repair an application-created early FEN segment without losing its continuation."""
+        if (not self.rec or self.rec.initial_fen==chess.STARTING_FEN or self.headers.get('Result','*')!='*'
+                or not any(text in self.note for text in ('Recording began midgame','visible midgame FEN'))):
+            return False
+        old=self.rec;root=chess.Board(old.initial_fen)
+        turn=None if not old.verified and len({b.root_fen for b in old.branches})>1 else root.turn
+        prefix=self._infer_short_opening(Observation.from_board(root),target_turn=turn)
+        if not prefix:return False
+        try:
+            board=chess.Board()
+            for uci in prefix+old.verified:board.push_uci(uci)
+            branches=[]
+            for branch in old.branches:
+                origin=chess.Board(branch.root_fen)
+                if origin.board_fen()!=board.board_fen() or origin.turn!=board.turn:continue
+                endpoint=board.copy()
+                for uci in branch.moves:endpoint.push_uci(uci)
+                if endpoint.board_fen()==branch.board().board_fen():branches.append(Branch(board.fen(),branch.moves))
+            if not branches:return False
+            headers={key:value for key,value in self.headers.items() if key not in ('FEN','SetUp')}
+            pgn=export_pgn(old.initial_fen,old.verified,self.headers,self.note,
+                           self.review_pgn,self.move_clocks,self.inferred_moves)
+            joined=join_recordings([
+                {'id':'opening-prefix','started':'','pgn':export_pgn(chess.STARTING_FEN,prefix,headers,self._opening_note())},
+                {'id':self.current_id,'started':self.started,'pgn':pgn}],self.searcher())
+            game=chess.pgn.read_game(io.StringIO(joined))
+            if game is None or game.errors:return False
+            anchor=game
+            for _ in prefix:anchor=anchor.variations[0]
+            anchor.comment=anchor.comment.replace(self.note,
+                'The original application-created FEN start followed this guessed opening prefix.')
+            data=old.serialize();data['initial_fen']=chess.STARTING_FEN
+            data['verified']=prefix+old.verified
+            data['branches']=[{'root_fen':b.root_fen,'moves':list(b.moves)} for b in branches]
+            if not old.verified and not any(b.moves for b in old.branches) and self.settings.confirm_on_reply:
+                data['verified']=prefix[:-1];before=chess.Board()
+                for uci in prefix[:-1]:before.push_uci(uci)
+                data['branches']=[{'root_fen':before.fen(),'moves':[prefix[-1]]}]
+            restored=Reconstructor.restore(data,self.searcher())
+        except (ValueError,KeyError,IndexError):
+            logging.info('Could not backfill a saved opening FEN; original retained',exc_info=True)
+            return False
+        self.rec=restored;self.headers=dict(game.headers)
+        self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+        self.move_clocks={str(ply):node.clock() for ply,node in enumerate(game.mainline(),1) if node.clock() is not None}
+        self.inferred_moves={str(int(ply)+len(prefix)):value for ply,value in self.inferred_moves.items()}
+        for ply,uci in enumerate(prefix,1):
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix restored before an earlier FEN recording; pawn moves prioritized.'}
+        self.note=self._opening_note()+' An earlier application-created FEN start was replaced; its recorded continuation was retained.'
+        self._persisted_fingerprint=None
+        self.store.audit('opening prefix backfilled',{'game_id':self.current_id,'previous_initial_fen':old.initial_fen,
+            'prefix':prefix,'method':'shortest legal opening; pawn moves first; earlier order guessed'})
+        return True
 
     @staticmethod
     def _san_line(board, moves):
@@ -404,16 +486,21 @@ class GameManager(GameExtras):
 
     def _seed_opening(self, moves):
         if not self.rec or not moves:return
-        for uci in moves:
+        pending=1 if self.settings.confirm_on_reply else 0
+        confirmed=moves[:-pending] if pending else moves
+        for ply,uci in enumerate(moves,1):
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix: shortest legal path, pawn moves prioritized; earlier move order may differ.'}
+        for uci in confirmed:
             self.rec.board.push_uci(uci)
             self.rec.verified.append(uci)
             self.rec.history.append(self.rec.board.board_fen())
-        self.rec.branches=[Branch(self.rec.board.fen(),())]
-        self.rec.status="recording • opening reconstructed from visible position"
+        self.rec.branches=[Branch(self.rec.board.fen(),tuple(moves[len(confirmed):]))]
+        self.rec.status=("provisional move • opening guessed; waiting for opponent response" if pending else
+                         "recording • opening guessed from visible position")
         self._persisted_fingerprint=None
 
     def _start_from_visible(self, obs, reason, since=None):
-        opening_moves=self._infer_short_opening(obs)
+        opening_moves=self._infer_short_opening(obs,max_plies=4)
         board,roots,note=self._visible_roots(obs)
         previous_id=self.current_id
         if self.rec:
@@ -423,6 +510,7 @@ class GameManager(GameExtras):
         self.reset_candidate=None
         self._create(board,obs.timestamp,roots,note)
         self._seed_opening(opening_moves)
+        self.persist()
         self.last_message="New PGN started from the visible board position"
         self.clear_position_recovery()
         self.store.audit("visible FEN checkpoint",{"previous_game_id":previous_id,"game_id":self.current_id,
@@ -744,6 +832,8 @@ class GameManager(GameExtras):
                     "preview_confidence":(float(np.exp(ranked_branches[0][0])*100) if ranked_branches else None),
                     "preview_clock_support":(ranked_branches[0][1] if ranked_branches else 0),
                     "initial_fen":self.rec.initial_fen,"moves":san,
+                    "guessed_plies":sorted(int(ply) for ply,item in self.inferred_moves.items()
+                        if str(ply).isdigit() and 0<int(ply)<=len(san) and 'Guessed opening prefix' in item.get('comment','')),
                     "plies":len(san),"last_move":self.rec.verified[-1] if san else None,
                     "alternatives":alternatives,"incomplete":self.rec.incomplete,"note":self.note,
                     "result":self.headers.get("Result","*"),"terminal_message":self.terminal_message,"clocks":(self.latest_context or {}).get("clocks",{}),"players":{"white":self.headers.get('White','Unknown'),"black":self.headers.get('Black','Unknown')},
@@ -806,7 +896,9 @@ class GameManager(GameExtras):
             self.clear_position_recovery()
             self.rec.status = "recovered • ready to resume"
             self.last_message = self.rec.status
-            if persist:self.persist()
+            if persist:
+                if self._backfill_opening_prefix():self.last_message='Opening prefix guessed and restored • '+self.last_message
+                self.persist()
 
     def choose(self, index):
         with self.lock:

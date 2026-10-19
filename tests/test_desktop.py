@@ -60,6 +60,12 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     board=chess.Board();window.manager.process(Observation.from_board(board));board.push_san('e4')
     window.on_update(window.manager.process(Observation.from_board(board)))
     assert window.live_board.fen==board.fen() and window.snapshot['pending_moves']==['e4']
+    window._preview_active=True
+    window.on_update({**window.snapshot,'recording_started_automatically':True})
+    assert not window._preview_active and not window.start_button.isEnabled()
+    assert window.pause_button.isEnabled() and window.stop_button.isEnabled()
+    window.update_move_table(['e4'],chess.STARTING_FEN,guessed=[1])
+    assert window.move_table.item(0,1).text()=='≈ e4'
     assert '1. e4' not in window.store.game(window.manager.current_id)['pgn']
     window.manager.force_new();window.navigate(1);window.game_table.selectAll()
     actions={action.text():action for action in window.game_row_menu().actions()}

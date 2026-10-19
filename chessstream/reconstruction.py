@@ -21,6 +21,7 @@ class SearchResult:
     nodes: int = 0
     elapsed_ms: float = 0
     depth: int = 0
+    shortest_proven: bool = False
 
 
 def capture_path_rank(board: chess.Board, path: tuple[chess.Move, ...] | list[chess.Move]):
@@ -69,7 +70,8 @@ class LegalSearcher:
         self.threshold = threshold
         self.path_limit = path_limit
 
-    def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None) -> SearchResult:
+    def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None,
+               first_shortest: bool = False, pawn_first: bool = False) -> SearchResult:
         result = SearchResult()
         start = perf_counter()
         target = observed.labels.tolist()
@@ -79,6 +81,7 @@ class LegalSearcher:
             return result
         if observed.matches(board, self.threshold) and (target_turn is None or board.turn==target_turn):
             result.paths = [()]
+            result.shortest_proven = True
             return result
         # Compile the observation once. Board comparisons in the search use
         # integer bitboards instead of rebuilding 64-element NumPy arrays.
@@ -111,6 +114,21 @@ class LegalSearcher:
         path = []
         abort = False
 
+        def castle_target_bonus(state, color, needed):
+            # Castling can fill two required target squares in one turn only
+            # when BOTH its king and rook destinations are actually wanted.
+            # Granting this bonus for any home rook makes short openings with
+            # three pawn moves look reachable in two turns and wastes a tree.
+            rank=0 if color else 7
+            if not (state.castling_rights & state.occupied_co[color]):return 0
+            for king_file,rook_file,origin_file in ((6,5,7),(2,3,0)):
+                king=chess.BB_SQUARES[chess.square(king_file,rank)]
+                rook=chess.BB_SQUARES[chess.square(rook_file,rank)]
+                origin=chess.BB_SQUARES[chess.square(origin_file,rank)]
+                if state.castling_rights & origin and needed & king and needed & rook and wanted[6] & king and wanted[4] & rook:
+                    return 1
+            return 0
+
         def dfs(state: chess.Board, remaining: int):
             nonlocal abort
             result.nodes += 1
@@ -133,7 +151,8 @@ class LegalSearcher:
                            (white ^ initial[6]))
                 if mismatch == 0 and not changed & ~known and (target_turn is None or state.turn==target_turn):
                     result.paths.append(tuple(path))
-                    if len(result.paths) >= self.path_limit:
+                    result.shortest_proven = True
+                    if first_shortest or len(result.paths) >= self.path_limit:
                         abort = True
                         result.exhaustive = False
                     return True
@@ -144,8 +163,9 @@ class LegalSearcher:
             # allow one extra square if it retains any castling rights.
             white_turns = (remaining + int(state.turn == chess.WHITE)) // 2
             black_turns = remaining - white_turns
-            if ((mismatch & wanted_white).bit_count() > white_turns + bool(white_turns and state.castling_rights & white)
-                    or (mismatch & wanted_black).bit_count() > black_turns + bool(black_turns and state.castling_rights & black)):
+            white_needed=mismatch & wanted_white;black_needed=mismatch & wanted_black
+            if (white_needed.bit_count() > white_turns + (castle_target_bonus(state,chess.WHITE,white_needed) if white_turns else 0)
+                    or black_needed.bit_count() > black_turns + (castle_target_bonus(state,chess.BLACK,black_needed) if black_turns else 0)):
                 return False
             key = (state.pawns,state.knights,state.bishops,state.rooks,state.queens,
                    state.kings,white,black,state.turn,state.castling_rights,state.ep_square,remaining)
@@ -158,7 +178,11 @@ class LegalSearcher:
                         bool(mismatch & chess.BB_SQUARES[move.to_square]))
 
             moves = state.legal_moves
-            if remaining > 1:moves = sorted(moves,key=priority,reverse=True)
+            if pawn_first:
+                moves=sorted(moves,key=lambda move:(state.piece_type_at(move.from_square)!=chess.PAWN,
+                    -priority(move),-int(abs(move.to_square-move.from_square)==16),
+                    abs(3.5-chess.square_file(move.to_square)),move.uci()))
+            elif remaining > 1:moves = sorted(moves,key=priority,reverse=True)
             found = False
             for move in moves:
                 if remaining == 1:

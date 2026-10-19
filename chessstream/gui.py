@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.4"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.5"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -121,7 +121,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.interval=QDoubleSpinBox();self.interval.setRange(.1,60);self.interval.setDecimals(1);self.interval.setSuffix(" s");self.interval.setValue(self.settings.interval);self.interval.setEnabled(self.settings.screenshot_mode!='positions');self.interval.valueChanged.connect(self.set_interval);source.addWidget(self.interval)
         box.addLayout(source)
         metrics=QHBoxLayout();self.metric_labels={}
-        for key,title,value in [("moves","VERIFIED PLIES","0"),("confidence","WEAKEST SQUARE SCORE","—"),("saved","SAVED SCREENSHOTS","0"),("disk","SCREENSHOT STORAGE","0 MB")]:
+        for key,title,value in [("moves","PGN PLIES","0"),("confidence","WEAKEST SQUARE SCORE","—"),("saved","SAVED SCREENSHOTS","0"),("disk","SCREENSHOT STORAGE","0 MB")]:
             card=Card();card.box.addWidget(muted(title));label=QLabel(value);label.setObjectName("metric");card.box.addWidget(label);self.metric_labels[key]=label;metrics.addWidget(card)
         box.addLayout(metrics)
         splitter=QSplitter(Qt.Horizontal)
@@ -205,13 +205,18 @@ class MainWindow(ReviewTools,QMainWindow):
         self.worker.frame.connect(self.on_frame);self.worker.update.connect(self.on_update)
         self.worker.problem.connect(self.error);self.worker.region_changed.connect(self.auto_region)
         self.worker.finished.connect(self.worker_finished);self.worker.start()
-        self.recording_status.setText("◉  Live preview • no screenshots or PGN are being saved")
+        self.stop_button.setEnabled(True)
+        self.recording_status.setText('◉  Armed • recording starts when an opening move appears' if self.settings.auto_record_opening else
+                                     '◉  Live preview • click Start recording when ready')
 
     def on_frame(self,image):
         self.latest_image=image;self.live_image.set_array(image)
 
     def on_update(self,snap):
         self.snapshot=snap
+        if snap.get('recording_started_automatically'):
+            self._preview_active=False
+            self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True)
         diagnostic_key=(snap.get('game_id'),snap.get('status'),tuple(snap.get('uncertain_squares',[])),snap.get('plies'))
         if diagnostic_key!=getattr(self,'_last_diagnostic',None):
             logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks']}))
@@ -252,11 +257,13 @@ class MainWindow(ReviewTools,QMainWindow):
             self.live_board.show_pending();self._last_board_render=None
         self.last_move_label.setText(f"{len(moves)} verified plies  •  Last: {moves[-1] if moves else '—'}" if snap.get('fen') else "Waiting for a reliable first position • recording continues")
         pending=snap.get('pending_moves',[]) if snap.get('provisional') else []
-        self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN),pending)
+        guessed=snap.get('guessed_plies',[])
+        self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN),pending,guessed)
         if preview_active:
             option=f" • candidate 1 of {candidates}" if candidates>1 else ""
             suffix=" • final confirmation needed" if snap.get('pending_terminal') else " • not yet in PGN"
             self.last_move_label.setText(f"{len(moves)} verified plies • preview: {preview_line or 'current legal position'}{option}{suffix}")
+        if guessed:self.last_move_label.setText(self.last_move_label.text().replace('verified plies','PGN plies')+f' • {len(guessed)} opening plies guessed (≈)')
         options=snap.get('alternatives',[])
         if [self.alternatives.itemText(i) for i in range(self.alternatives.count())]!=options:
             self.alternatives.clear();self.alternatives.addItems(options)
@@ -271,8 +278,8 @@ class MainWindow(ReviewTools,QMainWindow):
             self.recovery.setText('Observed clocks • '+ '  |  '.join(color.title()+' ('+snap.get('players',{}).get(color,'Unknown')+'): '+clock_text(seconds) for color,seconds in snap['clocks'].items())+' • saved in PGN clock comments')
         self.delay_label.setText(f"Processing {snap.get('processing_ms',0)} ms  •  {snap.get('orientation','auto').title()} at bottom")
 
-    def update_move_table(self,moves,fen,pending=()):
-        key=(fen,tuple(moves),tuple(pending))
+    def update_move_table(self,moves,fen,pending=(),guessed=()):
+        key=(fen,tuple(moves),tuple(pending),tuple(guessed))
         if key==getattr(self,'_last_moves_render',None):return
         self._last_moves_render=key
         self.move_table.clearContents()
@@ -281,8 +288,12 @@ class MainWindow(ReviewTools,QMainWindow):
         self.move_table.setRowCount(rows)
         for row in range(rows):self.move_table.setItem(row,0,QTableWidgetItem(str(start+row)))
         for i,san in enumerate(list(moves)+list(pending)):
-            index=i+(1 if black_first else 0);item=QTableWidgetItem(("✓ " if i<len(moves) else "… ")+san)
+            index=i+(1 if black_first else 0)
+            prefix='… ' if i>=len(moves) else ('≈ ' if i+1 in guessed else '✓ ')
+            item=QTableWidgetItem(prefix+san)
             if i>=len(moves):item.setForeground(QColor('#f4c17a'));item.setToolTip('Provisional: a held piece can look like a move. Not included in PGN until confirmed.')
+            elif i+1 in guessed:
+                item.setForeground(QColor('#f4c17a'));item.setToolTip('Guessed opening prefix included in PGN. Shortest legal line with pawn moves prioritized; earlier move order may differ.')
             self.move_table.setItem(index//2,1+index%2,item)
         if rows:self.move_table.scrollToBottom()
 
@@ -360,7 +371,8 @@ class MainWindow(ReviewTools,QMainWindow):
             if self.worker and self.worker.isRunning():self.worker.commands.put(("region",region))
             self.auto_window_timer.stop()
             if hasattr(self,"statusBar"):
-                self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • live preview started; click Start recording when ready",10000)
+                self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • "+
+                    ('armed to record the first opening move' if self.settings.auto_record_opening else 'click Start recording when ready'),10000)
             logging.info("Automatically selected YouTube capture window hwnd=%s title=%r",hwnd,title)
             self.start_preview()
             return True
@@ -718,6 +730,9 @@ class MainWindow(ReviewTools,QMainWindow):
         def tab(name):
             widget=QWidget();layout=QFormLayout(widget);layout.setContentsMargins(24,24,24,24);layout.setVerticalSpacing(18);scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(widget);tabs.addTab(scroll,name);return layout
         capture=tab("Capture & recognition")
+        self.auto_record_opening=QCheckBox('Start recording automatically when an opening move appears')
+        self.auto_record_opening.setChecked(self.settings.auto_record_opening)
+        capture.addRow('Automatic recording',self.auto_record_opening)
         self.settings_interval=QDoubleSpinBox();self.settings_interval.setRange(.1,60);self.settings_interval.setValue(self.settings.interval);self.settings_interval.setSuffix(' seconds');capture.addRow('Permanent screenshot interval',self.settings_interval)
         self.adaptive=QCheckBox('Analyze additional temporary frames for fast games');self.adaptive.setChecked(self.settings.adaptive);capture.addRow('Adaptive recognition',self.adaptive)
         self.confirm_reply=QCheckBox('Keep the latest move provisional until the opponent responds');self.confirm_reply.setChecked(self.settings.confirm_on_reply);capture.addRow('Protect against dragged pieces',self.confirm_reply)
@@ -787,6 +802,7 @@ class MainWindow(ReviewTools,QMainWindow):
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
+            s.auto_record_opening=self.auto_record_opening.isChecked()
             s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.new_game_change_seconds=self.new_game_delay.value();s.new_game_min_changed_squares=self.new_game_squares.value();s.detect_results=self.detect_results.isChecked();s.read_context=self.read_context.isChecked();s.auto_context=self.auto_context.isChecked();s.context_padding_percent=self.context_padding.value();s.result_player_color=self.result_player.currentData();s.review_seconds=self.review_seconds.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.save_screenshots=self.save_screenshots.isChecked();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.capture_caption.setText(self._screenshot_caption());self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))
         except Exception as e:self.error(str(e))

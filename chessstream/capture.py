@@ -170,6 +170,29 @@ class RecordingWorker(QThread):
         self.paused=threading.Event()
         self.commands=queue.SimpleQueue()
 
+    def process_observation(self, obs, stable_count):
+        """Arm preview at startup and switch to recording on a supported opening."""
+        automatic=False
+        if (self.preview_only and stable_count>=2 and self.manager.settings.auto_record_opening
+                and self.manager.opening_ready(obs)):
+            self.preview_only=False;automatic=True
+            with self.manager.lock:
+                if self.manager.ended and self.manager.headers.get('Result','*')=='*':
+                    self.manager.ended=None
+                with self.manager.store.transaction() as db:
+                    db.execute('UPDATE sessions SET ended=NULL WHERE id=?',(self.manager.session_id,))
+            logging.info('Automatic recording started after a supported opening move appeared')
+        if stable_count>=2 and not self.preview_only:
+            snapshot=self.manager.process(obs)
+        else:
+            snapshot={**self.manager.snapshot(),'status':'Waiting for position to settle'}
+        if self.preview_only:
+            status=('Armed • recording starts when an opening move appears' if self.manager.settings.auto_record_opening else
+                    'Previewing selected window • click Start recording')
+            snapshot.update(status=status,preview_fen=obs.placement()+' w - - 0 1',preview_moves=[])
+        if automatic:snapshot['recording_started_automatically']=True
+        return snapshot
+
     def scan_context(self,image,rect,obs):
         settings=self.manager.settings
         if getattr(self,"_text_failed",False):return
@@ -355,13 +378,7 @@ class RecordingWorker(QThread):
                                         second=choose_orientation(second,self.manager.rec.board if self.manager.rec else None)
                                     elif settings.orientation=="black":second=second.flipped()
                                     if second.placement()==key:stable_count=2
-                        if stable_count>=2 and not self.preview_only:
-                            snapshot=self.manager.process(obs)
-                        else:
-                            snapshot={**snapshot,"status":"Waiting for position to settle"}
-                        if self.preview_only:
-                            snapshot.update(status="Previewing selected window • click Start recording",
-                                            preview_fen=obs.placement()+" w - - 0 1",preview_moves=[])
+                        snapshot=self.process_observation(obs,stable_count)
                         self.frame.emit(board_image)
                         snapshot.update(confidence=obs.confidence,orientation=obs.orientation,
                                         weakest_confidence=obs.weakest_confidence,
