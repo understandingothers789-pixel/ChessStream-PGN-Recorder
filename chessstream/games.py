@@ -113,6 +113,8 @@ class GameManager(GameExtras):
                 return False
             self._create(b, obs.timestamp)
             return True
+        if self._resume_latest_game_at_position(obs):
+            return True
         if obs.placement() == chess.Board().board_fen():
             self._create(chess.Board(), obs.timestamp)
             return True
@@ -139,6 +141,39 @@ class GameManager(GameExtras):
         note = ("Recording began midgame. Earlier moves are unavailable. Side to move is inferred from later evidence. "
                 "Castling rights and en passant history were not visible; no rights were assumed. Set an exact initial FEN if needed.")
         self._create(chess.Board(roots[0]), obs.timestamp, roots, note)
+        return True
+
+    def _resume_latest_game_at_position(self, obs):
+        """Reuse the newest recorded PGN when the visible board matches its end.
+
+        The visible image gives us piece placement, but not side to move,
+        castling rights, en-passant state, or counters. Match placement against
+        the verified end position and any saved pending branch end position.
+        """
+        rows=self.store.query("SELECT id,state FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 1")
+        if not rows:return False
+        row=rows[0]
+        try:
+            state=json.loads(row["state"])
+            saved=Reconstructor.restore(state,self.searcher())
+            placements={saved.board.board_fen()}
+            placements.update(branch.board().board_fen() for branch in saved.branches)
+        except (KeyError,TypeError,ValueError,chess.IllegalMoveError):
+            logging.warning("Could not compare latest saved game position for automatic resume",exc_info=True)
+            return False
+        if obs.placement() not in placements:
+            return False
+        unused_session=self.session_id
+        self.recover(row["id"])
+        if unused_session!=self.session_id:
+            self.store.finish_session(unused_session)
+        self.last_observation=obs
+        self.last_message="Continued latest saved PGN • visible board matches its verified or pending position"
+        self.persist()
+        self.store.audit("latest PGN resumed by visible position",{
+            "game_id":self.current_id,"placement":obs.placement(),
+            "matched_pending":obs.placement()!=saved.board.board_fen()})
+        logging.info("Resumed latest saved PGN %s from matching visible board placement",self.current_id)
         return True
 
     def _visible_roots(self, obs):
@@ -372,6 +407,9 @@ class GameManager(GameExtras):
         if elapsed>=seconds:
             reason=(f"stable board differed on {changed} confident squares and was not reachable from saved PGN history"
                     if large_change else "stable board remained unresolved for configured timeout")
+            if self._resume_latest_game_at_position(obs):
+                self.clear_position_recovery()
+                return
             try:
                 self._start_from_visible(obs,reason,self._unresolved_timestamp)
             except ValueError:

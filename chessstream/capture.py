@@ -347,7 +347,7 @@ class RecordingWorker(QThread):
                             board_image if board_image is not None else image,timestamp,
                             fen=(obs.placement() if obs else None),confidence=(obs.confidence if obs else None),
                             ply=snapshot.get("plies",0),deduplicate=settings.deduplicate,
-                            deduplicate_position=position_mode)
+                            deduplicate_position=bool(obs is not None and stable_count>=2))
                         next_saved=tick+settings.interval
                     snapshot["processing_ms"]=round((time.monotonic()-tick)*1000)
                     snapshot["saved_count"]=store.deletion_estimate({"session_id":self.manager.session_id})["count"]

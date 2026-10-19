@@ -100,14 +100,25 @@ def test_real_arrow_cursor_and_texture_changes_save_only_one_position(tmp_path):
     store.close()
 
 
-def test_repeated_positions_and_new_games_are_not_deduplicated_globally(tmp_path):
+def test_repeated_positions_are_kept_when_position_changes_but_same_position_is_session_deduped(tmp_path):
     store=Store(tmp_path);manager=GameManager(store,Settings());board=chess.Board();manager.process(Observation.from_board(board));sid=manager.session_id;gid=manager.current_id;image=np.zeros((80,80,3),np.uint8)
     for san in ['']+'Nf3 Nf6 Ng1 Ng8'.split():
         if san:board.push_san(san)
         assert store.save_screenshot(sid,gid,image,utcnow(),board.board_fen(),deduplicate_position=True)
     second=GameManager(store,Settings(),sid);second.process(Observation.from_board(board))
-    assert store.save_screenshot(sid,second.current_id,image,utcnow(),board.board_fen(),deduplicate_position=True)
-    assert len(store.screenshots())==6
+    assert store.save_screenshot(sid,second.current_id,image,utcnow(),board.board_fen(),deduplicate_position=True) is None
+    assert len(store.screenshots())==5
+    store.close()
+
+
+def test_position_dedup_ignores_layout_images_without_recognized_fen(tmp_path):
+    store=Store(tmp_path);manager=GameManager(store,Settings());manager.process(Observation.from_board(chess.Board()))
+    sid,gid=manager.session_id,manager.current_id;image=np.zeros((80,80,3),np.uint8)
+    start=chess.Board().board_fen()
+    assert store.save_screenshot(sid,gid,image,utcnow(),start,deduplicate_position=True)
+    assert store.save_screenshot(sid,gid,image,utcnow(),None,deduplicate_position=True)
+    assert store.save_screenshot(sid,gid,image,utcnow(),start,deduplicate_position=True) is None
+    assert len(store.screenshots())==2
     store.close()
 
 

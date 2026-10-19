@@ -113,9 +113,14 @@ class Store:
     def save_screenshot(self, sid, gid, image, timestamp, fen=None, confidence=None, ply=0, deduplicate=False, deduplicate_position=False):
         digest = hashlib.sha256(image.tobytes()).hexdigest()
         with self.lock:
-            last = self.query("SELECT sha256,fen,game_id FROM screenshots WHERE session_id=? AND deleted=0 ORDER BY id DESC LIMIT 1", (sid,))
-            if deduplicate_position and fen and last and last[0]['fen']==fen and last[0]['game_id']==gid:
+            # Compare against the last recognized position, not just the last
+            # image. Fullscreen/layout transitions can generate temporary
+            # unrecognized frames, and a recovered game can be associated with
+            # a different game id while retaining the same board position.
+            last_position = self.query("SELECT fen FROM screenshots WHERE session_id=? AND deleted=0 AND fen IS NOT NULL ORDER BY id DESC LIMIT 1", (sid,))
+            if deduplicate_position and fen and last_position and last_position[0]['fen']==fen:
                 return None
+            last = self.query("SELECT sha256,game_id FROM screenshots WHERE session_id=? AND deleted=0 ORDER BY id DESC LIMIT 1", (sid,))
             if deduplicate and last and last[0]['game_id']==gid and last[0]["sha256"] == digest:
                 return None
             sequence = self.query("SELECT COALESCE(MAX(sequence),0)+1 AS n FROM screenshots WHERE session_id=?", (sid,))[0]["n"]

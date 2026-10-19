@@ -210,3 +210,44 @@ def test_position_reachable_as_analysis_branch_stays_with_existing_game(tmp_path
     assert len(list(anchor.variations))==2
     assert manager.current_id==old_id
     store.close()
+
+
+def test_new_recording_resumes_latest_pgn_when_visible_board_matches_verified_end(tmp_path):
+    store=Store(tmp_path);settings=Settings(confirm_on_reply=False)
+    first=GameManager(store,settings);board=chess.Board()
+    first.process(Observation.from_board(chess.Board()))
+    for san in 'e4 e5 Nf3'.split():board.push_san(san);first.process(Observation.from_board(board))
+    gid=first.current_id
+    resumed=GameManager(store,Settings(confirm_on_reply=False))
+    resumed.process(Observation.from_board(board))
+    assert resumed.current_id==gid
+    assert resumed.rec.verified==first.rec.verified
+    assert len(store.games())==1
+    assert store.query("SELECT * FROM audit WHERE action='latest PGN resumed by visible position'")
+    store.close()
+
+
+def test_new_recording_resumes_latest_pgn_when_visible_board_matches_pending_move(tmp_path):
+    store=Store(tmp_path);first=GameManager(store,Settings(confirm_on_reply=True));board=chess.Board()
+    first.process(Observation.from_board(board));board.push_san('e4');first.process(Observation.from_board(board))
+    gid=first.current_id
+    assert first.rec.verified==[] and first.rec.branches[0].moves==('e2e4',)
+    resumed=GameManager(store,Settings(confirm_on_reply=True))
+    resumed.process(Observation.from_board(board))
+    assert resumed.current_id==gid
+    assert resumed.rec.verified==[] and resumed.rec.branches[0].moves==('e2e4',)
+    assert len(store.games())==1
+    store.close()
+
+
+def test_position_match_only_reuses_the_latest_chronological_pgn(tmp_path):
+    store=Store(tmp_path);settings=Settings(confirm_on_reply=False)
+    first=GameManager(store,settings);board=chess.Board();first.process(Observation.from_board(board))
+    board.push_san('e4');first.process(Observation.from_board(board));old_id=first.current_id
+    second=GameManager(store,settings);other=chess.Board();second.process(Observation.from_board(other))
+    other.push_san('d4');second.process(Observation.from_board(other));latest_id=second.current_id
+    assert latest_id!=old_id
+    third=GameManager(store,settings);third.process(Observation.from_board(board))
+    assert third.current_id not in {old_id,latest_id}
+    assert len(store.games())==3
+    store.close()
