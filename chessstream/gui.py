@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.2"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.3"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -125,7 +125,7 @@ class MainWindow(ReviewTools,QMainWindow):
             card=Card();card.box.addWidget(muted(title));label=QLabel(value);label.setObjectName("metric");card.box.addWidget(label);self.metric_labels[key]=label;metrics.addWidget(card)
         box.addLayout(metrics)
         splitter=QSplitter(Qt.Horizontal)
-        capture_card=Card("CAPTURED BOARD");self.live_image=ImageView();capture_card.box.addWidget(self.live_image,1);self.capture_caption=muted("Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary." if self.settings.screenshot_mode=='positions' else "Permanent screenshots: at the selected interval. Analysis frames stay temporary.");capture_card.box.addWidget(self.capture_caption)
+        capture_card=Card("CAPTURED BOARD");self.live_image=ImageView();capture_card.box.addWidget(self.live_image,1);self.capture_caption=muted(self._screenshot_caption());capture_card.box.addWidget(self.capture_caption)
         self.recognition_details=muted("Bundled screenshot model • waiting for a capture");capture_card.box.addWidget(self.recognition_details)
         internal=Card("RECONSTRUCTED BOARD");self.board_heading=internal.box.itemAt(0).widget();self.live_board=BoardView();internal.box.addWidget(self.live_board,1);self.last_move_label=muted("Waiting for the first verified position");internal.box.addWidget(self.last_move_label)
         self.live_board.show_pending()
@@ -153,7 +153,14 @@ class MainWindow(ReviewTools,QMainWindow):
     def set_screenshot_mode(self,index):
         self.settings.screenshot_mode=self.screenshot_mode.currentData();self.settings.save(self.root/'settings.json')
         if hasattr(self,'interval'):self.interval.setEnabled(self.settings.screenshot_mode!='positions')
-        if hasattr(self,'capture_caption'):self.capture_caption.setText('Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary.' if self.settings.screenshot_mode=='positions' else 'Permanent screenshots: at the selected interval. Analysis frames stay temporary.')
+        if hasattr(self,'capture_caption'):self.capture_caption.setText(self._screenshot_caption())
+
+    def _screenshot_caption(self):
+        if not self.settings.save_screenshots:
+            return 'Screenshot saving is off. Frames are still captured and analyzed in memory; no screenshot images are written to disk.'
+        return ('Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary.'
+                if self.settings.screenshot_mode=='positions' else
+                'Permanent screenshots: at the selected interval. Analysis frames stay temporary.')
 
     def toggle_start(self):
         if self.worker and self.worker.isRunning():
@@ -740,6 +747,10 @@ class MainWindow(ReviewTools,QMainWindow):
         self.model=QLineEdit(self.settings.onnx_model);self.model.setPlaceholderText('Optional compatible RGB/logit model; leave blank to use the bundled model');model_row=QWidget();model_box=QHBoxLayout(model_row);model_box.setContentsMargins(0,0,0,0);model_box.addWidget(self.model);model_box.addWidget(button('Import model…',self.browse_model));capture.addRow('Custom ONNX model',model_row)
         capture.addRow(muted('Imported models are copied into the app-managed models folder, separate from screenshots and settings. Only load models you trust. Models must follow the documented 13-class contract.'))
         storage=tab('Storage & saving')
+        self.save_screenshots=QCheckBox('Save screenshot images to disk while recording')
+        self.save_screenshots.setChecked(self.settings.save_screenshots)
+        storage.addRow('Screenshot images',self.save_screenshots)
+        storage.addRow(muted('Off by default. The recorder still captures and analyzes frames in memory, and game joining uses PGNs and position data, so turning this off does not affect move reconstruction or rejoining.'))
         self.dedupe=QCheckBox('Skip saving byte-identical images (recognition still runs)');self.dedupe.setChecked(self.settings.deduplicate);storage.addRow('Optional deduplication',self.dedupe)
         self.retention=QSpinBox();self.retention.setRange(0,36500);self.retention.setValue(self.settings.retention_days);self.retention.setSpecialValueText('Keep indefinitely');self.retention.setSuffix(' days');storage.addRow('Automatically delete after',self.retention)
         storage.addRow(muted('Enabling a positive retention period authorizes permanent deletion of older screenshot files, including files already saved. Game data and PGNs are kept. Due jobs run when the application is open.'))
@@ -774,7 +785,7 @@ class MainWindow(ReviewTools,QMainWindow):
             if days and days!=self.settings.retention_days:
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
-            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.new_game_change_seconds=self.new_game_delay.value();s.new_game_min_changed_squares=self.new_game_squares.value();s.detect_results=self.detect_results.isChecked();s.read_context=self.read_context.isChecked();s.auto_context=self.auto_context.isChecked();s.context_padding_percent=self.context_padding.value();s.result_player_color=self.result_player.currentData();s.review_seconds=self.review_seconds.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.statusBar().showMessage('Settings saved',6000)
+            s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.new_game_change_seconds=self.new_game_delay.value();s.new_game_min_changed_squares=self.new_game_squares.value();s.detect_results=self.detect_results.isChecked();s.read_context=self.read_context.isChecked();s.auto_context=self.auto_context.isChecked();s.context_padding_percent=self.context_padding.value();s.result_player_color=self.result_player.currentData();s.review_seconds=self.review_seconds.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.save_screenshots=self.save_screenshots.isChecked();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.capture_caption.setText(self._screenshot_caption());self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))
         except Exception as e:self.error(str(e))
 

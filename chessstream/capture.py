@@ -19,6 +19,12 @@ from .results import EndMessageDetector,ContextStabilizer,extract_context
 from .vision import BoardDetector, TemplateRecognizer, create_recognizer, choose_orientation, checker_score
 
 
+def should_save_screenshot(settings, preview_only, save_due, position_mode, observation, stable_count):
+    """Whether a captured frame should become a permanent image on disk."""
+    return bool(not preview_only and settings.save_screenshots and save_due
+                and (not position_mode or observation is not None and stable_count >= 2))
+
+
 def enable_dpi_awareness():
     if sys.platform == "win32":
         try:
@@ -369,7 +375,7 @@ class RecordingWorker(QThread):
                         snapshot.update(status=(self.manager.last_message if self.manager.terminal_message else "Board hidden / not found • game preserved"),confidence=0)
                     # Position-mode storage never suppresses recognition, search
                     # or evidence metadata. Ignore hidden/unstable board images.
-                    if not self.preview_only and save_due and (not position_mode or obs is not None and stable_count>=2):
+                    if should_save_screenshot(settings,self.preview_only,save_due,position_mode,obs,stable_count):
                         store.save_screenshot(self.manager.session_id,self.manager.current_id,
                             board_image if board_image is not None else image,timestamp,
                             fen=(obs.placement() if obs else None),confidence=(obs.confidence if obs else None),

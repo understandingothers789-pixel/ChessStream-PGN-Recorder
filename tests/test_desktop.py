@@ -48,6 +48,8 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     monkeypatch.setattr(gui.MainWindow,'start_preview',lambda self:setattr(self,'preview_started',True))
     window=gui.MainWindow(tmp_path);assert window.region.window==4
     assert window.preview_started
+    assert window.settings.save_screenshots is False
+    assert not window.save_screenshots.isChecked()
     assert rank_capture_windows(options)[0][0]==4
     assert rank_youtube_windows(options)[0][0]==4
     window.on_update({'preview_fen':chess.Board().fen(),'preview_moves':[],'confidence':.95,

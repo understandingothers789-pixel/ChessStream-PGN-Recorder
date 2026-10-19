@@ -16,6 +16,7 @@ from .reconstruction import Reconstructor, LegalSearcher, Branch
 from .storage import Store
 from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
+from .gap_join import join_recordings
 
 
 def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None, inferred_moves=None) -> str:
@@ -181,7 +182,29 @@ class GameManager(GameExtras):
         if latest['id'] not in {row['id'] for row in candidates}:candidates.append(latest)
 
         chosen=None
+        joined=None
+        if is_fen_checkpoint:
+            # A temporary FEN PGN is a segment of the current game when its
+            # verified line can be attached to the immediately preceding PGN.
+            # Try this full join before falling back to a direct bridge from
+            # the older PGN to the latest image.
+            if (not self.pending_identity
+                    and not (self.clocks_recently_reset() and obs.placement()==chess.Board().board_fen())):
+                for previous in candidates:
+                    if (previous['id']==latest['id'] or previous['session_id']!=latest['session_id']
+                            or not previous['status'].startswith('preserved')):
+                        continue
+                    try:
+                        joined=self._join_checkpoint(previous['id'],latest['id'],obs)
+                    except (ValueError,TypeError,KeyError,chess.IllegalMoveError):
+                        logging.info('Could not join checkpoint %s into %s; trying the ordinary saved-position recovery',
+                                     latest['id'],previous['id'],exc_info=True)
+                        joined=None
+                    if joined is not None:
+                        chosen=(previous,joined['rec'],joined['bridge_before'],[],joined['bridged'],None,False)
+                        break
         for row in candidates:
+            if chosen is not None:break
             try:
                 state=json.loads(row['state'])
                 saved=Reconstructor.restore(state,self.searcher())
@@ -216,7 +239,24 @@ class GameManager(GameExtras):
         latest_checkpoint_id=(latest['id'] if row['id']!=latest['id'] and is_fen_checkpoint else None)
         unused_session=self.session_id
         self.recover(row["id"],persist=False)
-        if bridged:
+        if joined is not None and row['id']!=latest['id']:
+            self.rec=joined['rec']
+            self.review_pgn=joined['pgn']
+            self.headers=dict(joined['game'].headers)
+            self.move_clocks.update(joined['clocks'])
+            self.note=self.note.replace(
+                ' A separate PGN segment was started from the visible board FEN; this game\'s saved moves remain unchanged.','').strip()
+            self.note += " A temporary visible-FEN recording was joined to this PGN using the shortest legal connection; inferred gap moves are labeled."
+            if bridged:
+                self._mark_inferred_gap(before,previous_pending)
+                if joined['bridge_update'] and joined['bridge_update'].tie_broken:
+                    self._mark_capture_tiebreak(before)
+            self._persisted_fingerprint=None
+            self.store.audit('saved PGN segments automatically joined',{
+                'game_id':self.current_id,'checkpoint_game_id':latest_checkpoint_id,
+                'joined_plies':len(self.rec.verified),'bridge_plies':len(self.rec.verified)-before,
+                'fen':self.rec.board.fen()})
+        elif bridged:
             self.rec=saved
             self._mark_inferred_gap(before,previous_pending)
             if bridge_update.tie_broken and len(saved.verified)>before:
@@ -228,7 +268,8 @@ class GameManager(GameExtras):
         if unused_session!=self.session_id:
             self.store.finish_session(unused_session)
         self.last_observation=obs
-        self.last_message=("Review position • linked to latest saved PGN history" if review else
+        self.last_message=("Joined the saved PGNs • continuing the combined game" if joined is not None else
+                           "Review position • linked to latest saved PGN history" if review else
                            "Gap linked to latest PGN • shortest legal continuation • "+self.rec.status if bridged else
                            "Continued latest saved PGN • visible board matches its verified or pending position")
         self.persist()
@@ -238,6 +279,47 @@ class GameManager(GameExtras):
             "bridged":bridged,"review":review})
         logging.info("Resumed latest saved PGN %s from matching visible board placement",self.current_id)
         return True
+
+    def _join_checkpoint(self, previous_id, checkpoint_id, obs):
+        """Return a validated merged PGN and live reconstructor for two saved segments."""
+        previous=self.store.game(previous_id);checkpoint=self.store.game(checkpoint_id)
+        if not previous or not checkpoint:raise ValueError('A saved PGN segment is missing.')
+        previous_state=json.loads(previous['state']);checkpoint_state=json.loads(checkpoint['state'])
+        previous_headers=json.loads(previous['headers']);checkpoint_headers=json.loads(checkpoint['headers'])
+        if (previous_headers.get('Result','*')!='*' or previous_state.get('terminal_message')
+                or checkpoint_headers.get('Result','*')!='*' or checkpoint_state.get('terminal_message')):
+            raise ValueError('A game-end result prevents automatic joining.')
+        pgn=join_recordings([previous,checkpoint],self.searcher())
+        game=chess.pgn.read_game(io.StringIO(pgn))
+        if game is None or game.errors:raise ValueError('The joined PGN did not pass validation.')
+        checkpoint_note=checkpoint_state.get('note','')
+        if checkpoint_note:
+            def sanitize_segment_note(node):
+                if checkpoint_note in node.comment:
+                    node.comment=node.comment.replace(checkpoint_note,
+                        'Visible-FEN checkpoint joined to the preceding PGN; inferred gap moves are labeled.')
+                for child in node.variations:sanitize_segment_note(child)
+            sanitize_segment_note(game)
+            pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+        rec=self.reconstructor(game.board())
+        clocks={}
+        for ply,node in enumerate(game.mainline(),1):
+            if node.move not in rec.board.legal_moves:raise ValueError('Joined PGN contains an illegal move.')
+            rec.board.push(node.move);rec.verified.append(node.move.uci());rec.history.append(rec.board.board_fen())
+            clock=node.clock()
+            if clock is not None:clocks[str(ply)]=clock
+        rec.branches=[Branch(rec.board.fen(),())]
+        rec.status='recording • joined saved PGN segments'
+        bridge_before=len(rec.verified);bridge_update=None;bridged=False
+        if not obs.matches(rec.board,max(.8,self.settings.min_confidence)):
+            bridge_update=rec.bridge_gap(obs,self.searcher())
+            if bridge_update is None:raise ValueError('The joined PGN does not reach the current visible position.')
+            bridged=True
+        if not rec.branches or any(branch.board().board_fen()!=obs.placement() for branch in rec.branches):
+            raise ValueError('The joined PGN does not match the current visible position.')
+        rec.confirmation_plies=int(self.settings.confirm_on_reply)
+        return {'pgn':pgn,'game':game,'rec':rec,'clocks':clocks,
+                'bridge_before':bridge_before,'bridge_update':bridge_update,'bridged':bridged}
 
     def _mark_inferred_gap(self, before, previous_pending):
         """Annotate only the common new path across a multi-move gap."""

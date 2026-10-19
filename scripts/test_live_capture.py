@@ -32,7 +32,7 @@ def main():
         browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=False,args=['--no-sandbox','--window-size=1400,1000','--window-position=0,0'])
         page=browser.new_page(viewport={'width':1300,'height':880})
         page.goto('https://lichess.org/analysis',wait_until='domcontentloaded',timeout=60000);page.wait_for_selector('cg-board');page.wait_for_timeout(1800)
-        store=Store(Path(td));settings=Settings();manager=GameManager(store,settings)
+        store=Store(Path(td));settings=Settings(save_screenshots=True);manager=GameManager(store,settings)
         with mss.mss() as cap:
             monitor=cap.monitors[1]
             screen=np.asarray(cap.grab(monitor))[:,:,:3].copy()

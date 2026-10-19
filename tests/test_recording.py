@@ -7,6 +7,7 @@ from chessstream.storage import Store
 from chessstream.games import GameManager,export_pgn
 from chessstream.reconstruction import LegalSearcher
 from chessstream.gap_join import join_recordings
+from chessstream.capture import should_save_screenshot
 
 PREFIX='e4 e6 d4 d5 e5 c5 Bb5+ Bd7 a4 cxd4'
 
@@ -74,6 +75,43 @@ def test_live_fen_checkpoint_reconnects_to_preserved_game_after_window_transitio
     assert manager.store.game(checkpoint_id)['status'].startswith('reconnected • see ')
     assert chess.pgn.read_game(io.StringIO(manager.store.game(original_id)['pgn'])).end().board().board_fen()==board.board_fen()
     store.close()
+
+
+def test_live_fen_checkpoint_is_joined_into_main_pgn_and_becomes_active(tmp_path):
+    store=Store(tmp_path);settings=Settings(confirm_on_reply=False)
+    manager,board=record(store,settings,'e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6')
+    original_id=manager.current_id
+    checkpoint=Observation.from_board(board)
+    manager._start_from_visible(checkpoint,'simulated fullscreen reacquisition')
+    checkpoint_id=manager.current_id
+    for san in 'O-O Be7'.split():
+        board.push_san(san);manager.process(Observation.from_board(board))
+    board.push_san('Re1')
+    assert manager._resume_latest_game_at_position(Observation.from_board(board))
+    assert manager.current_id==original_id
+    combined=chess.pgn.read_game(io.StringIO(store.game(original_id)['pgn']))
+    assert not combined.errors
+    assert [node.san() for node in combined.mainline()]==[
+        'e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7','Re1']
+    assert combined.end().board().board_fen()==board.board_fen()
+    assert 'Earlier moves are not included' not in store.game(original_id)['pgn']
+    assert 'saved moves remain unchanged' not in store.game(original_id)['pgn']
+    assert store.game(checkpoint_id)['status'].startswith('reconnected • see ')
+    assert 'Joined the saved PGNs' in manager.last_message
+    store.close()
+
+
+def test_screenshot_images_are_opt_in_but_memory_capture_is_unaffected():
+    obs=Observation.from_board(chess.Board())
+    settings=Settings()
+    assert not settings.save_screenshots
+    assert not should_save_screenshot(settings,False,True,False,obs,2)
+    settings.save_screenshots=True
+    assert should_save_screenshot(settings,False,True,False,None,0)
+    assert not should_save_screenshot(settings,False,False,False,obs,2)
+    assert not should_save_screenshot(settings,True,True,False,obs,2)
+    assert not should_save_screenshot(settings,False,True,True,None,2)
+    assert should_save_screenshot(settings,False,True,True,obs,2)
 
 
 def test_resumed_equal_shortest_lines_choose_one_deterministically(tmp_path):
