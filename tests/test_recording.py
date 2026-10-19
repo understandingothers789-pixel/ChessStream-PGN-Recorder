@@ -326,3 +326,54 @@ def test_half_second_counts_from_first_frame_before_worker_animation_gate(tmp_pa
     now[0]=.5;worker.process_observation(obs,2)
     assert manager.rec.verified[-1]=='b8c6' and not manager.snapshot()['pending_moves']
     store.close()
+
+
+CLARIFIED_OPENING='e4 c5 d3 Nc6 c3 d5 f3 e5 Ne2 Nf6 g3 c4 dxc4 dxe4 Qxd8+ Nxd8 fxe4 Nxe4'
+
+
+def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(tmp_path):
+    for skip in (False,True):
+        store=Store(tmp_path/str(skip));manager,board=record(store,Settings(),CLARIFIED_OPENING)
+        gid=manager.current_id;now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
+        for index,san in enumerate('Bg2 Nc5 O-O Nd3'.split()):
+            board.push_san(san)
+            if skip and index%2==0:continue
+            now[0]+=5. if skip else 1.
+            obs=Observation.from_board(board)
+            if san=='Nd3':
+                # The reported screenshot flags the now-empty c5 at 74.9%.
+                obs.probabilities[chess.C5]=0
+                obs.probabilities[chess.C5,0]=.749
+                obs.probabilities[chess.C5,8]=.251
+            manager.process(obs)
+            now[0]+=.5;manager.process(obs)
+        game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+        sans=[node.san() for node in game.mainline()]
+        assert sans[-5:]==['Nxe4','Bg2','Nc5','O-O','Nd3']
+        assert 'Rb8' not in sans and 'Ra8' not in sans
+        assert game.end().board().fen()==board.fen()
+        assert manager.current_id==gid and len(store.games())==1
+        store.close()
+
+
+def test_reported_rook_and_bishop_detour_is_replaced_by_nc5_without_losing_opening(tmp_path):
+    store=Store(tmp_path);manager,source=record(store,Settings(confirm_on_reply=False),CLARIFIED_OPENING+' Bg2')
+    gid=manager.current_id;prefix=manager.rec.verified[:];before=len(prefix)
+    for san in 'Rb8 Bxe4 Ra8 Bg2'.split():
+        manager.rec.board.push_san(san)
+        uci=manager.rec.board.peek().uci();manager.rec.verified.append(uci)
+        manager.rec.history.append(manager.rec.board.board_fen())
+        manager.inferred_moves[str(len(manager.rec.verified))]={'uci':uci,'comment':'Inferred across capture gap'}
+    from chessstream.reconstruction import Branch
+    manager.rec.branches=[Branch(manager.rec.board.fen(),())];manager.persist();manager.recover(gid)
+    target=source.copy();target.push_san('Nc5')
+    now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
+    manager.process(Observation.from_board(target))
+    now[0]=.5;manager.process(Observation.from_board(target))
+    assert manager.rec.verified[:before]==prefix
+    assert manager.rec.verified[before:]==['e4c5']
+    game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+    assert [n.san() for n in game.mainline()][-3:]==['Nxe4','Bg2','Nc5']
+    assert game.end().board().fen()==target.fen()
+    assert manager.current_id==gid and len(store.games())==1
+    store.close()
