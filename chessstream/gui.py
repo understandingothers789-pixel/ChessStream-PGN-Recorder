@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QSplitter, QPlainTextEdit, QTextBrowser, QLineEdit, QListWidget, QListWidgetItem,
     QSlider, QFileDialog, QMessageBox, QInputDialog, QDialog, QDialogButtonBox,
-    QFormLayout, QScrollArea, QDateTimeEdit, QTabWidget, QKeySequenceEdit, QMenu
+    QFormLayout, QScrollArea, QDateTimeEdit, QTabWidget, QKeySequenceEdit, QMenu, QButtonGroup
 )
 from .domain import Settings, Region, atomic_text
 from .storage import Store
@@ -83,10 +83,10 @@ class MainWindow(ReviewTools,QMainWindow):
         outer=QWidget();self.setCentralWidget(outer);layout=QHBoxLayout(outer);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
         side=QWidget();side.setObjectName("sidebar");side.setFixedWidth(208);sidebar=QVBoxLayout(side);sidebar.setContentsMargins(16,28,16,20)
         brand=QLabel("♞  ChessStream");brand.setObjectName("brand");sidebar.addWidget(brand);sidebar.addWidget(muted("PGN RECORDER  /  LOCAL"));sidebar.addSpacing(35)
-        self.stack=QStackedWidget();self.nav=[]
+        self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
-            b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.17"))
+            b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.18"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -115,8 +115,8 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack.addWidget(scroll);return page,box
 
     def navigate(self,index):
-        self.stack.setCurrentIndex(index)
         for i,b in enumerate(self.nav):b.setChecked(i==index)
+        self.stack.setCurrentIndex(index)
         if index==1:self.refresh_library()
         elif index==2:self.refresh_screenshots()
 

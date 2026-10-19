@@ -56,6 +56,11 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     monkeypatch.setattr(gui,'window_client',lambda hwnd:Region(0,0,1200,800,window=hwnd))
     monkeypatch.setattr(gui.MainWindow,'start_preview',lambda self:setattr(self,'preview_started',True))
     window=gui.MainWindow(tmp_path);assert window.region.window==4
+    selected_during_switch=[]
+    window.stack.currentChanged.connect(lambda index:selected_during_switch.append(
+        [i for i,button in enumerate(window.nav) if button.isChecked()]))
+    window.nav[1].click();assert selected_during_switch[-1]==[1]
+    window.nav[0].click();assert selected_during_switch[-1]==[0]
     assert window.preview_started
     assert window.settings.save_screenshots is False
     # The common correction actions operate inline, without the old SAN dialog.

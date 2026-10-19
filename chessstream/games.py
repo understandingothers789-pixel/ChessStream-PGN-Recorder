@@ -19,6 +19,7 @@ from .pgn_tools import merge_annotations
 from .gap_join import join_recordings
 from .opening import infer_visible_opening
 from .repair import simplify_shuffles,retained_annotations
+from .analysis_tracking import AnalysisTracking
 
 
 def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None, inferred_moves=None) -> str:
@@ -51,7 +52,7 @@ def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", re
     return game.accept(chess.pgn.StringExporter(headers=True, variations=True, comments=True))
 
 
-class GameManager(GameExtras):
+class GameManager(AnalysisTracking,GameExtras):
     def __init__(self, store: Store, settings: Settings, session_id: str | None = None):
         self.store, self.settings = store, settings
         self.session_id = session_id or store.session()
@@ -686,6 +687,12 @@ class GameManager(GameExtras):
             self.last_observation = obs
             move_evidence=obs
             self._recognition_ignored_squares=[]
+            if self.rec and self._handle_saved_analysis(obs):
+                self.reset_settling();self.persist()
+                self.store.save_observation(self.session_id,self.current_id,obs,self.last_message,{'analysis':True,'cursor':self.analysis_cursor})
+                snapshot=self.snapshot()
+                snapshot.update(preview_fen=obs.placement()+' w - - 0 1',preview_moves=[],preview_last_move=None)
+                return snapshot
             if self.rec:self._consider_new_opening(obs)
             if self.rec:self._consider_unlinked_position(obs)
             if self.rec and self._handle_rewind(obs):
@@ -1444,6 +1451,9 @@ class GameManager(GameExtras):
         with self.lock:
             if not self.rec:
                 self.last_message='Join previous • capture a board first';return False
+            self._analysis_retry=None
+            if self._try_replay_recording(self.last_observation or Observation.from_board(self.rec.board)):
+                return True
             self.persist();current=self.store.game(self.current_id)
             rows=self.store.query("SELECT * FROM games WHERE id!=? AND started<=? AND status!='imported' AND status NOT LIKE 'combined source%' AND status NOT LIKE 'reconnected%' ORDER BY started DESC,updated DESC LIMIT 2",
                                   (self.current_id,current['started']))

@@ -81,7 +81,7 @@ class Store:
         atomic_text(self.root/"pgn"/(gid+".pgn"), pgn+"\n")
 
     def games(self) -> list[dict]:
-        return self.query("SELECT * FROM games ORDER BY started DESC")
+        return self.query("SELECT * FROM games WHERE status NOT LIKE 'reconnected analysis%' ORDER BY started DESC")
 
     def game(self, gid) -> dict | None:
         rows = self.query("SELECT * FROM games WHERE id=?", (gid,))
