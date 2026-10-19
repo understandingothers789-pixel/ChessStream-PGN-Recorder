@@ -174,6 +174,8 @@ class RecordingWorker(QThread):
         self.stopping=threading.Event()
         self.paused=threading.Event()
         self.commands=queue.SimpleQueue()
+        from .recovery import RecentFrames
+        self.recent_frames=RecentFrames(12)
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
@@ -189,13 +191,18 @@ class RecordingWorker(QThread):
                     db.execute('UPDATE sessions SET ended=NULL WHERE id=?',(self.manager.session_id,))
             logging.info('Automatic recording started after a supported opening move appeared')
         if stable_count>=2 and not self.preview_only:
-            snapshot=self.manager.process(obs)
+            if self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id)):
+                snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues'}
+            else:
+                snapshot=self.manager.process(obs)
+                self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id))
         else:
             snapshot={**self.manager.snapshot(),'status':'Waiting for position to settle'}
         if self.preview_only:
             status=('Armed • recording starts when an opening move appears' if self.manager.settings.auto_record_opening else
                     'Previewing selected window • click Start recording')
             snapshot.update(status=status,preview_fen=obs.placement()+' w - - 0 1',preview_moves=[])
+        self.recent_frames.mark(self.manager.current_id,not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message)
         if automatic:snapshot['recording_started_automatically']=True
         return snapshot
 
@@ -216,7 +223,7 @@ class RecordingWorker(QThread):
                     self.manager.observe_context(context,obs.timestamp if obs else utcnow())
                     if context.get('clocks') or context.get('names'):
                         logging.info('Visible game context %s',context)
-                if message and settings.detect_results and not self.manager.pending_identity:self.manager.declare_end(message,obs)
+                if message and settings.detect_results:self.manager.declare_end(message,obs)
         except Exception:
             if not getattr(self,'_text_failed',False):
                 logging.exception('Local text recognition failed; chess capture continues')
@@ -391,6 +398,7 @@ class RecordingWorker(QThread):
                                         second=choose_orientation(second,self.manager.rec.board if self.manager.rec else None)
                                     elif settings.orientation=="black":second=second.flipped()
                                     if second.placement()==key:stable_count=2
+                        self.recent_frames.add(board_image,obs)
                         snapshot=self.process_observation(obs,stable_count)
                         self.frame.emit(board_image)
                         snapshot.update(confidence=obs.confidence,orientation=obs.orientation,
@@ -412,6 +420,8 @@ class RecordingWorker(QThread):
                             ply=snapshot.get("plies",0),deduplicate=settings.deduplicate,
                             deduplicate_position=bool(obs is not None and stable_count>=2))
                         next_saved=tick+settings.interval
+                    snapshot["buffered_frames"]=len(self.recent_frames.frames)
+                    snapshot["buffered_bytes"]=sum(frame["image"].nbytes for frame in self.recent_frames.frames)
                     snapshot["processing_ms"]=round((time.monotonic()-tick)*1000)
                     snapshot["saved_count"]=store.deletion_estimate({"session_id":self.manager.session_id})["count"]
                     self.update.emit(snapshot)
@@ -422,6 +432,7 @@ class RecordingWorker(QThread):
             logging.exception("Recording worker failed")
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
+            self.manager.cancel_background_recovery()
             try:
                 if not self.preview_only:
                     self.manager.finish()

@@ -29,6 +29,7 @@ def parse_end_message(lines, player_color=None, names=None):
     context=bool(re.search(r'\b(won|wins|lost|draw|drawn|stalemate|checkmate|abandoned|resigned|resignation|timeout|time out|game over|game ended|aborted)\b',normalized))
     if not context and not re.fullmatch(r'(?:1-0|0-1|1/2-1/2)',normalized.replace(' ','')):return None
     reason=next((word for word in ['aborted','abandoned','checkmate','stalemate','resignation','timeout'] if word in normalized),'game ended')
+    if re.search(r'\bresign(?:ed|ation)\b',normalized):reason='resignation'
     confidence=min(score for _,score in strong)
     if aborted:return EndMessage('*','aborted',text,confidence)
     if re.search(r'(?<!\d)1\s*/\s*2\s*-\s*1\s*/\s*2(?!\d)|\b(draw|drawn|stalemate)\b',normalized):
@@ -49,7 +50,7 @@ def parse_end_message(lines, player_color=None, names=None):
         white_wins=(player_color=='white')==won
         return EndMessage('1-0' if white_wins else '0-1',reason,text,confidence,'You Won/Lost mapped using configured player color')
     # Abandonment without a named winner still proves that play ended.
-    if 'abandoned' in normalized:return EndMessage('*',reason,text,confidence,'winner color unknown; edit result in library')
+    if 'abandoned' in normalized or reason=='resignation':return EndMessage('*',reason,text,confidence,'winner color unknown; edit result in library')
     return None
 
 
@@ -111,6 +112,19 @@ class EndMessageDetector:
         if self.reader is None:self.reader=LocalTextReader()
         if self._pixels is None or not np.array_equal(self._pixels,image):
             self.last_lines=self.reader.read(image);self._pixels=image.copy()
+            message=parse_end_message(self.last_lines,player_color,names)
+            # Full-window downsampling can erase a small resignation subtitle.
+            # Retry the actual board at native scale; map coordinates back so
+            # context extraction keeps its ordinary spatial restrictions.
+            if board_rect and (message is None or message.reason=='game ended'):
+                x,y,w,h=map(int,board_rect)
+                x0=max(0,x);y0=max(0,y);x1=min(image.shape[1],x+w);y1=min(image.shape[0],y+h)
+                if x1-x0>=64 and y1-y0>=64:
+                    crop=image[y0:y1,x0:x1]
+                    for line in self.reader.read(crop):
+                        if len(line)<3:self.last_lines.append(line);continue
+                        text,score,(a,b,c,d)=line
+                        self.last_lines.append((text,score,(a+x0,b+y0,c+x0,d+y0)))
         relevant=self.last_lines
         if board_rect:
             x,y,w,h=board_rect

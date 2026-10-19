@@ -12,12 +12,12 @@ from .pgn_tools import node_at
 class GameExtras:
     def _reset_extras(self):
         self.review_pgn='';self.terminal_message=None;self.player_color=None
-        self.review_tracker=None;self.review_anchor=None;self.rewind_state=None
+        self.review_tracker=None;self.review_anchor=None;self.rewind_state=None;self.premove_state=None
         self.move_clocks={};self.inferred_moves={};self.clock_evidence={};self.latest_context=None;self._clock_samples=[]
         self.observed_names={};self.pending_identity=None;self.clock_reset_seen=False
 
     def _extra_state(self):
-        return {key:getattr(self,key) for key in ['review_pgn','terminal_message','player_color','move_clocks','inferred_moves','clock_evidence','observed_names','rewind_state']}
+        return {key:getattr(self,key) for key in ['review_pgn','terminal_message','player_color','move_clocks','inferred_moves','clock_evidence','observed_names','rewind_state','premove_state']}
 
     def _load_extras(self,state):
         self._reset_extras()
@@ -102,6 +102,7 @@ class GameExtras:
         if not self.rec or len(self.rec.branches)!=1:return False
         branch=self.rec.branches[0]
         if len(branch.moves)!=1:return False
+        if self.premove_state and branch.moves[-1]==self.premove_state['move']:return False
         final=branch.board();before=board_labels(self.rec.board);after=board_labels(final)
         changed=[s for s in chess.SQUARES if before[s]!=after[s]]
         # A popup may hide most of the board. The move's changed squares still
@@ -117,6 +118,9 @@ class GameExtras:
             if not self.rec or self.terminal_message:return False
             observed=obs or self.last_observation
             confirmed=self._confirm_terminal_pending(observed) if observed and message.reason!='aborted' else False
+            if self.premove_state:
+                self.store.audit('premove discarded at game end',{'game_id':self.current_id,**self.premove_state})
+                self.premove_state=None
             self.terminal_message={'result':message.result,'reason':message.reason,'text':message.text,'confidence':message.confidence,'color_basis':message.color_basis,'timestamp':utcnow()}
             if not self.result_override:self.headers['Result']=message.result
             if message.reason in ['aborted','abandoned','resignation','timeout','checkmate','stalemate']:self.headers['Termination']={'aborted':'abandoned','abandoned':'abandoned','timeout':'time forfeit'}.get(message.reason,message.reason)

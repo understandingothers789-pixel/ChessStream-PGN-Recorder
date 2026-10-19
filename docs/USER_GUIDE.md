@@ -175,3 +175,14 @@ The recorder checks earlier saved positions before trying to reconstruct new mov
 Return to the saved endpoint to resume, or advance to a legal continuation beyond it. Rewind protection survives reopening a recording. A terminal-game reset still allows a new game. Normal one-move repetitions, including a legal return to the starting board, continue recording normally.
 
 When rewind evidence also reveals a recent **inferred** four-ply, noncapturing rook round trip, the recorder can delete that loop from the main PGN and shift subsequent clock/move metadata. The diagnostic log records the removed moves. It does not delete arbitrary older verified history or silently collapse real repetitions. If both the historical and live continuation remain plausible, it keeps the PGN protected until clearer evidence arrives.
+
+
+### Premoves and extra recovery time
+
+A possible premove is shown in the preview but excluded from the PGN when only the inactive side's piece changes position. The recorder waits for an opponent move or for the preview to cancel; time alone cannot commit this out-of-turn change. This prevents invented waiting moves merely to make a premoved mate legal. Resignation ends the game at the last played position. A genuine preceding pending move can still be confirmed if its changed squares are visible.
+
+The capture worker retains at most **12 changed board frames in RAM**, downscaled to at most 768 pixels per side (about 21 MB maximum pixel storage for square frames). Identical images refresh their timestamps rather than consuming another slot. This buffer is temporary and never writes screenshot files; your screenshot-saving preference remains separate.
+
+Unresolved gaps can use a single background recovery worker with progressively larger, bounded search budgets up to 1.5 seconds. The worker can reconstruct through retained intermediate observations. Frame comparison continues while the longer search runs. Results are accepted only if the game, accepted prefix, root FEN and current observed placement still match the task that requested them. Premoves, rewinds and ended games cannot receive a background continuation. Corrections remain labeled inferred. These are resource limits, not guarantees of a specific frame rate under heavy CPU load.
+
+Result OCR retries the board crop at native scale when full-window text is insufficient, preserving screen coordinates for player/clock extraction. It still requires repeated end-message evidence; an ordinary Resign button does not end the game. Diagnostics include possible premoves, discarded end-of-game premoves, queued background recovery and recovered gaps.

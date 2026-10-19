@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.10"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.11"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -263,7 +263,7 @@ class MainWindow(ReviewTools,QMainWindow):
             option=f" • candidate 1 of {candidates}" if candidates>1 else ""
             suffix=" • final confirmation needed" if snap.get('pending_terminal') else " • not yet in PGN"
             self.last_move_label.setText(f"{len(moves)} verified plies • preview: {preview_line or 'current legal position'}{option}{suffix}")
-        if guessed:self.last_move_label.setText(self.last_move_label.text().replace('verified plies','PGN plies')+f' • {len(guessed)} opening plies guessed (≈)')
+        if guessed:self.last_move_label.setText(self.last_move_label.text().replace('verified plies','PGN plies')+f' • {len(guessed)} plies inferred (≈)')
         options=snap.get('alternatives',[])
         if [self.alternatives.itemText(i) for i in range(self.alternatives.count())]!=options:
             self.alternatives.clear();self.alternatives.addItems(options)

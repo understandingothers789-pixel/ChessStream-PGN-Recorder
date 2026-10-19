@@ -27,12 +27,21 @@ def test_actual_board_page_detection_piece_recognition_and_board_flip():
 
 def test_native_ocr_still_reads_names_clocks_and_game_end():
     image=cv2.imread(str(FIXTURES/'results/native-bot-resigned.png'))
-    lines=LocalTextReader().read(image)
+    reader=LocalTextReader();lines=reader.read(image)
     context=extract_context(lines,(108,66,568,568),'white')
     assert context['names']=={'black':'Martinfoot','white':'Guest'}
     assert all(500<=time<=600 for time in context['clocks'].values())
     message=parse_end_message(lines,'white',context['names'])
     assert message and message.result=='0-1'
+    # Exercise the native board-focused retry with the actual offline OCR model.
+    from chessstream.results import EndMessageDetector
+    class BoardReader:
+        def read(self,tile):
+            return [] if tile.shape==image.shape else reader.read(tile)
+    now=[0.];detector=EndMessageDetector(BoardReader(),lambda:now[0])
+    assert detector.scan(image,'white',(108,66,568,568),context['names']) is None
+    now[0]=1.;end=detector.scan(image,'white',(108,66,568,568),context['names'])
+    assert end and end.result=='0-1' and end.reason=='resignation'
 
 
 def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,monkeypatch):

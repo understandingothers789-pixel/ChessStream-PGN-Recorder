@@ -80,6 +80,8 @@ class GameManager(GameExtras):
         self._settled_key=None;self._settled_since=None;self._settled_error=None
         self._frame_placement=None;self._frame_since=None
         self._timed_base=None;self._timed_end=0
+        self._recovery_executor=None;self._recovery_future=None;self._recovery_token=None
+        self._recovery_next=0.;self._recovery_attempt=0
         self._clock=time.monotonic
         self._reset_extras()
 
@@ -541,6 +543,12 @@ class GameManager(GameExtras):
                 snapshot.update(preview_fen=obs.placement()+' w - - 0 1',preview_moves=[],
                                 preview_last_move=None)
                 return snapshot
+            if self.rec and not self.terminal_message and self._handle_premove(obs):
+                self.reset_settling()
+                self.persist()
+                snapshot=self.snapshot()
+                snapshot.update(preview_fen=obs.placement()+' w - - 0 1',preview_moves=[],preview_last_move=None)
+                return snapshot
             # An aborted game can end before a single move. A clear legal
             # opening after its popup disappears starts a fresh recording.
             if (self.rec and self.terminal_message and not self.rec.verified
@@ -668,6 +676,11 @@ class GameManager(GameExtras):
                         self.last_message = "Complete • " + outcome.termination.name.replace("_"," ").lower()
             if self.rec:
                 self._settle_position(move_evidence)
+                if not self.terminal_message and not self.result_override:
+                    outcome=self.rec.board.outcome(claim_draw=False)
+                    if outcome:
+                        self.headers['Result']=outcome.result();self.ended=self.ended or obs.timestamp
+                        self.last_message='Complete • '+outcome.termination.name.replace('_',' ').lower()
                 self._record_clocks(move_evidence)
                 self.persist()
             signature=(self.current_id,obs.placement(),self.last_message,obs.orientation)
@@ -678,6 +691,94 @@ class GameManager(GameExtras):
                      "orientation":obs.orientation,"ignored_squares":self._recognition_ignored_squares})
                 self._last_evidence_signature=signature
             return self.snapshot()
+
+    def _handle_premove(self, obs):
+        """An inactive-side-only change cannot justify invented waiting moves."""
+        if obs.confidence<.8 or obs.uncertain_squares(self.settings.min_confidence):
+            return bool(self.premove_state)
+        boards=[branch.board() for branch in self.rec.branches] or [self.rec.board]
+        distances=[int(np.count_nonzero(board_labels(board)!=obs.labels)) for board in boards]
+        nearest=[board for board,distance in zip(boards,distances) if distance==min(distances)]
+        if len({board.turn for board in nearest})!=1:
+            self.premove_state=None;return False
+        for board in nearest[:8]:
+            if board.board_fen()==obs.placement():break
+            changed=np.flatnonzero(board_labels(board)!=obs.labels)
+            if not 2<=len(changed)<=4:continue
+            # There must be no changed piece belonging to the active player.
+            if any(obs.labels[s] and (obs.labels[s]<=6)==board.turn for s in changed):continue
+            opposite=board.copy();opposite.turn=not board.turn;opposite.ep_square=None
+            result=LegalSearcher(1,2000,25,self.settings.min_confidence).search(opposite,obs)
+            if not result.paths:continue
+            move=result.paths[0][0]
+            state={'placement':obs.placement(),'move':move.uci(),'waiting_for':'white' if board.turn else 'black'}
+            if self.premove_state!=state:
+                self.store.audit('possible premove held',{'game_id':self.current_id,**state,
+                    'reason':'only the inactive side moved; no opponent move observed'})
+            self.premove_state=state
+            self.rec.status=self.last_message='Possible premove • waiting for opponent move; excluded from PGN'
+            return True
+        if self.premove_state:
+            self.store.audit('premove view cleared',{'game_id':self.current_id,'placement':obs.placement()})
+        self.premove_state=None
+        return False
+
+    def cancel_background_recovery(self):
+        if self._recovery_executor:self._recovery_executor.shutdown(wait=False,cancel_futures=True)
+        self._recovery_executor=None;self._recovery_future=None;self._recovery_token=None
+
+    def background_recovery(self,obs,evidence=()):
+        """Poll/queue longer bounded work while the capture thread keeps comparing."""
+        from concurrent.futures import ThreadPoolExecutor
+        from .recovery import recover_gap
+        with self.lock:
+            if not self.rec:return False
+            token=(self.current_id,self.rec.initial_fen,tuple(self.rec.verified),obs.placement())
+            if self._recovery_future:
+                if not self._recovery_future.done():return self._recovery_token==token
+                try:result=self._recovery_future.result()
+                except Exception:
+                    logging.exception('Background legal recovery failed');result=None
+                expected=self._recovery_token;self._recovery_future=None
+                if (result and expected==token and not self.premove_state and not self.rewind_state
+                        and not self.terminal_message):
+                    base,recovered=result;before=len(base['verified'])
+                    if before<len(self.rec.verified):
+                        self.inferred_moves={k:v for k,v in self.inferred_moves.items() if int(k)<=before}
+                        self.move_clocks={k:v for k,v in self.move_clocks.items() if int(k)<=before}
+                        self._trim_timed_review(before)
+                    self.rec=Reconstructor.restore(recovered,self.searcher())
+                    self._timed_base=base;self._timed_end=len(self.rec.verified)
+                    for ply in range(before,len(self.rec.verified)):
+                        self.inferred_moves[str(ply+1)]={'uci':self.rec.verified[ply],
+                            'comment':'Inferred: background gap recovery matched observed placement; move order not independently verified.'}
+                    self.rec.status=self.last_message='Recording • gap recovered using buffered evidence'
+                    self.store.audit('background gap recovered',{'game_id':self.current_id,'after_ply':before,
+                        'moves':self.rec.verified[before:],'placement':obs.placement()})
+                    self.persist();return False
+            eligible=(not self.premove_state and not self.rewind_state and not self.terminal_message
+                and not obs.uncertain_squares(max(.8,self.settings.min_confidence))
+                and self.rec.status.startswith(('unmatched','search limit','uncertain'))
+                and obs.placement() not in self.rec.history)
+            if not eligible or self._clock()<self._recovery_next:return False
+            # Recheck premoves before a larger search can invent a waiting move.
+            if self._handle_premove(obs):return False
+            if self._recovery_executor is None:self._recovery_executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='chess-gap')
+            states=[self.rec.serialize()]
+            for before in range(max(0,len(self.rec.verified)-8),len(self.rec.verified)):
+                if str(before+1) not in self.inferred_moves:continue
+                probe=self.reconstructor(chess.Board(self.rec.initial_fen))
+                for uci in self.rec.verified[:before]:
+                    probe.board.push_uci(uci);probe.verified.append(uci);probe.history.append(probe.board.board_fen())
+                states.append(probe.serialize())
+            self._recovery_attempt=min(self._recovery_attempt+1,3)
+            self._recovery_token=token;self._recovery_next=self._clock()+3
+            self.store.audit('background gap queued',{'game_id':self.current_id,'buffered_observations':len(evidence),
+                'attempt':self._recovery_attempt,'placement':obs.placement(),'max_ms':min(1500,self.settings.search_ms*(1+self._recovery_attempt))})
+            self._recovery_future=self._recovery_executor.submit(recover_gap,states,obs,
+                max(6,self.settings.max_plies),min(300000,self.settings.search_nodes*3),
+                min(1500,self.settings.search_ms*(1+self._recovery_attempt)),evidence,self.settings.min_confidence)
+            return True
 
     def _discard_inferred_rook_cycles(self):
         """On confirmed rewind, remove recent guessed four-ply rook round trips."""
