@@ -115,15 +115,20 @@ class BoardView(QSvgWidget):
                   b'<text x="200" y="195" text-anchor="middle" fill="#aac2b7" font-family="sans-serif" font-size="17">Waiting for reliable recognition</text>'
                   b'<text x="200" y="224" text-anchor="middle" fill="#73869e" font-family="sans-serif" font-size="13">No starting position accepted yet</text></svg>')
 
-    def show_board(self,fen=None,last_move=None,flipped=None):
+    def show_board(self,fen=None,last_move=None,flipped=None,provisional=False):
         if fen:self.fen=fen
         if flipped is not None:self.flipped=flipped
         self.last_move=last_move
         b=chess.Board(self.fen)
         move=chess.Move.from_uci(last_move) if last_move else None
+        colors={"square light":"#d7ded5","square dark":"#638978","margin":"#182231",
+                "coord dark":"#aac2b7","coord light":"#aac2b7"}
+        if provisional:
+            colors["square light lastmove"]="#efc06f"
+            colors["square dark lastmove"]="#b97832"
         svg=chess.svg.board(b,orientation=not self.flipped,lastmove=move,
             check=b.king(b.turn) if b.is_check() else None,
-            colors={"square light":"#d7ded5","square dark":"#638978","margin":"#182231","coord dark":"#aac2b7","coord light":"#aac2b7"})
+            colors=colors)
         self.load(svg.encode())
 
 

@@ -51,17 +51,43 @@ def test_provisional_san_is_visible_but_excluded_from_verified_pgn(tmp_path):
     board.push_san('e4');window.on_update(window.manager.process(Observation.from_board(board)))
     assert window.move_table.item(0,1).text()=='… e4'
     assert window.metric_labels['moves'].text()=='0'
+    assert window.live_board.fen==board.fen()
+    assert window.manager.snapshot()['fen']==chess.Board().fen()
+    assert 'PROVISIONAL' in window.board_heading.text()
+    assert 'e4' in window.last_move_label.text()
     assert window.choose_path.text()=='Confirm final / pending move'
     assert '1. e4' not in window.store.game(window.manager.current_id)['pgn']
     board.push_san('e5');window.on_update(window.manager.process(Observation.from_board(board)))
     assert window.move_table.item(0,1).text()=='✓ e4'
     assert window.move_table.item(0,2).text()=='… e5'
     assert window.metric_labels['moves'].text()=='1'
+    assert window.live_board.fen==board.fen()
     window.manager.choose(0);window.on_update(window.manager.snapshot())
     assert window.move_table.item(0,2).text()=='✓ e5'
+    assert window.live_board.fen==board.fen()
     assert window.screenshot_mode.currentData()=='positions' and not window.interval.isEnabled()
     window.screenshot_mode.setCurrentIndex(1)
     assert window.settings.screenshot_mode=='interval' and window.interval.isEnabled()
+    window.close();window.deleteLater();app.processEvents()
+
+
+def test_live_board_preview_tracks_replaced_hover_without_committing_it(tmp_path):
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(tmp_path);board=chess.Board()
+    window.manager.process(Observation.from_board(board))
+    board.push_san('e4');window.on_update(window.manager.process(Observation.from_board(board)))
+    assert window.live_board.fen==board.fen()
+    assert window.manager.snapshot()['preview_moves']==['e4']
+
+    # A drag hovering on d4 replaces the earlier e4 hypothesis.
+    board=chess.Board();board.push_san('d4')
+    window.on_update(window.manager.process(Observation.from_board(board)))
+    snap=window.manager.snapshot()
+    assert window.live_board.fen==board.fen()
+    assert snap['preview_moves']==['d4']
+    assert snap['moves']==[] and snap['fen']==chess.Board().fen()
+    assert '1. d4' not in window.store.game(window.manager.current_id)['pgn']
+    assert 'not yet in PGN' in window.last_move_label.text()
     window.close();window.deleteLater();app.processEvents()
 
 

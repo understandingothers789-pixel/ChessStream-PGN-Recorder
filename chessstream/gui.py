@@ -73,7 +73,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.1"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.2"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -117,7 +117,7 @@ class MainWindow(ReviewTools,QMainWindow):
         splitter=QSplitter(Qt.Horizontal)
         capture_card=Card("CAPTURED BOARD");self.live_image=ImageView();capture_card.box.addWidget(self.live_image,1);self.capture_caption=muted("Saved screenshots: one per settled position. Arrow and cursor changes reuse that position. Analysis frames stay temporary." if self.settings.screenshot_mode=='positions' else "Permanent screenshots: at the selected interval. Analysis frames stay temporary.");capture_card.box.addWidget(self.capture_caption)
         self.recognition_details=muted("Bundled screenshot model • waiting for a capture");capture_card.box.addWidget(self.recognition_details)
-        internal=Card("RECONSTRUCTED BOARD");self.live_board=BoardView();internal.box.addWidget(self.live_board,1);self.last_move_label=muted("Waiting for the first verified position");internal.box.addWidget(self.last_move_label)
+        internal=Card("RECONSTRUCTED BOARD");self.board_heading=internal.box.itemAt(0).widget();self.live_board=BoardView();internal.box.addWidget(self.live_board,1);self.last_move_label=muted("Waiting for the first verified position");internal.box.addWidget(self.last_move_label)
         self.live_board.show_pending()
         moves_card=Card("MOVES");self.move_table=QTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);moves_card.box.addWidget(self.move_table,1)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
@@ -195,15 +195,24 @@ class MainWindow(ReviewTools,QMainWindow):
             self.metric_labels['confidence'].setText('—')
             self.recognition_details.setText('Board not found • previous verified position preserved')
         if 'saved_count' in snap:self.metric_labels['saved'].setText(str(snap['saved_count']))
-        render_key=(snap.get('fen'),snap.get('last_move'),snap.get('orientation'))
-        if snap.get('fen') and render_key!=getattr(self,'_last_board_render',None):
-            self.live_board.show_board(snap['fen'],snap.get('last_move'),snap.get('orientation')=='black');self._last_board_render=render_key
+        display_fen=snap.get('preview_fen') or snap.get('fen')
+        preview_moves=snap.get('preview_moves',[])
+        preview_active=bool(preview_moves) or bool(display_fen and display_fen!=snap.get('fen'))
+        preview_line=' '.join(preview_moves)
+        candidates=snap.get('preview_candidates',0)
+        self.board_heading.setText('PROVISIONAL BOARD PREVIEW • excluded from PGN' if preview_active else 'RECONSTRUCTED BOARD')
+        render_key=(display_fen,snap.get('preview_last_move') or snap.get('last_move'),snap.get('orientation'),preview_active)
+        if display_fen and render_key!=getattr(self,'_last_board_render',None):
+            self.live_board.show_board(display_fen,snap.get('preview_last_move') or snap.get('last_move'),snap.get('orientation')=='black',preview_active);self._last_board_render=render_key
         elif not snap.get('fen'):
             self.live_board.show_pending();self._last_board_render=None
         self.last_move_label.setText(f"{len(moves)} verified plies  •  Last: {moves[-1] if moves else '—'}" if snap.get('fen') else "Waiting for a reliable first position • recording continues")
         pending=snap.get('pending_moves',[]) if snap.get('provisional') else []
         self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN),pending)
-        if pending:self.last_move_label.setText(f"{len(moves)} verified plies • {' '.join(pending)} provisional, "+('final confirmation needed' if snap.get('pending_terminal') else 'waiting for reply'))
+        if preview_active:
+            option=f" • candidate 1 of {candidates}" if candidates>1 else ""
+            suffix=" • final confirmation needed" if snap.get('pending_terminal') else " • not yet in PGN"
+            self.last_move_label.setText(f"{len(moves)} verified plies • preview: {preview_line or 'current legal position'}{option}{suffix}")
         options=snap.get('alternatives',[])
         if [self.alternatives.itemText(i) for i in range(self.alternatives.count())]!=options:
             self.alternatives.clear();self.alternatives.addItems(options)

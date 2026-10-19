@@ -31,7 +31,7 @@ Section "ChessStream" SEC01
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "DisplayName" "ChessStream PGN Recorder"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "DisplayVersion" "1.5.1"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "DisplayVersion" "1.5.2"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "Publisher" "ChessStream project"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChessStream" "NoRepair" 1

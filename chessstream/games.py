@@ -328,6 +328,22 @@ class GameManager(GameExtras):
                 san.append(b.san(chess.Move.from_uci(uci)))
                 b.push_uci(uci)
             alternatives = []
+            preview_board = self.rec.board
+            preview_moves = []
+            preview_last_move = self.rec.verified[-1] if self.rec.verified else None
+            preview_candidates = 0
+            if not self.rec.incomplete and self.rec.branches:
+                preview_branch = self.rec.branches[0]
+                preview_board = preview_branch.board()
+                preview_candidates = len(self.rec.branches) if any(
+                    branch.moves for branch in self.rec.branches
+                ) or len(self.rec.branches) > 1 else 0
+                preview_last_move = preview_branch.moves[-1] if preview_branch.moves else preview_last_move
+                leaf = chess.Board(preview_branch.root_fen)
+                for uci in preview_branch.moves:
+                    move = chess.Move.from_uci(uci)
+                    preview_moves.append(leaf.san(move))
+                    leaf.push(move)
             for branch in self.rec.branches:
                 if branch.moves or len(self.rec.branches)>1:
                     leaf = chess.Board(branch.root_fen)
@@ -337,7 +353,10 @@ class GameManager(GameExtras):
                         leaf.push_uci(uci)
                     alternatives.append(" ".join(line) or ("White to move" if leaf.turn else "Black to move"))
             return {"status":self.last_message,"game_id":self.current_id,"name":self.name,
-                    "fen":self.rec.board.fen(),"initial_fen":self.rec.initial_fen,"moves":san,
+                    "fen":self.rec.board.fen(),"preview_fen":preview_board.fen(),
+                    "preview_last_move":preview_last_move,"preview_moves":preview_moves,
+                    "preview_candidates":preview_candidates,
+                    "initial_fen":self.rec.initial_fen,"moves":san,
                     "plies":len(san),"last_move":self.rec.verified[-1] if san else None,
                     "alternatives":alternatives,"incomplete":self.rec.incomplete,"note":self.note,
                     "result":self.headers.get("Result","*"),"terminal_message":self.terminal_message,"clocks":(self.latest_context or {}).get("clocks",{}),"players":{"white":self.headers.get('White','Unknown'),"black":self.headers.get('Black','Unknown')},
