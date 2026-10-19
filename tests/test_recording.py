@@ -218,14 +218,14 @@ def test_combine_overlapping_recordings_saves_active_game_and_retains_sources(tm
     store.close()
 
 
-def test_two_second_settling_exports_without_reply_and_revises_latest_guess(tmp_path):
+def test_half_second_settling_exports_without_reply_and_revises_latest_guess(tmp_path):
     store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6')
     now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
     gid=manager.current_id;before=len(manager.rec.verified)
     manager.process(Observation.from_board(board))
-    now[0]=1.99;manager.process(Observation.from_board(board))
+    now[0]=.49;manager.process(Observation.from_board(board))
     assert len(manager.rec.verified)==before
-    now[0]=2.;manager.process(Observation.from_board(board))
+    now[0]=.5;manager.process(Observation.from_board(board))
     assert manager.rec.verified[-1]=='b8c6' and not manager.snapshot()['pending_moves']
     assert 'not independently verified' in store.game(gid)['pgn']
     assert len(manager.rec.verified) in manager.snapshot()['guessed_plies']
@@ -273,9 +273,56 @@ def test_castling_both_colors_and_wings_settles_without_an_opponent_reply(tmp_pa
             now=[0.];manager._clock=lambda:now[0]
             manager._create(board.copy(),utcnow());board.push_san(san)
             manager.process(Observation.from_board(board))
-            now[0]=2.;manager.process(Observation.from_board(board))
+            now[0]=.5;manager.process(Observation.from_board(board))
             game=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
             assert [n.san() for n in game.mainline()]==[san]
             assert game.end().board().fen()==board.fen()
             assert not manager.snapshot()['pending_moves']
             store.close()
+
+
+def test_false_rook_detour_and_capture_are_repaired_when_knight_reappears(tmp_path):
+    from chessstream.domain import utcnow
+    store=Store(tmp_path);manager=GameManager(store,Settings())
+    source=chess.Board('r3k3/8/8/8/4n3/8/8/1B2K3 b q - 0 1')
+    manager._create(source,utcnow());gid=manager.current_id
+    # A previous observation led to an inferred rook detour and false capture.
+    for san in 'Ra7 Bxe4 Ra8 Bb1'.split():
+        manager.rec.board.push_san(san)
+        manager.rec.verified.append(manager.rec.board.peek().uci())
+        manager.rec.history.append(manager.rec.board.board_fen())
+    from chessstream.reconstruction import Branch
+    manager.rec.branches=[Branch(manager.rec.board.fen(),())]
+    for ply,uci in enumerate(manager.rec.verified,1):
+        manager.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred across capture gap'}
+    manager.persist();manager.recover(gid)
+    target=source.copy();target.push_san('Nc5')
+    now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
+    manager.process(Observation.from_board(target))
+    now[0]=.5;manager.process(Observation.from_board(target))
+    assert manager.current_id==gid and manager.rec.verified==['e4c5']
+    game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+    assert game.end().board().fen()==target.fen()
+    assert [node.san() for node in game.mainline()]==['Nc5']
+    assert len(store.games())==1 and 'Inferred:' in store.game(gid)['pgn']
+    store.close()
+
+
+def test_comparison_period_is_at_least_two_hz_independent_of_image_saving():
+    from chessstream.capture import recognition_period
+    assert recognition_period(Settings())==.5
+    for enabled in (False,True):
+        assert recognition_period(Settings(adaptive=False,interval=10,save_screenshots=enabled))==.5
+    assert recognition_period(Settings(adaptive=True,adaptive_fps=6))<.5
+
+
+def test_half_second_counts_from_first_frame_before_worker_animation_gate(tmp_path):
+    from chessstream.capture import RecordingWorker,Region
+    store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3')
+    board.push_san('Nc6');obs=Observation.from_board(board)
+    now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
+    worker=RecordingWorker(manager,Region(0,0,600,600))
+    worker.process_observation(obs,1)
+    now[0]=.5;worker.process_observation(obs,2)
+    assert manager.rec.verified[-1]=='b8c6' and not manager.snapshot()['pending_moves']
+    store.close()

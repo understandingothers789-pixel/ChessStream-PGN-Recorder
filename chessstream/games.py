@@ -78,6 +78,7 @@ class GameManager(GameExtras):
         self._review_candidate=None
         self._review_recorded=None
         self._settled_key=None;self._settled_since=None;self._settled_error=None
+        self._frame_placement=None;self._frame_since=None
         self._timed_base=None;self._timed_end=0
         self._clock=time.monotonic
         self._reset_extras()
@@ -696,6 +697,38 @@ class GameManager(GameExtras):
         if node.variations:node.remove_variation(node.variations[0])
         self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
 
+    def _repair_inferred_suffix(self, obs, milliseconds, nodes):
+        """Revisit at most eight recent plies, only starting at an inferred move.
+
+        A guessed capture may remove a piece that later reappears. Forward
+        search can never recreate it; retry from before the bad inferred suffix.
+        No mutation is made until an exact legal endpoint has been found.
+        """
+        old=self.rec;started=time.monotonic();used=0
+        candidates=[ply for ply in range(max(0,len(old.verified)-8),len(old.verified))
+                    if str(ply+1) in self.inferred_moves]
+        # Earlier guesses get the opportunity to explain away a false capture.
+        for before in candidates:
+            remaining_ms=milliseconds-(time.monotonic()-started)*1000
+            if remaining_ms<=0 or nodes-used<=0:break
+            probe=self.reconstructor(chess.Board(old.initial_fen))
+            for uci in old.verified[:before]:
+                probe.board.push_uci(uci);probe.verified.append(uci);probe.history.append(probe.board.board_fen())
+            search=LegalSearcher(max(6,self.settings.max_plies),nodes-used,remaining_ms,self.settings.min_confidence)
+            result=search.search(probe.board,obs,first_shortest=True);used+=result.nodes
+            if not result.paths:continue
+            base=probe.serialize()
+            for move in result.paths[0]:
+                probe.board.push(move);probe.verified.append(move.uci());probe.history.append(probe.board.board_fen())
+            if probe.board.board_fen()!=obs.placement():continue
+            if probe.verified==old.verified:continue
+            probe.branches=[Branch(probe.board.fen(),())];probe.incomplete=False
+            self.store.audit('inferred suffix repaired',{'game_id':self.current_id,'after_ply':before,
+                'replaced':old.verified[before:],'replacement':probe.verified[before:],
+                'placement':obs.placement(),'reason':'later visual evidence contradicted recent inferred moves'})
+            return base,probe
+        return None
+
     def _settle_position(self, obs):
         """Two seconds of board evidence permits a labeled, revisable guess."""
         now=self._clock();key=(self.current_id,obs.placement())
@@ -703,10 +736,11 @@ class GameManager(GameExtras):
             self._settled_key=None;self._settled_since=None
             return
         if self._settled_key!=key:
-            self._settled_key=key;self._settled_since=now;self._settled_error=None
-            return
+            self._settled_key=key
+            self._settled_since=(self._frame_since if self._frame_placement==obs.placement() and self._frame_since is not None else now)
+            self._settled_error=None
         elapsed=now-self._settled_since
-        if elapsed<2 or self.terminal_message:return
+        if elapsed<.5 or self.terminal_message:return
         if obs.matches(self.rec.board,self.settings.min_confidence):return
         if obs.placement() in self.rec.history[:-1]:return  # review is not play
         # A reply that extends the committed suffix removes its rollback privilege.
@@ -743,9 +777,15 @@ class GameManager(GameExtras):
                 probe.branches=[Branch(probe.board.fen(),())];probe.incomplete=False
                 base=state;chosen=probe
                 break
+        if chosen is None and not candidates:
+            remaining_ms=self.settings.search_ms-(time.monotonic()-budget_started)*1000
+            remaining_nodes=self.settings.search_nodes-used
+            repaired=self._repair_inferred_suffix(obs,remaining_ms,remaining_nodes)
+            if repaired:
+                base,chosen=repaired
         if chosen is not None:
             before=len(base['verified'])
-            if self._timed_base and before<len(self.rec.verified):
+            if before<len(self.rec.verified):
                 # Discard only annotations attached to the replaceable guessed suffix.
                 self.inferred_moves={k:v for k,v in self.inferred_moves.items() if int(k)<=before}
                 self.move_clocks={k:v for k,v in self.move_clocks.items() if int(k)<=before}
@@ -754,8 +794,8 @@ class GameManager(GameExtras):
             self.rec=chosen
             for ply in range(before,len(chosen.verified)):
                 self.inferred_moves[str(ply+1)]={'uci':chosen.verified[ply],
-                    'comment':'Inferred: position unchanged for at least 2 seconds; best-effort legal order, not independently verified.'}
-            self.rec.status='recording • accepted after 2 seconds (inferred)'
+                    'comment':'Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified.'}
+            self.rec.status='recording • accepted after 0.5 seconds (inferred)'
             self.last_message=self.rec.status
             self.store.audit('settled position accepted',{'game_id':self.current_id,'after_ply':before,
                 'moves':chosen.verified[before:],'placement':obs.placement(),'elapsed':elapsed})
@@ -880,8 +920,17 @@ class GameManager(GameExtras):
         except ValueError:
             self.last_message="Review position • legal continuation linked to saved game"
 
+    def observe_frame(self, obs):
+        """Count settling from first captured evidence, before animation gating."""
+        with self.lock:
+            if obs.confidence<.8 or obs.uncertain_squares(self.settings.min_confidence):
+                self.reset_settling();return
+            if self._frame_placement!=obs.placement():
+                self._frame_placement=obs.placement();self._frame_since=self._clock()
+
     def reset_settling(self):
         self._settled_key=None;self._settled_since=None;self._settled_error=None
+        self._frame_placement=None;self._frame_since=None
 
     def clear_position_recovery(self):
         self._unresolved_position=self._unresolved_since=self._unresolved_timestamp=None
@@ -894,7 +943,7 @@ class GameManager(GameExtras):
         comment = self.note
         pending = any(b.moves for b in self.rec.branches) or len(self.rec.branches)>1 or self.rec.incomplete
         if pending:
-            comment += (" Final move awaits a reply, 2 seconds unchanged, or explicit confirmation; only accepted moves are exported."
+            comment += (" Final move awaits a reply, 0.5 seconds unchanged, or explicit confirmation; only accepted moves are exported."
                         if self.rec.confirmation_plies and len(self.rec.branches)==1 and len(self.rec.branches[0].moves)==1
                         else " Unresolved observations exist; only the verified prefix is exported.")
         status = ("aborted" if self.terminal_message["reason"]=="aborted" else "complete") if self.terminal_message else ("complete" if self.ended and self.headers["Result"] != "*" else self.rec.status)

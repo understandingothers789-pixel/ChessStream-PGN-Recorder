@@ -53,7 +53,7 @@ class Region:
 class Settings:
     interval: float = 1.0
     adaptive: bool = True
-    adaptive_fps: int = 6
+    adaptive_fps: int = 2
     deduplicate: bool = False
     screenshot_mode: str = "positions"
     save_screenshots: bool = False

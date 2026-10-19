@@ -43,7 +43,7 @@ Adaptive recognition analyzes up to **six temporary frames per second** by defau
 
 ## Uncertainty and stream behavior
 
-**Protect against dragged pieces** is enabled by default. A reply or **two seconds of unchanged recognized position** now accepts the pending move. Timed moves and best-effort gap guesses appear with amber ≈ markers and PGN comments. A held piece may therefore be accepted before release; the latest timed guess retains a saved rollback state so a later one-move alternative can correct it. If a position remains unresolved at three seconds, the recorder logs a recovery error and retries a bounded legal gap search. It may take the first shortest legal match rather than exhaust alternative orders. If no legal match is found, the existing PGN is kept. Pausing, losing the board or reacquiring its layout restarts the two-second timer.
+**Protect against dragged pieces** is enabled by default. A reply or **0.5 seconds of unchanged recognized position** now accepts the pending move. Timed moves and best-effort gap guesses appear with amber ≈ markers and PGN comments. A held piece may therefore be accepted before release; the latest timed guess retains a saved rollback state so a later one-move alternative can correct it. If a position remains unresolved at three seconds, the recorder logs a recovery error and retries a bounded legal gap search. It may take the first shortest legal match rather than exhaust alternative orders. If no legal match is found, the existing PGN is kept. Pausing, losing the board or reacquiring its layout restarts the half-second timer.
 
 At the end of a game, inspect the visible final move and choose **Confirm final / pending move**. This is an explicit override; use it only after the piece has been released or after reviewing the game. A stable game-ending message can confirm the final pending move when its changed squares remain clearly visible; covered destinations remain pending. Checkmate without an identifiable result message still waits for confirmation. Stop, export, end of video and restart never automatically promote a pending move. Turning the protection off allows immediate confirmation and loses the hover safeguard.
 
@@ -158,4 +158,11 @@ See `KNOWN_LIMITATIONS.md` and `evaluation.json` for exact tested scope.
 
 When several legal shortest sequences reach the same board, guesses prefer capture/recapture continuity, then captures, two-square pawn pushes, one-square pawn pushes, and other piece moves. Quick first-match recovery uses this ordering too. For example, `d4` is preferred before `c3` when both move orders fit. These preferences describe likely move order; they do not prove it.
 
-Castling moves the king and rook together and is accepted after two seconds unchanged, like other legal moves. Both colors and both castling sides are covered by tests. Recordings begun from a midgame FEN with unknown castling rights still require an accurate FEN to enable castling; a home king and rook alone do not prove those rights.
+Castling moves the king and rook together and is accepted after 0.5 seconds unchanged, like other legal moves. Both colors and both castling sides are covered by tests. Recordings begun from a midgame FEN with unknown castling rights still require an accurate FEN to enable castling; a home king and rook alone do not prove those rights.
+
+
+### Repairing contradicted guesses
+
+Live comparisons run at least twice per second, independently of screenshot saving. The default adaptive rate is two frames per second; an existing faster setting is preserved. Acceptance measures 0.5 seconds from the first captured observation, including the animation-settling gate.
+
+If later evidence contradicts a guessed capture or detour, recovery can retry from before a recent inferred move, at most eight recorded plies back. Searches remain bounded and only replace the suffix when a legal sequence reaches the exact observed placement. The correction is marked as inferred, and diagnostics record both the replaced and replacement moves. Earlier moves before the repair point are kept. A longer historical error may still require manual correction or joining recordings.

@@ -75,7 +75,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.8"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.9"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -741,7 +741,7 @@ class MainWindow(ReviewTools,QMainWindow):
         capture.addRow('Automatic recording',self.auto_record_opening)
         self.settings_interval=QDoubleSpinBox();self.settings_interval.setRange(.1,60);self.settings_interval.setValue(self.settings.interval);self.settings_interval.setSuffix(' seconds');capture.addRow('Permanent screenshot interval',self.settings_interval)
         self.adaptive=QCheckBox('Analyze additional temporary frames for fast games');self.adaptive.setChecked(self.settings.adaptive);capture.addRow('Adaptive recognition',self.adaptive)
-        self.confirm_reply=QCheckBox('Keep latest move provisional until a reply or 2 seconds unchanged');self.confirm_reply.setChecked(self.settings.confirm_on_reply);capture.addRow('Protect against dragged pieces',self.confirm_reply)
+        self.confirm_reply=QCheckBox('Keep latest move provisional until a reply or 0.5 seconds unchanged');self.confirm_reply.setChecked(self.settings.confirm_on_reply);capture.addRow('Protect against dragged pieces',self.confirm_reply)
         capture.addRow(muted('Recommended for blitz and rapid: a stable hover is not proof of a drop. The last move stays amber and out of PGN until a reply or explicit final-move confirmation.'))
         self.unresolved_fen=QDoubleSpinBox();self.unresolved_fen.setRange(0,600);self.unresolved_fen.setDecimals(0);self.unresolved_fen.setSuffix(' seconds');self.unresolved_fen.setSpecialValueText('Off');self.unresolved_fen.setValue(self.settings.unresolved_fen_seconds);capture.addRow('Start a FEN segment after unresolved position',self.unresolved_fen)
         capture.addRow(muted('If a clear board cannot be linked to the saved game for this long, keep the old PGN and continue in a new PGN from the displayed position. Side to move is inferred from later evidence. The latest legal hover is excluded from this timer. Set Off to disable automatic FEN recovery.'))

@@ -156,6 +156,11 @@ def resolve_region(region: Region) -> Region:
     return region
 
 
+def recognition_period(settings):
+    """Image saving interval must never slow move comparisons below 2 Hz."""
+    return min(.5,1/settings.adaptive_fps if settings.adaptive else settings.interval)
+
+
 class RecordingWorker(QThread):
     frame = Signal(object)
     update = Signal(dict)
@@ -172,6 +177,7 @@ class RecordingWorker(QThread):
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
+        self.manager.observe_frame(obs)
         automatic=False
         if (self.preview_only and stable_count>=2 and self.manager.settings.auto_record_opening
                 and self.manager.opening_ready(obs)):
@@ -409,7 +415,7 @@ class RecordingWorker(QThread):
                     snapshot["processing_ms"]=round((time.monotonic()-tick)*1000)
                     snapshot["saved_count"]=store.deletion_estimate({"session_id":self.manager.session_id})["count"]
                     self.update.emit(snapshot)
-                    period=1/settings.adaptive_fps if settings.adaptive else settings.interval
+                    period=recognition_period(settings)
                     self.stopping.wait(max(.005,period-(time.monotonic()-tick)))
         except Exception as e:
             import logging

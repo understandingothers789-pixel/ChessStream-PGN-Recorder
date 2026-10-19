@@ -112,7 +112,7 @@ def test_local_video_replay_saves_images_only_when_enabled(tmp_path,monkeypatch)
     pgns=[]
     for save in (False,True):
         root=tmp_path/str(save);root.mkdir()
-        Settings(save_screenshots=save).save(root/'settings.json')
+        Settings(save_screenshots=save,adaptive_fps=6).save(root/'settings.json')
         h,w=frames[0].shape[:2]
         replay_video(Path('captured-video.avi'),root,region=f'0,0,{w},{h}',orientation='white')
         store=Store(root);games=store.games()
