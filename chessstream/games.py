@@ -18,7 +18,7 @@ from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
 
 
-def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None) -> str:
+def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None, inferred_moves=None) -> str:
     game = chess.pgn.Game()
     initial = chess.Board(initial_fen)
     game.setup(initial)
@@ -41,6 +41,10 @@ def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", re
         node = node.add_variation(move)
         board.push(move)
     merge_annotations(game,review_pgn,clocks)
+    for ply,node in enumerate(game.mainline(),1):
+        inferred=(inferred_moves or {}).get(str(ply))
+        if inferred and inferred['uci']==node.move.uci() and inferred['comment'] not in node.comment:
+            node.comment=(node.comment+' '+inferred['comment']).strip()
     return game.accept(chess.pgn.StringExporter(headers=True, variations=True, comments=True))
 
 
@@ -144,13 +148,14 @@ class GameManager(GameExtras):
         return True
 
     def _resume_latest_game_at_position(self, obs):
-        """Reuse the newest recorded PGN when the visible board matches its end.
+        """Reuse the newest PGN on an exact match or shortest legal bridge.
 
         The visible image gives us piece placement, but not side to move,
         castling rights, en-passant state, or counters. Match placement against
-        the verified end position and any saved pending branch end position.
+        the verified/pending endpoint, or infer a bounded continuation from
+        the verified prefix. Equal shortest histories stay as alternatives.
         """
-        rows=self.store.query("SELECT id,state FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 1")
+        rows=self.store.query("SELECT id,state,headers FROM games WHERE status!='imported' ORDER BY started DESC,updated DESC LIMIT 1")
         if not rows:return False
         row=rows[0]
         try:
@@ -161,20 +166,50 @@ class GameManager(GameExtras):
         except (KeyError,TypeError,ValueError,chess.IllegalMoveError):
             logging.warning("Could not compare latest saved game position for automatic resume",exc_info=True)
             return False
-        if obs.placement() not in placements:
-            return False
+        before=len(saved.verified)
+        previous_pending=[branch.moves for branch in saved.branches]
+        bridged=False
+        review=obs.placement() not in placements and obs.placement() in saved.history[:-1]
+        if obs.placement() not in placements and not review:
+            # A completed result, changed opponent or reset clocks is stronger
+            # evidence of a new game than a coincidental short legal bridge.
+            if (json.loads(row['headers']).get('Result','*')!='*' or state.get('terminal_message')
+                    or self.pending_identity or self.clocks_recently_reset()):return False
+            saved.confirmation_plies=int(self.settings.confirm_on_reply)
+            if saved.bridge_gap(obs,self.searcher()) is None:return False
+            bridged=True
         unused_session=self.session_id
-        self.recover(row["id"])
+        self.recover(row["id"],persist=False)
+        if bridged:
+            self.rec=saved
+            self._mark_inferred_gap(before,previous_pending)
         if unused_session!=self.session_id:
             self.store.finish_session(unused_session)
         self.last_observation=obs
-        self.last_message="Continued latest saved PGN • visible board matches its verified or pending position"
+        self.last_message=("Review position • linked to latest saved PGN history" if review else
+                           "Gap linked to latest PGN • shortest legal continuation • "+self.rec.status if bridged else
+                           "Continued latest saved PGN • visible board matches its verified or pending position")
         self.persist()
         self.store.audit("latest PGN resumed by visible position",{
             "game_id":self.current_id,"placement":obs.placement(),
-            "matched_pending":obs.placement()!=saved.board.board_fen()})
+            "matched_pending":obs.placement()!=saved.board.board_fen(),"bridged":bridged,"review":review})
         logging.info("Resumed latest saved PGN %s from matching visible board placement",self.current_id)
         return True
+
+    def _mark_inferred_gap(self, before, previous_pending):
+        """Annotate only the common new path; ties stay as pending alternatives."""
+        added=tuple(self.rec.verified[before:])
+        paths=[added+branch.moves for branch in self.rec.branches]
+        if not paths:return
+        common=min(len(path) for path in paths)
+        for offset in range(common):
+            if len({path[offset] for path in paths})!=1:break
+            uci=paths[0][offset]
+            if any(len(old)>offset and old[:offset+1]==paths[0][:offset+1] for old in previous_pending):continue
+            self.inferred_moves[str(before+offset+1)]={
+                'uci':uci,'comment':'Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded.'}
+        self.store.audit('shortest legal gap linked',{'game_id':self.current_id,'after_ply':before,
+            'paths':[list(path) for path in paths],'ambiguous':len(paths)>1})
 
     def _visible_roots(self, obs):
         threshold=max(.80,self.settings.min_confidence)
@@ -342,7 +377,15 @@ class GameManager(GameExtras):
                         else:
                             self.last_message = "Opening review / possible new game • previous PGN preserved"
                 else:
+                    before=len(self.rec.verified)
+                    previous_pending=[branch.moves for branch in self.rec.branches]
                     update = self.rec.observe(obs)
+                    paths=[tuple(self.rec.verified[before:])+branch.moves for branch in self.rec.branches]
+                    unseen=min((len(path)-max((len(old) for old in previous_pending
+                               if path[:len(old)]==old),default=0) for path in paths),default=0)
+                    if (not self.rec.incomplete and unseen>1
+                            and all(branch.board().board_fen()==obs.placement() for branch in self.rec.branches)):
+                        self._mark_inferred_gap(before,previous_pending)
                     if update.recovered:
                         self.store.audit("transient candidate replaced",{"game_id":self.current_id,
                             "placement":obs.placement(),"reason":"clear shorter legal continuation from the verified board; no verified moves rewritten"})
@@ -495,7 +538,7 @@ class GameManager(GameExtras):
         data['result_override']=self.result_override
         fingerprint=json.dumps([self.current_id,self.name,self.headers,data,self.ended,self.settings.export_dir,self.settings.auto_export],sort_keys=True)
         if fingerprint==self._persisted_fingerprint:return
-        pgn = export_pgn(self.rec.initial_fen, self.rec.verified, self.headers, comment,self.review_pgn,self.move_clocks)
+        pgn = export_pgn(self.rec.initial_fen, self.rec.verified, self.headers, comment,self.review_pgn,self.move_clocks,self.inferred_moves)
         self.store.save_game(self.current_id,self.session_id,self.name,self.started,status,self.headers,data,pgn,self.ended)
         if self.settings.export_dir and self.settings.auto_export:
             atomic_text(Path(self.settings.export_dir)/(self.current_id+".pgn"),pgn+"\n")
@@ -587,7 +630,7 @@ class GameManager(GameExtras):
                     if board.is_valid():candidates.append(board.fen())
             return candidates
 
-    def recover(self, gid):
+    def recover(self, gid, persist=True):
         with self.lock:
             row = self.store.game(gid)
             if not row:
@@ -606,7 +649,7 @@ class GameManager(GameExtras):
             self.clear_position_recovery()
             self.rec.status = "recovered • ready to resume"
             self.last_message = self.rec.status
-            self.persist()
+            if persist:self.persist()
 
     def choose(self, index):
         with self.lock:
@@ -643,6 +686,7 @@ class GameManager(GameExtras):
             self.rec.board=chess.Board(self.rec.initial_fen)
             self.rec.verified=prefix+moves
             self.move_clocks={key:value for key,value in self.move_clocks.items() if int(key)<=len(prefix)}
+            self.inferred_moves={key:value for key,value in self.inferred_moves.items() if int(key)<=len(prefix)}
             self.clock_evidence={};self.review_tracker=None
             self.rec.history=[self.rec.board.board_fen()]
             for uci in self.rec.verified:
@@ -672,7 +716,7 @@ class GameManager(GameExtras):
             else:
                 state = json.loads(row["state"])
                 if headers.get('Result','*')!=json.loads(row['headers']).get('Result','*'):state['result_override']=True
-                pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""),state.get("review_pgn",""),state.get("move_clocks",{}))
+                pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""),state.get("review_pgn",""),state.get("move_clocks",{}),state.get('inferred_moves',{}))
                 self.store.save_game(gid,row["session_id"],name,row["started"],row["status"],headers,state,pgn,row["ended"])
 
     def import_pgn(self, path: Path) -> int:

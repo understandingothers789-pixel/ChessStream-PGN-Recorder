@@ -1,0 +1,12 @@
+[Event "Controlled gap regression"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Unknown"]
+[Black "Unknown"]
+[Result "*"]
+
+{ Controlled example based on transcribed source and target board placements; not an independently verified complete stream game. Joined saved recording segments; gap moves are explicitly annotated as inferred. }
+1. e4 e6 2. d4 d5 3. e5 c5 4. Bb5+ Bd7 5. a4 cxd4 6. Qxd4
+{ Inferred across recording gap: shortest legal continuation; intermediate frames were not recorded. }
+6... Ne7 7. Nf3 Nbc6 8. Qf4 *

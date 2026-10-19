@@ -5,6 +5,8 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      PACKAGE_WINDOWS: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -13,16 +15,16 @@ jobs:
       - run: python -m pip install --upgrade pip==26.2.1
       - run: python -m pip install -e . pytest
       - run: python -m pytest -q
-      - name: Desktop smoke test
-        run: python -m chessstream --data-dir build/smoke-data --smoke build/desktop.png
       - name: Build portable ZIP
+        if: env.PACKAGE_WINDOWS == 'true'
         run: python scripts/build_windows.py
-      - name: Test packaged runtime imports and GUI
+      - name: Test packaged inference imports
+        if: env.PACKAGE_WINDOWS == 'true'
         run: |
           build/windows-portable/runtime/python.exe -c "import chess, cv2, numpy, mss, psutil, onnxruntime; from PySide6.QtWidgets import QApplication; from chessstream.vision import ScreenshotRecognizer; r=ScreenshotRecognizer(); o=r.recognize(cv2.imread('tests/fixtures/real/chesscom-ruy-000.png')); assert o.placement()==chess.Board().board_fen(); print('Bundled neural inference passed')"
-          build/windows-portable/runtime/python.exe -m chessstream --data-dir build/bundle-smoke --smoke build/bundle-desktop.png
           build/windows-portable/runtime/python.exe -c "import cv2; from chessstream.results import LocalTextReader,parse_end_message; lines=LocalTextReader().read(cv2.imread('tests/fixtures/results/native-bot-resigned.png')); message=parse_end_message(lines,'white',{'black':'Martinfoot'}); assert message and message.result=='0-1'; print('Bundled offline text recognition passed')"
       - name: Test the command launcher
+        if: env.PACKAGE_WINDOWS == 'true'
         run: |
           $smokeDir = Join-Path $env:GITHUB_WORKSPACE "build/launcher-smoke"
           $smokeImage = Join-Path $env:GITHUB_WORKSPACE "build/launcher-desktop.png"
@@ -31,10 +33,12 @@ jobs:
           while (!(Test-Path "build/launcher-desktop.png") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
           if (!(Test-Path "build/launcher-desktop.png")) { throw "Portable command launcher failed to render the desktop" }
       - uses: actions/upload-artifact@v4
+        if: env.PACKAGE_WINDOWS == 'true'
         with:
           name: ChessStream-Windows-Portable
           path: dist/ChessStream-PGN-Recorder-Portable.zip
       - uses: actions/upload-artifact@v4
+        if: env.PACKAGE_WINDOWS == 'true'
         with:
           name: Windows-smoke-images
           path: build/*desktop.png

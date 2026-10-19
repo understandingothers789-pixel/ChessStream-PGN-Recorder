@@ -28,6 +28,7 @@ from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEdito
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
 from .model_security import import_custom_model, validate_custom_model
+from .gap_join import join_recordings
 
 
 def human_bytes(n):
@@ -73,7 +74,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[]
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.5.9"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.0"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -432,6 +433,8 @@ class MainWindow(ReviewTools,QMainWindow):
         menu=QMenu(self)
         menu.addAction("Copy PGN",self.copy_selected)
         menu.addAction("Export selected…",self.export_selected)
+        action=menu.addAction("Join selected recordings…",self.join_selected)
+        action.setEnabled(len(self.selected_games())>=2)
         menu.addSeparator()
         menu.addAction("Delete saved PGN file(s)…",self.delete_saved_pgns)
         return menu
@@ -517,6 +520,12 @@ class MainWindow(ReviewTools,QMainWindow):
     def export_current(self):
         g=self.store.game(self.manager.current_id);self.write_export([g] if g else [])
     def export_selected(self):self.write_export(self.selected_games())
+    def join_selected(self):
+        selected=self.selected_games()
+        if len(selected)<2:
+            self.error('Ctrl-click two or more recordings, then choose Join selected recordings.');return
+        self.background(lambda:join_recordings(selected,self.manager.searcher()),
+                        lambda pgn:self.write_export([{'pgn':pgn}]))
     def export_all(self):self.write_export(list(reversed(self.store.games())))
     def export_session(self):
         selected=self.selected_games()

@@ -1,0 +1,119 @@
+{
+  "environment": "Linux-6.18.55-x86_64-with-glibc2.41",
+  "python": "3.12.14",
+  "baseline_ref": "f9b9594",
+  "repeats": 3,
+  "limits": {
+    "max_plies": 4,
+    "nodes": 60000,
+    "milliseconds": 350
+  },
+  "provenance": "Qxd4 source/target placements transcribed from user screenshots; remaining cases are controlled legal positions.",
+  "cases": [
+    {
+      "name": "reported_Qxd4",
+      "source_fen": "rn1qkbnr/pp1b1ppp/4p3/1B1pP3/P2p4/8/1PP2PPP/RNBQK1NR w KQkq - 0 6",
+      "target_fen": "rn1qkbnr/pp1b1ppp/4p3/1B1pP3/P2Q4/8/1PP2PPP/RNB1K1NR b KQkq - 0 6",
+      "results": {
+        "optimized": {
+          "median_ms": 0.261,
+          "median_nodes": 2,
+          "paths": 1,
+          "exhaustive": true,
+          "depth": 1
+        },
+        "baseline": {
+          "median_ms": 0.369,
+          "median_nodes": 2,
+          "paths": 1,
+          "exhaustive": true,
+          "depth": 1
+        }
+      }
+    },
+    {
+      "name": "pending_plus_Qxd4",
+      "source_fen": "rn1qkbnr/pp1b1ppp/4p3/1BppP3/P2P4/8/1PP2PPP/RNBQK1NR b KQkq - 0 5",
+      "target_fen": "rn1qkbnr/pp1b1ppp/4p3/1B1pP3/P2Q4/8/1PP2PPP/RNB1K1NR b KQkq - 0 6",
+      "results": {
+        "optimized": {
+          "median_ms": 0.587,
+          "median_nodes": 32,
+          "paths": 1,
+          "exhaustive": true,
+          "depth": 2
+        },
+        "baseline": {
+          "median_ms": 1.723,
+          "median_nodes": 32,
+          "paths": 1,
+          "exhaustive": true,
+          "depth": 2
+        }
+      }
+    },
+    {
+      "name": "three_missing_plies",
+      "source_fen": "r1bqk1nr/pppp1ppp/1bn5/4p3/2B1P3/2P2N2/PP3PPP/RNBQK2R w KQkq - 1 6",
+      "target_fen": "r1bqk2r/pppp1ppp/1bn4n/4p1N1/2B1P3/2P2Q2/PP3PPP/RNB1K2R b KQkq - 4 7",
+      "results": {
+        "optimized": {
+          "median_ms": 5.316,
+          "median_nodes": 508,
+          "paths": 1,
+          "exhaustive": true,
+          "depth": 3
+        },
+        "baseline": {
+          "median_ms": 58.361,
+          "median_nodes": 1382,
+          "paths": 1,
+          "exhaustive": true,
+          "depth": 3
+        }
+      }
+    },
+    {
+      "name": "four_ply_equal_orders",
+      "source_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "target_fen": "r1bqkb1r/pppppppp/2n2n2/8/8/2N2N2/PPPPPPPP/R1BQKB1R w KQkq - 4 3",
+      "results": {
+        "optimized": {
+          "median_ms": 4.617,
+          "median_nodes": 564,
+          "paths": 4,
+          "exhaustive": true,
+          "depth": 4
+        },
+        "baseline": {
+          "median_ms": 110.98,
+          "median_nodes": 2310,
+          "paths": 4,
+          "exhaustive": true,
+          "depth": 4
+        }
+      }
+    },
+    {
+      "name": "unrelated_opening",
+      "source_fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+      "target_fen": "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1",
+      "results": {
+        "optimized": {
+          "median_ms": 0.099,
+          "median_nodes": 0,
+          "paths": 0,
+          "exhaustive": true,
+          "depth": 0
+        },
+        "baseline": {
+          "median_ms": 352.064,
+          "median_nodes": 7680,
+          "paths": 0,
+          "exhaustive": false,
+          "depth": 4
+        }
+      }
+    }
+  ]
+}

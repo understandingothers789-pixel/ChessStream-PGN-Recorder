@@ -1,0 +1,73 @@
+"""Non-destructive joining of saved PGN segments across a shortest legal gap."""
+import io
+import chess
+import chess.pgn
+from .domain import Observation
+
+
+def join_recordings(rows, searcher):
+    rows = sorted(rows,key=lambda row: row['started'])
+    if len(rows)<2 or len({row['id'] for row in rows})!=len(rows):
+        raise ValueError('Select at least two different recordings to join.')
+
+    def read(row):
+        game = chess.pgn.read_game(io.StringIO(row['pgn']))
+        if game is None or game.errors:raise ValueError('A selected recording contains invalid PGN.')
+        return game
+
+    combined = read(rows[0])
+    for row in rows[1:]:
+        later = read(row)
+        for color in ('White','Black'):
+            a,b = combined.headers.get(color,'Unknown'),later.headers.get(color,'Unknown')
+            if (a not in ('Unknown','?','') and b not in ('Unknown','?','')
+                    and ''.join(a.casefold().split())!=''.join(b.casefold().split())):
+                raise ValueError(f'These recordings have different {color.lower()} player names.')
+        if combined.headers.get('Result','*')!='*':
+            raise ValueError('The earlier game has a declared result. Correct it before joining further play.')
+        end = combined.end()
+        source = end.board()
+        # A later recorded move establishes its root's side to move. A bare
+        # FEN checkpoint may still have both turns as unconfirmed hypotheses.
+        turn=later.board().turn if later.variations else None
+        result = searcher.search(source,Observation.from_board(later.board()),target_turn=turn)
+        if not result.exhaustive:
+            raise ValueError('The gap search reached its limit. Increase the search limits in Settings and retry.')
+        valid = []
+        for path in result.paths:
+            trial = source.copy()
+            for move in path:trial.push(move)
+            for move in later.mainline_moves():
+                if move not in trial.legal_moves:break
+                trial.push(move)
+            else:
+                if trial.board_fen()==later.end().board().board_fen():valid.append(path)
+        if not valid:
+            raise ValueError('No legal connection was found within the configured gap limit.')
+        if len(valid)!=1:
+            raise ValueError('Several equally short connections fit these recordings. Use intervening frames or a manual correction to choose the line.')
+        for move in valid[0]:
+            end = end.add_main_variation(move)
+            end.comment = 'Inferred across recording gap: shortest legal continuation; intermediate frames were not recorded.'
+        if later.comment:end.comment=(end.comment+' Segment note: '+later.comment).strip()
+
+        def copy_tree(old,new,board):
+            for child in old.variations:
+                if child.move not in board.legal_moves:
+                    raise ValueError('An analysis variation is incompatible with the earlier game state.')
+                target = next((node for node in new.variations if node.move==child.move),None)
+                if target is None:target=new.add_variation(child.move)
+                target.comment=child.comment
+                target.starting_comment=child.starting_comment
+                target.nags=set(child.nags)
+                next_board=board.copy();next_board.push(child.move)
+                copy_tree(child,target,next_board)
+
+        copy_tree(later,end,end.board())
+        combined.headers['Result']=later.headers.get('Result','*')
+        for color in ('White','Black'):
+            if combined.headers.get(color,'Unknown') in ('Unknown','?',''):
+                name=later.headers.get(color,'Unknown')
+                combined.headers[color]=name if name not in ('?','') else 'Unknown'
+    combined.comment=(combined.comment+' Joined saved recording segments; gap moves are explicitly annotated as inferred.').strip()
+    return combined.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))

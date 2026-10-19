@@ -2,7 +2,7 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.5.9 avoids duplicate position screenshots and resumes matching games.** Fullscreen/layout changes no longer save another image when the last recognized board position in the session is unchanged, including interval mode. At startup or before creating a separate FEN recording, ChessStream checks whether the visible position matches the latest saved game's verified endpoint or pending move and resumes that PGN when it does. See the [release notes](docs/RELEASE-v1.5.9.md), [user guide](docs/USER_GUIDE.md), [security audit](SECURITY.md), and [known limitations](docs/KNOWN_LIMITATIONS.md).
+**Version 1.6.0 fills short gaps between recordings.** When a resumed video has advanced, ChessStream searches for the shortest legal continuation from the latest saved PGN before starting another game. A unique line stays with that game and its inferred moves are labeled in PGN comments; equal shortest lines remain alternatives. To join existing fragments, Ctrl-select them in the library and right-click → **Join selected recordings…**. The local validation suite is reduced from 147 tests to 15 focused checks. See the [release notes](docs/RELEASE-v1.6.0.md), [user guide](docs/USER_GUIDE.md), [security audit](SECURITY.md), and [known limitations](docs/KNOWN_LIMITATIONS.md).
 
 ![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 
@@ -71,18 +71,19 @@ Opening reviews and new games can be visually indistinguishable. The app now che
 ## Tests and measured evaluation
 
 ```sh
-python -m pip install -e '.[dev]'
+python -m pip install -e . pytest
 python -m pytest -q
-python scripts/evaluate.py
 ```
 
-The included `tests/fixtures/real` contains **64 actual Chromium screenshots** captured from public Lichess and Chess.com analysis boards, with a manifest of known FENs and test moves. Three are full Lichess games; the fourth is a 16-ply Chess.com opening. All frames are evaluated without calibration. This is a controlled fixture set, not a YouTube stream benchmark.
+Routine validation now runs **15 essential tests**: shortest-path correctness against a small independent oracle, the reported Qxd4 gap, pending moves, ambiguity, PGN joining, results, storage/deletion, security boundaries, representative real Chess.com/Lichess images, OCR and desktop actions. The measured local run takes about **1.9 seconds**, versus **15.5 seconds** for the former 147-test suite. Duplicate GUI checks, repeated theme permutations, full-sequence recognition loops and generated-video tests were removed. These timings describe the development environment; Windows package assembly is separate.
+
+The retained `tests/fixtures/real` contains **64 actual Chromium screenshots** captured from public Lichess and Chess.com analysis boards, with a manifest of known FENs and test moves. The broader corpus can be evaluated manually with `python scripts/evaluate.py`; it is no longer repeated during routine local validation. It is a controlled fixture set, not a YouTube stream benchmark. The optional search benchmark can be reproduced with `python scripts/benchmark_gap_search.py --baseline-ref f9b9594`; measured results are in [gap-search-v1.6.json](docs/gap-search-v1.6.json).
 
 The recorded [evaluation](docs/evaluation.json) evaluates every existing real browser frame without calibration. The additional [recognition regression report](docs/recognition-v1.2.json) compares the original templates with the new model on textured boards and includes Chess.com Ocean/Walnut, analysis arrows, dragging, flips and compressed captures. These are controlled regression suites; they are not evidence of general YouTube accuracy. Your particular stream and capture still need checking.
 
-An additional [live capture acceptance test](docs/live-capture-result.json) used headed Chromium on an actual X11 desktop with MSS and the production recording worker. It automatically verified seven of eight test plies, with one explicit final confirmation, checked pause/resume and a real board flip, and saved five position screenshots over 54 processed updates. Every measured complete sequence in the current reports includes one explicit final-move confirmation; the reports count that intervention. A compressed MJPEG video replay and three consecutive real-image games are also covered by automated tests. These Linux results do not validate Windows capture or YouTube streams.
+An additional [live capture acceptance test](docs/live-capture-result.json) used headed Chromium on an actual X11 desktop with MSS and the production recording worker. It automatically verified seven of eight test plies, with one explicit final confirmation, checked pause/resume and a real board flip, and saved five position screenshots over 54 processed updates. Every measured complete sequence in the current reports includes one explicit final-move confirmation; the reports count that intervention. The former suite also checked a compressed MJPEG video and three consecutive real-image games; those repeated checks were removed from routine validation in v1.6.0. These Linux results do not validate Windows capture or YouTube streams.
 
-`scripts/capture_fixtures.py` recreates the original browser fixtures. `scripts/capture_confirmation_fixtures.py` reproduces the continuation after `Bb6`, native blue arrows and a bishop held over `c5` before release at `b4`; `scripts/evaluate_confirmation.py` records the results. These use public browser UIs and known test PGNs. The application does not include any of those test sequences in its runtime behavior. `examples/*.pgn` are generated by the actual recognition pipeline from the captured sequences.
+`scripts/capture_fixtures.py` recreates the original browser fixtures. `scripts/capture_confirmation_fixtures.py` reproduces the continuation after `Bb6`, native blue arrows and a bishop held over `c5` before release at `b4`; `scripts/evaluate_confirmation.py` records the results. These use public browser UIs and known test PGNs. The application does not include any of those test sequences in its runtime behavior. Recognition examples are in `examples/*.pgn`; `gap-joined.pgn` is a controlled joining example based on manually transcribed user screenshot positions, with Qxd4 marked as inferred.
 
 ## Local video replay
 
@@ -102,7 +103,7 @@ The portable ZIP contains official CPython 3.13.16 x64, pinned Windows wheels, O
 python scripts/build_windows.py
 ```
 
-The builder works on Linux and Windows. Windows wheels are downloaded explicitly for `win_amd64`, and a SHA-256 input manifest is included. An optional NSIS installer can still be built by passing `--makensis /path/to/makensis`; the portable ZIP is the recommended download. `.github/workflows/windows.yml` runs Windows tests, GUI rendering, packaged-runtime import checks and portable package construction when the project is pushed to GitHub. Tagged releases are published only after Windows tests, packaged neural inference and the GUI smoke check pass.
+The builder works on Linux and Windows. Windows wheels are downloaded explicitly for `win_amd64`, and a SHA-256 input manifest is included. An optional NSIS installer can still be built by passing `--makensis /path/to/makensis`; the portable ZIP is the recommended download. `.github/workflows/windows.yml` runs the compact Windows tests on pushes and pull requests; portable construction, packaged inference and launcher validation run on release tags or manual builds. Tagged releases are published only after these checks pass.
 
 ## Data and modules
 

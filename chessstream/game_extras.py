@@ -13,11 +13,11 @@ class GameExtras:
     def _reset_extras(self):
         self.review_pgn='';self.terminal_message=None;self.player_color=None
         self.review_tracker=None;self.review_anchor=None
-        self.move_clocks={};self.clock_evidence={};self.latest_context=None;self._clock_samples=[]
+        self.move_clocks={};self.inferred_moves={};self.clock_evidence={};self.latest_context=None;self._clock_samples=[]
         self.observed_names={};self.pending_identity=None;self.clock_reset_seen=False
 
     def _extra_state(self):
-        return {key:getattr(self,key) for key in ['review_pgn','terminal_message','player_color','move_clocks','clock_evidence','observed_names']}
+        return {key:getattr(self,key) for key in ['review_pgn','terminal_message','player_color','move_clocks','inferred_moves','clock_evidence','observed_names']}
 
     def _load_extras(self,state):
         self._reset_extras()

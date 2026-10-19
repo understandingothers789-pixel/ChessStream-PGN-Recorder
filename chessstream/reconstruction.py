@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import perf_counter
-import math
 import chess
 import numpy as np
 from .domain import Observation, board_labels
@@ -31,44 +30,98 @@ class LegalSearcher:
         self.threshold = threshold
         self.path_limit = path_limit
 
-    def search(self, board: chess.Board, observed: Observation) -> SearchResult:
+    def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None) -> SearchResult:
         result = SearchResult()
         start = perf_counter()
-        target = observed.labels
-        initial_labels = board_labels(board)
+        target = observed.labels.tolist()
         mask = observed.probabilities.max(axis=1) >= self.threshold
         if mask.sum() < 60:
             result.exhaustive = False
             return result
-        if observed.matches(board, self.threshold):
+        if observed.matches(board, self.threshold) and (target_turn is None or board.turn==target_turn):
             result.paths = [()]
             return result
+        # Compile the observation once. Board comparisons in the search use
+        # integer bitboards instead of rebuilding 64-element NumPy arrays.
+        known = sum(1 << s for s in range(64) if mask[s])
+        wanted = [0] * 7
+        wanted_white = wanted_black = 0
+        for s, label in enumerate(target):
+            if not label or not mask[s]:continue
+            bit = 1 << s
+            wanted[(label - 1) % 6 + 1] |= bit
+            if label <= 6:wanted_white |= bit
+            else:wanted_black |= bit
+        min_white, min_black = wanted_white.bit_count(), wanted_black.bit_count()
+        # Pawns cannot move backward or be recreated by promotion. This cheap
+        # reachability proof rejects new-game resets and unrelated openings
+        # before traversing a tree of impossible continuations.
+        for square,label in enumerate(target):
+            if not mask[square] or label not in (1,7):continue
+            color = label == 1
+            direction = 1 if color else -1
+            rank,file = chess.square_rank(square),chess.square_file(square)
+            origins = board.pawns & board.occupied_co[color]
+            if not any((rank-chess.square_rank(origin))*direction >= abs(file-chess.square_file(origin))
+                       for origin in chess.scan_forward(origins)):
+                result.elapsed_ms = (perf_counter()-start)*1000
+                return result
+        initial = (board.pawns,board.knights,board.bishops,board.rooks,
+                   board.queens,board.kings,board.occupied_co[chess.WHITE])
+        dead = set()
+        path = []
         abort = False
-        def dfs(state: chess.Board, remaining: int, path: tuple[chess.Move, ...]):
+
+        def dfs(state: chess.Board, remaining: int):
             nonlocal abort
-            if abort:
-                return
             result.nodes += 1
             if result.nodes > self.node_limit or (result.nodes % 64 == 0 and (perf_counter()-start)*1000 > self.time_limit_ms):
                 abort = True
                 result.exhaustive = False
-                return
-            labels = board_labels(state)
-            mismatch = int(np.count_nonzero((labels != target) & mask))
+                return False
+            white,black = state.occupied_co[chess.WHITE],state.occupied_co[chess.BLACK]
+            # Captured material cannot reappear; promotions preserve piece count.
+            if white.bit_count() < min_white or black.bit_count() < min_black:
+                return False
+            mismatch = ((state.pawns ^ wanted[1]) | (state.knights ^ wanted[2]) |
+                        (state.bishops ^ wanted[3]) | (state.rooks ^ wanted[4]) |
+                        (state.queens ^ wanted[5]) | (state.kings ^ wanted[6]) |
+                        (white ^ wanted_white)) & known
             if remaining == 0:
-                # Obscured unchanged squares may keep their previous pieces.
-                # A move may not be proved by an unknown destination/source.
-                if mismatch == 0 and np.all(mask[labels != initial_labels]):
-                    result.paths.append(path)
+                changed = ((state.pawns ^ initial[0]) | (state.knights ^ initial[1]) |
+                           (state.bishops ^ initial[2]) | (state.rooks ^ initial[3]) |
+                           (state.queens ^ initial[4]) | (state.kings ^ initial[5]) |
+                           (white ^ initial[6]))
+                if mismatch == 0 and not changed & ~known and (target_turn is None or state.turn==target_turn):
+                    result.paths.append(tuple(path))
                     if len(result.paths) >= self.path_limit:
                         abort = True
                         result.exhaustive = False
-                return
-            # A move changes at most four squares (castling). This is a safe bound.
-            if mismatch > 4*remaining:
-                return
-            mismatch_bits = sum(1 << s for s in np.flatnonzero((labels != target) & mask).tolist()) if remaining == 1 else 0
-            for move in state.legal_moves:
+                    return True
+                return False
+            if mismatch.bit_count() > 4 * remaining:
+                return False
+            # Each side can fill at most one required target square per turn;
+            # allow one extra square if it retains any castling rights.
+            white_turns = (remaining + int(state.turn == chess.WHITE)) // 2
+            black_turns = remaining - white_turns
+            if ((mismatch & wanted_white).bit_count() > white_turns + bool(white_turns and state.castling_rights & white)
+                    or (mismatch & wanted_black).bit_count() > black_turns + bool(black_turns and state.castling_rights & black)):
+                return False
+            key = (state.pawns,state.knights,state.bishops,state.rooks,state.queens,
+                   state.kings,white,black,state.turn,state.castling_rights,state.ep_square,remaining)
+            if key in dead:return False
+
+            def priority(move):
+                label = (move.promotion or state.piece_type_at(move.from_square)) + (0 if state.turn else 6)
+                return (4 * (target[move.to_square] == label) +
+                        2 * bool(mismatch & chess.BB_SQUARES[move.from_square]) +
+                        bool(mismatch & chess.BB_SQUARES[move.to_square]))
+
+            moves = state.legal_moves
+            if remaining > 1:moves = sorted(moves,key=priority,reverse=True)
+            found = False
+            for move in moves:
                 if remaining == 1:
                     changed = chess.BB_SQUARES[move.from_square] | chess.BB_SQUARES[move.to_square]
                     if state.is_en_passant(move):
@@ -78,17 +131,27 @@ class LegalSearcher:
                         kingside = move.to_square > move.from_square
                         changed |= chess.BB_SQUARES[chess.square(7 if kingside else 0, rank)]
                         changed |= chess.BB_SQUARES[chess.square(5 if kingside else 3, rank)]
-                    if mismatch_bits & ~changed:
+                    if mismatch & ~changed:
                         continue
                 state.push(move)
-                dfs(state, remaining-1, path+(move,))
-                state.pop()
-                if abort:
-                    return
+                path.append(move)
+                try:found = dfs(state, remaining-1) or found
+                finally:path.pop();state.pop()
+                if abort:return found
+            # Only cache exhausted failures. Caching successes would hide
+            # different shortest move orders reaching the same position.
+            if not found:dead.add(key)
+            return found
+
         # All alternatives at the shortest matching depth must be examined.
+        state = board.copy(stack=False)
         for depth in range(1, self.max_plies+1):
+            if target_turn is not None and (board.turn ^ bool(depth & 1))!=target_turn:continue
             result.depth = depth
-            dfs(board.copy(stack=False), depth, ())
+            if (perf_counter()-start)*1000 > self.time_limit_ms:
+                result.exhaustive = False
+                break
+            dfs(state, depth)
             if abort or result.paths:
                 break
         result.elapsed_ms = (perf_counter()-start)*1000
@@ -255,6 +318,34 @@ class Reconstructor:
             self.status = "uncertain • choose a legal sequence" if any(b.moves for b in self.branches) or len(self.branches)>1 else "recording"
         update.status = self.status
         update.alternatives = [list(b.moves) for b in self.branches if b.moves]
+        return update
+
+    def bridge_gap(self, observed: Observation, searcher: LegalSearcher | None = None) -> ReconstructionUpdate | None:
+        """Atomically attach the shortest legal continuation from the saved prefix.
+
+        Pending hovers are hypotheses, so search again from the verified board.
+        Equal shortest paths remain separate. A limited search changes nothing.
+        """
+        searcher = searcher or self.searcher
+        if observed.uncertain_squares(max(.8, searcher.threshold)):
+            return None
+        roots = list(dict.fromkeys(b.root_fen for b in self.branches)) if not self.verified else None
+        probe = Reconstructor(self.board,searcher,roots,self.confirmation_plies)
+        update = probe.observe(observed)
+        if probe.incomplete or not probe.branches or any(
+                b.board().board_fen() != observed.placement() for b in probe.branches):
+            return None
+        if not self.verified:
+            self.initial_fen = probe.initial_fen
+            self.board = chess.Board(self.initial_fen)
+            self.history = [self.board.board_fen()]
+        for uci in probe.verified:
+            self.board.push_uci(uci)
+            self.verified.append(uci)
+            self.history.append(self.board.board_fen())
+        self.branches = probe.branches
+        self.incomplete = False
+        self.status = probe.status
         return update
 
     @staticmethod
