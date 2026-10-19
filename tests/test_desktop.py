@@ -120,3 +120,33 @@ def test_screenshot_browser_supports_extended_range_and_multiselect(tmp_path,mon
     ids=window.selected_screenshot_ids()
     assert len(ids)==2 and len(set(ids))==2
     window.close();window.deleteLater();app.processEvents()
+
+
+def test_live_move_click_pins_history_until_return_to_live_or_game_change(tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui,'windows',lambda:[])
+    window=gui.MainWindow(tmp_path)
+    board=chess.Board()
+    for san in ('e4','e5','Nf3'):board.push_san(san)
+    snap={'game_id':'first','initial_fen':chess.STARTING_FEN,'fen':board.fen(),
+          'moves':['e4','e5','Nf3'],'orientation':'white','status':'Recording'}
+    window.on_update(snap)
+    window.move_table.itemClicked.emit(window.move_table.item(0,1))
+    first=chess.Board();first.push_san('e4')
+    assert window.live_board.fen==first.fen() and not window.return_live_button.isHidden()
+    board.push_san('Nc6');snap={**snap,'fen':board.fen(),'moves':snap['moves']+['Nc6']}
+    window.on_update(snap)
+    assert window.live_board.fen==first.fen() and not window.store.games()
+    window.return_live_button.click();assert window.live_board.fen==board.fen()
+    window.move_table.itemClicked.emit(window.move_table.item(0,2))
+    window.on_update({**snap,'game_id':'second'})
+    assert window.live_board.fen==board.fen() and window.return_live_button.isHidden()
+    # A midgame FEN can start on Black's move; the Black cell still maps to ply 1.
+    black=first.copy();black.push_san('e5');ending=black.copy();ending.push_san('Nf3')
+    window.on_update({'game_id':'black-root','initial_fen':first.fen(),'fen':ending.fen(),
+                      'moves':['e5','Nf3'],'orientation':'black','status':'Recording'})
+    window.move_table.itemClicked.emit(window.move_table.item(0,2))
+    assert window.live_board.fen==black.fen()
+    window.close();window.deleteLater();app.processEvents()

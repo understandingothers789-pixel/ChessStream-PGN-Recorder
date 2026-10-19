@@ -70,6 +70,8 @@ class GameManager(GameExtras):
         self._recognition_ignored_squares=[]
         self._opening_cache=None
         self._new_opening_position=None;self._new_opening_since=None
+        self._boundary_position=None;self._boundary_since=None
+        self._boundary_history_link=None
         self.last_message = "Select a board and start recording"
         self._persisted_fingerprint=None
         self._last_evidence_signature=None
@@ -411,7 +413,7 @@ class GameManager(GameExtras):
         if obs.confidence<threshold or np.count_nonzero(~confident)>2:return []
         initial=chess.Board();expected=board_labels(initial);labels=obs.labels
         if obs.matches(initial,threshold):return []
-        occupied=int(np.count_nonzero((labels!=0)&confident))
+        occupied=int(np.count_nonzero((labels!=0)&confident)+np.count_nonzero((expected!=0)&~confident))
         displaced=int(np.count_nonzero((expected!=0)&(labels!=expected)&confident))
         if not 30<=occupied<=32 or not 1<=displaced<=14:return []
         if np.any(obs.probabilities[np.arange(64)[~confident],expected[~confident]]<.05):return []
@@ -426,8 +428,21 @@ class GameManager(GameExtras):
             result=search.search(initial,obs,target_turn=target_turn,first_shortest=True,pawn_first=True)
             if result.shortest_proven and result.paths and result.paths[0]:
                 moves=[move.uci() for move in result.paths[0]]
-        if not moves and not np.any(~confident) and max_plies>6:
-            moves=infer_visible_opening(obs,max_plies=min(14,max_plies),target_turn=target_turn)
+        if not moves and max_plies>6:
+            probabilities=obs.probabilities.copy()
+            probabilities[~confident]=0
+            probabilities[np.arange(64)[~confident],expected[~confident]]=1
+            evidence=Observation(probabilities,obs.timestamp,obs.orientation,obs.quality)
+            moves=infer_visible_opening(evidence,max_plies=min(14,max_plies),target_turn=target_turn)
+            trial=chess.Board()
+            for uci in moves:
+                move=chess.Move.from_uci(uci);changed={move.from_square,move.to_square}
+                if trial.is_castling(move):
+                    rank=chess.square_rank(move.from_square)
+                    changed.update((chess.square(7 if move.to_square>move.from_square else 0,rank),
+                                    chess.square(5 if move.to_square>move.from_square else 3,rank)))
+                if any(not confident[square] for square in changed):moves=[];break
+                trial.push(move)
         if not moves:
             self._opening_cache=(key,())
             return []
@@ -531,6 +546,10 @@ class GameManager(GameExtras):
         self.reset_candidate=None
         self._create(board,obs.timestamp,roots,note+" Temporary visible board FEN segment.")
         self._seed_opening(opening_moves)
+        if opening_moves:
+            ignored=obs.uncertain_squares(max(.8,self.settings.min_confidence))
+            self._recognition_ignored_squares=ignored
+            if ignored:self.note+=' Uncertain unchanged starting squares retained: '+', '.join(ignored)+'.'
         self.persist()
         self.last_message="New PGN started from the visible board position"
         self.clear_position_recovery()
@@ -544,7 +563,7 @@ class GameManager(GameExtras):
     def _consider_new_opening(self,obs):
         """Prefer a fresh opening after a short stable divergence from recent PGNs."""
         if (self.settings.initial_fen or not self.rec or self.premove_state or obs.confidence<.85
-                or obs.uncertain_squares(max(.80,self.settings.min_confidence))):
+                or len(obs.uncertain_squares(max(.80,self.settings.min_confidence)))>2):
             self._new_opening_position=self._new_opening_since=None
             return False
         names=(self.latest_context or {}).get('names',{})
@@ -567,6 +586,10 @@ class GameManager(GameExtras):
         if len(opening)<(1 if strong_boundary else 2):
             self._new_opening_position=self._new_opening_since=None
             return False
+        target=chess.Board()
+        for uci in opening:target.push_uci(uci)
+        placement=target.board_fen()
+        opening_obs=Observation.from_board(target);opening_obs.timestamp=obs.timestamp;opening_obs.orientation=obs.orientation
         if self._new_opening_position!=placement:
             self._new_opening_position=placement;self._new_opening_since=self._clock()
             return False
@@ -587,7 +610,7 @@ class GameManager(GameExtras):
         # A legal continuation from the active endpoint has priority over a
         # split, unless fresh identity and reset clocks show a new game.
         if not self.terminal_message and not strong_boundary:
-            line=infer_visible_opening(obs,start_board=self.rec.board,max_plies=14,
+            line=infer_visible_opening(opening_obs,start_board=self.rec.board,max_plies=14,
                                        time_limit_ms=250,node_limit=30000)
             if line:
                 before=len(self.rec.verified)
@@ -605,6 +628,11 @@ class GameManager(GameExtras):
                 self._new_opening_position=self._new_opening_since=None
                 self.persist()
                 return True
+        if not strong_boundary:
+            link=self._find_history_path(opening_obs,max_plies=6,min_ply=2,time_limit_ms=150,node_limit=16000)
+            if link is not None:
+                self._boundary_history_link=(self.current_id,tuple(self.rec.verified),placement)
+                return False
         previous=self.current_id
         excluded=[row['id'] for row in rows if row['id']!=previous][:2] if strong_boundary else []
         if strong_boundary:excluded.insert(0,previous)
@@ -620,12 +648,46 @@ class GameManager(GameExtras):
         self.persist()
         return True
 
+    def _consider_unlinked_position(self,obs):
+        """A stable unrelated board must not stay trapped in rewind/recovery."""
+        threshold=max(.8,self.settings.min_confidence)
+        if (not self.settings.split_unlinked_positions or not self.rec or self.settings.initial_fen
+                or self.premove_state or obs.confidence<threshold or obs.uncertain_squares(threshold)
+                or obs.matches(self.rec.board,threshold)
+                or any(obs.matches(branch.board(),threshold) for branch in self.rec.branches)):
+            self._boundary_position=self._boundary_since=None;return False
+        placement=obs.placement()
+        if placement in self.rec.history:
+            self._boundary_position=self._boundary_since=None;return False
+        changed=int(np.count_nonzero(board_labels(self.rec.board)!=obs.labels))
+        if changed<self.settings.new_game_min_changed_squares:return False
+        if not any(chess.Board(f'{placement} {turn} - - 0 1').is_valid() for turn in ('w','b')):return False
+        if self._boundary_position!=placement:
+            self._boundary_position=placement;self._boundary_since=self._clock();return False
+        if self._clock()-self._boundary_since<self.settings.new_game_change_seconds:return False
+        self._boundary_since=self._clock()
+        link=self._find_history_path(obs,max_plies=6,min_ply=2 if len(self.rec.verified)>6 else 0,
+                                     time_limit_ms=250,node_limit=30000)
+        if link is not None:
+            self._boundary_history_link=(self.current_id,tuple(self.rec.verified),placement)
+            return False
+        if self._resume_latest_game_at_position(obs):return False
+        previous=self.current_id
+        self.cancel_background_recovery()
+        self._start_from_visible(obs,'stable new position could not be linked to recent PGNs or earlier played positions')
+        self._boundary_position=self._boundary_since=None
+        self.last_message='New position • previous PGN saved; recording the visible game'
+        self.store.audit('unlinked position split',{'previous_game_id':previous,'game_id':self.current_id,
+            'placement':placement,'checked_history_depth':6,'search_ms':250})
+        return True
+
     def process(self, obs: Observation) -> dict:
         with self.lock:
             self.last_observation = obs
             move_evidence=obs
             self._recognition_ignored_squares=[]
             if self.rec:self._consider_new_opening(obs)
+            if self.rec:self._consider_unlinked_position(obs)
             if self.rec and self._handle_rewind(obs):
                 self.reset_settling()
                 self.persist()
@@ -1100,6 +1162,8 @@ class GameManager(GameExtras):
 
     def _track_unresolved_position(self,obs,status):
         """Treat legal history as review; split only a sustained unexplained board."""
+        if not self.settings.split_unlinked_positions:
+            self.clear_position_recovery();return
         threshold=max(.80,self.settings.min_confidence)
         eligible=(self.rec is not None
                   and status.startswith(("unmatched position","search limit","uncertain","review / rewind"))
@@ -1108,6 +1172,11 @@ class GameManager(GameExtras):
                   and not obs.uncertain_squares(threshold))
         if not eligible:
             self.clear_position_recovery()
+            return
+
+        if self._boundary_history_link==(self.current_id,tuple(self.rec.verified),obs.placement()):
+            self.clear_position_recovery()
+            self.last_message='Review position • linked to earlier PGN history'
             return
 
         history_path=self._find_history_path(obs)
@@ -1159,7 +1228,7 @@ class GameManager(GameExtras):
             label="possible new game" if large_change else "unresolved position"
             self.last_message=f"{status} • {label} ({changed} changed squares); checking saved PGNs in {remaining}s if stable"
 
-    def _find_history_path(self,obs):
+    def _find_history_path(self,obs,max_plies=None,min_ply=0,time_limit_ms=45,node_limit=8000):
         """Find an exact or short legal continuation from any verified PGN position."""
         if not self.rec:return None
         positions=[];board=chess.Board(self.rec.initial_fen);positions.append(board.copy())
@@ -1171,17 +1240,20 @@ class GameManager(GameExtras):
         target=obs.labels
         confident=obs.probabilities.max(axis=1)>=threshold
         candidates=[]
-        max_changes=4*min(3,self.settings.max_plies)
+        depth=max_plies or min(3,self.settings.max_plies)
+        max_changes=4*depth
         for index,position in enumerate(positions):
+            if index<min_ply:continue
             distance=int(np.count_nonzero((board_labels(position)!=target)&confident))
             if distance<=max_changes:
                 candidates.append((distance,-index,index,position))
         candidates.sort(key=lambda item:(item[0],item[1]))
         started=time.monotonic();used_nodes=0
         for _,__,index,position in candidates[:40]:
-            remaining=8000-used_nodes
-            if remaining<1000 or (time.monotonic()-started)*1000>45:break
-            searcher=LegalSearcher(min(3,self.settings.max_plies),min(1600,remaining),45,
+            remaining=node_limit-used_nodes
+            milliseconds=time_limit_ms-(time.monotonic()-started)*1000
+            if remaining<1000 or milliseconds<=0:break
+            searcher=LegalSearcher(depth,min(5000 if max_plies else 1600,remaining),milliseconds,
                                    threshold,path_limit=32)
             result=searcher.search(position,obs);used_nodes+=result.nodes
             if result.paths:
