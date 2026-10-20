@@ -138,6 +138,13 @@ class GameLifecycle:
         for row in rows:
             try:
                 headers=json.loads(row['headers']);state=json.loads(row['state'])
+                # A currently running game must never be auto-replaced with
+                # a previously completed PGN just because the screenshot
+                # revisits its final board. A wrong result OCR in an archived
+                # segment would otherwise stop every subsequent move.
+                if (manager.headers.get('Result','*')=='*'
+                        and headers.get('Result','*')!='*'):
+                    continue
                 if len(state['verified'])<4 and state['initial_fen']==chess.STARTING_FEN:continue
                 if not visible or any(name_key(headers.get(c.title(),'Unknown'))!=name_key(n) for c,n in visible.items()):continue
                 board=chess.Board(state['initial_fen'])
