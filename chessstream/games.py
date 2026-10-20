@@ -329,6 +329,12 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         pgn=join_recordings([previous,checkpoint],self.searcher())
         game=chess.pgn.read_game(io.StringIO(pgn))
         if game is None or game.errors:raise ValueError('The joined PGN did not pass validation.')
+        # Remove only the administrative notice that the earlier PGN cannot
+        # be joined. This becomes false after a successful saved join, and
+        # survives otherwise through merge_annotations(review_pgn).
+        obsolete_notice=("A separate PGN segment was started from the visible board FEN; "
+                         "this game's saved moves remain unchanged.")
+        game.comment=game.comment.replace(obsolete_notice,'').strip()
         checkpoint_note=checkpoint_state.get('note','')
         if checkpoint_note:
             def sanitize_segment_note(node):
@@ -338,6 +344,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 for child in node.variations:sanitize_segment_note(child)
             sanitize_segment_note(game)
             pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+        pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
         rec=self.reconstructor(game.board())
         clocks={}
         for ply,node in enumerate(game.mainline(),1):
