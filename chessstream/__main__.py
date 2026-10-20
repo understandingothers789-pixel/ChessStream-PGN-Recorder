@@ -9,6 +9,12 @@ import sys
 from platformdirs import user_data_path
 
 
+def gui_lock_path():
+    """One live GUI recorder per OS user, independent of extraction/data dir."""
+    user_token=hashlib.sha256(os.path.normcase(str(Path.home())).encode('utf-8')).hexdigest()[:20]
+    return Path(tempfile.gettempdir())/f'ChessStream-recorder-{user_token}.lock'
+
+
 def main():
     parser=argparse.ArgumentParser(description='ChessStream PGN Recorder — local screen-to-PGN desktop application')
     parser.add_argument('--data-dir',type=Path,help='Override the default local application data folder')
@@ -40,8 +46,7 @@ def main():
     # portable builds or data folders for the same Windows user.  A per-data-
     # folder lock did not stop the two independent recorders in the Oct 20 log.
     # Explicit video --replay remains a separate headless workflow.
-    user_token=hashlib.sha256(os.path.normcase(str(Path.home())).encode('utf-8')).hexdigest()[:20]
-    global_lock_path=Path(tempfile.gettempdir())/f'ChessStream-recorder-{user_token}.lock'
+    global_lock_path=gui_lock_path()
     lock=QLockFile(str(global_lock_path))
     lock.setStaleLockTime(0)  # Living PID owns the lock; don't time out a slow stream.
     if not lock.tryLock(100):
