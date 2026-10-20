@@ -226,9 +226,15 @@ class RecordingWorker(QThread):
             orientation=obs.orientation if obs else (self.manager.last_observation.orientation if self.manager.last_observation else None)
             message=self._text_detector.scan(image,self.manager.result_player(),rect or getattr(self,'_text_board_rect',None),self.manager.observed_names,orientation=orientation)
             if self._text_detector.last_scan!=before:
-                if settings.read_context:
+                if (settings.read_context and obs is not None
+                        and obs.confidence>=max(.80,settings.min_confidence)
+                        and len(obs.uncertain_squares(max(.80,settings.min_confidence)))<=2
+                        and rect is not None):
+                    # An obscured or absent board can leave a stale rectangle
+                    # pointing at a different tab/overlay. OCR results from
+                    # that view must never mutate player IDs or game identity.
                     context=self._context_stabilizer.observe(extract_context(self._text_detector.last_lines,rect,orientation))
-                    self.manager.observe_context(context,obs.timestamp if obs else utcnow())
+                    self.manager.observe_context(context,obs.timestamp)
                     if context.get('clocks') or context.get('names'):
                         logging.info('Visible game context %s',context)
                 if message and settings.detect_results:self.manager.declare_end(message,obs)
