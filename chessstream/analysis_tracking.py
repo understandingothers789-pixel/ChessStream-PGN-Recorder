@@ -28,6 +28,7 @@ class AnalysisTracking:
 
     def _analysis_boundary(self,headers=None,state=None):
         """Names support a replay; changed opponents, resets and aborts oppose it."""
+        if self.lifecycle.mode=='analysis':return False
         if self.pending_identity or self.clocks_recently_reset():return True
         if self.terminal_message and self.terminal_message.get('reason')=='aborted':return True
         if state and (state.get('terminal_message') or {}).get('reason')=='aborted':return True
@@ -106,6 +107,9 @@ class AnalysisTracking:
 
     def _try_replay_recording(self,obs):
         """Fold a recognizable short replay/checkpoint into a recent longer game."""
+        if ('Temporary visible board FEN segment' not in self.note and not self.rewind_state
+                and not self.analysis_cursor and self.lifecycle.phase!='analysis / replay'):
+            return False
         if (not self.rec or self._analysis_boundary() or len(self.rec.verified)>12
                 or not any(text in self.note for text in ('Temporary visible board FEN segment','visible midgame FEN','visible board FEN','Recording began midgame'))):
             return False

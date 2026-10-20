@@ -86,7 +86,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.18"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.19"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -154,6 +154,9 @@ class MainWindow(ReviewTools,QMainWindow):
             action.setStyleSheet("padding:7px 4px;font-size:11px")
             pgn_actions.addWidget(action)
         moves_card.box.addLayout(pgn_actions)
+        self.game_identity_button=button('Game: waiting ▾',self.game_controls_menu)
+        self.game_identity_button.setStyleSheet('padding:6px;font-size:11px')
+        moves_card.box.addWidget(self.game_identity_button)
         self.move_table=MoveTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);self.move_table.setContextMenuPolicy(Qt.CustomContextMenu);self.move_table.customContextMenuRequested.connect(self.live_moves_context_menu);self.move_table.step_move.connect(self.navigate_live_move);self.move_table.setToolTip('Click a move to review it. Use the left and right arrow keys to step through moves in order.');moves_card.box.addWidget(self.move_table,1)
         self.move_table.itemClicked.connect(self.review_live_move)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
@@ -188,6 +191,30 @@ class MainWindow(ReviewTools,QMainWindow):
         elif selected==export:self.export_current()
         elif selected==fen:self.copy_visible_fen()
         elif selected==manual:self.correct_moves()
+
+    def game_controls_menu(self):
+        menu=QMenu(self.game_identity_button)
+        for text,mode in [('Automatic game detection','auto'),('Start separate PGN from visible board','new'),
+                          ('Continue current PGN','continue'),('Treat as analysis / replay','analysis'),
+                          ('Undo last game switch','undo')]:
+            action=menu.addAction(text,lambda checked=False,value=mode:self.run_game_control(value))
+            if mode=='undo':action.setEnabled(bool(self.snapshot.get('lifecycle',{}).get('can_undo')))
+        menu.addSeparator();selected=self.move_table.currentItem()
+        ply=selected.data(Qt.UserRole) if selected else None
+        action=menu.addAction('Split PGN after selected move',lambda:self.run_game_control('split',ply))
+        action.setEnabled(bool(ply and 0<ply<len(self.snapshot.get('moves',[]))))
+        menu.exec(self.game_identity_button.mapToGlobal(self.game_identity_button.rect().bottomLeft()))
+
+    def run_game_control(self,mode,ply=None):
+        try:
+            self._pgn_action_pending=True
+            if mode=='split':
+                value=(self.snapshot.get('game_id'),ply)
+                if self.worker and self.worker.isRunning():self.worker.commands.put(('split_game',value))
+                else:self.manager.split_game_at(ply);self.on_update(self.manager.snapshot())
+            elif self.worker and self.worker.isRunning():self.worker.commands.put(('game_mode',mode))
+            else:self.manager.set_game_mode(mode);self.on_update(self.manager.snapshot())
+        except Exception as error:self.error(str(error))
 
     def run_pgn_action(self,action):
         if self.worker and self.worker.isRunning():
@@ -272,6 +299,10 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def on_update(self,snap):
         self.snapshot=snap
+        lifecycle=snap.get('lifecycle',{})
+        self.game_identity_button.setText('Game: '+lifecycle.get('state','waiting for a game')+' ▾')
+        self.game_identity_button.setToolTip('White: '+snap.get('players',{}).get('white','Unknown')+'\nBlack: '+snap.get('players',{}).get('black','Unknown')+
+            '\nIdentity: '+lifecycle.get('identity','pending')+'\n'+lifecycle.get('reason','')+'\nClick to correct game detection or split a PGN.')
         if self._live_review:
             line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
             review=self._live_review
@@ -283,7 +314,7 @@ class MainWindow(ReviewTools,QMainWindow):
             self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True)
         diagnostic_key=(snap.get('game_id'),snap.get('status'),tuple(snap.get('uncertain_squares',[])),snap.get('plies'))
         if diagnostic_key!=getattr(self,'_last_diagnostic',None):
-            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks']}))
+            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks','players','lifecycle']}))
             self._last_diagnostic=diagnostic_key
         if not self.worker or not self.worker.paused.is_set() or getattr(self,'_pgn_action_pending',False):
             self._pgn_action_pending=False
@@ -842,12 +873,15 @@ class MainWindow(ReviewTools,QMainWindow):
         self.auto_record_opening=QCheckBox('Start recording automatically when an opening move appears')
         self.auto_record_opening.setChecked(self.settings.auto_record_opening)
         capture.addRow('Automatic recording',self.auto_record_opening)
+        self.infer_unseen_opening=QCheckBox('Recover unseen opening moves as labeled guesses')
+        self.infer_unseen_opening.setChecked(self.settings.infer_unseen_opening)
+        capture.addRow('Unseen opening',self.infer_unseen_opening)
         self.settings_interval=QDoubleSpinBox();self.settings_interval.setRange(.1,60);self.settings_interval.setValue(self.settings.interval);self.settings_interval.setSuffix(' seconds');capture.addRow('Permanent screenshot interval',self.settings_interval)
         self.adaptive=QCheckBox('Analyze additional temporary frames for fast games');self.adaptive.setChecked(self.settings.adaptive);capture.addRow('Adaptive recognition',self.adaptive)
         self.confirm_reply=QCheckBox('Keep latest move provisional until a reply or 0.5 seconds unchanged');self.confirm_reply.setChecked(self.settings.confirm_on_reply);capture.addRow('Protect against dragged pieces',self.confirm_reply)
         capture.addRow(muted('Recommended for blitz and rapid: a stable hover is not proof of a drop. The last move stays amber and out of PGN until a reply or explicit final-move confirmation.'))
-        self.unresolved_fen=QDoubleSpinBox();self.unresolved_fen.setRange(0,600);self.unresolved_fen.setDecimals(0);self.unresolved_fen.setSuffix(' seconds');self.unresolved_fen.setSpecialValueText('Off');self.unresolved_fen.setValue(self.settings.unresolved_fen_seconds);capture.addRow('Start a FEN segment after unresolved position',self.unresolved_fen)
-        capture.addRow(muted('If a clear board cannot be linked to the saved game for this long, keep the old PGN and continue in a new PGN from the displayed position. Side to move is inferred from later evidence. The latest legal hover is excluded from this timer. Set Off to disable automatic FEN recovery.'))
+        self.unresolved_fen=QDoubleSpinBox();self.unresolved_fen.setRange(0,600);self.unresolved_fen.setDecimals(0);self.unresolved_fen.setSuffix(' seconds');self.unresolved_fen.setSpecialValueText('Off');self.unresolved_fen.setValue(self.settings.unresolved_fen_seconds);capture.addRow('Warn about a small unresolved mismatch after',self.unresolved_fen)
+        capture.addRow(muted('Small mismatches remain pending. The warning offers New game, Continue or Analysis in the Game menu beside the moves. It does not force a new PGN or invent a connection.'))
         self.new_game_delay=QDoubleSpinBox();self.new_game_delay.setRange(1,120);self.new_game_delay.setDecimals(0);self.new_game_delay.setSuffix(' seconds');self.new_game_delay.setValue(self.settings.new_game_change_seconds);capture.addRow('Confirm a likely new game after',self.new_game_delay)
         self.new_game_squares=QSpinBox();self.new_game_squares.setRange(1,32);self.new_game_squares.setValue(self.settings.new_game_min_changed_squares);capture.addRow('Minimum changed squares',self.new_game_squares)
         self.split_unlinked_positions=QCheckBox('Save the old PGN and start a new one for a stable unrelated board')
@@ -917,6 +951,7 @@ class MainWindow(ReviewTools,QMainWindow):
                 if QMessageBox.warning(self,'Enable automatic image deletion?',f'Permanently delete saved screenshots older than {days} days, now and on future runs? PGNs and game data are kept.',QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
             s=self.settings
             s.auto_record_opening=self.auto_record_opening.isChecked()
+            s.infer_unseen_opening=self.infer_unseen_opening.isChecked()
             s.split_unlinked_positions=self.split_unlinked_positions.isChecked()
             s.interval=self.settings_interval.value();s.adaptive=self.adaptive.isChecked();s.confirm_on_reply=self.confirm_reply.isChecked();s.unresolved_fen_seconds=self.unresolved_fen.value();s.new_game_change_seconds=self.new_game_delay.value();s.new_game_min_changed_squares=self.new_game_squares.value();s.detect_results=self.detect_results.isChecked();s.read_context=self.read_context.isChecked();s.auto_context=self.auto_context.isChecked();s.context_padding_percent=self.context_padding.value();s.result_player_color=self.result_player.currentData();s.review_seconds=self.review_seconds.value();s.adaptive_fps=self.fps.value();s.detect_board=self.detect_setting.isChecked();s.orientation=self.orientation_setting.currentText();s.max_plies=self.maxplies.value();s.search_nodes=self.nodes.value();s.search_ms=self.ms.value();s.min_confidence=self.threshold.value();s.initial_fen=self.initialfen.text().strip();s.onnx_model=self.model.text().strip();s.recognition_mode=self.recognizer_setting.currentData();s.save_screenshots=self.save_screenshots.isChecked();s.deduplicate=self.dedupe.isChecked();s.retention_days=days;s.export_dir=self.export_path.text().strip();s.auto_export=self.autoexport.isChecked();s.start_hotkey=self.start_key.keySequence().toString();s.stop_hotkey=self.stop_key.keySequence().toString();s.region_hotkey=self.region_key.keySequence().toString();s.save(self.root/'settings.json');self.interval.setValue(s.interval);self.install_hotkeys();self.run_retention();self.capture_caption.setText(self._screenshot_caption());self.statusBar().showMessage('Settings saved',6000)
             if self.worker:self.worker.commands.put(('region',self.region))

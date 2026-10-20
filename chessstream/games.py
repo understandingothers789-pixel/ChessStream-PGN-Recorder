@@ -20,6 +20,8 @@ from .gap_join import join_recordings
 from .opening import infer_visible_opening
 from .repair import simplify_shuffles,retained_annotations
 from .analysis_tracking import AnalysisTracking
+from .lifecycle import GameLifecycle
+from .game_boundaries import GameBoundaries
 
 
 def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", review_pgn="", clocks=None, inferred_moves=None) -> str:
@@ -52,9 +54,10 @@ def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", re
     return game.accept(chess.pgn.StringExporter(headers=True, variations=True, comments=True))
 
 
-class GameManager(AnalysisTracking,GameExtras):
+class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
     def __init__(self, store: Store, settings: Settings, session_id: str | None = None):
         self.store, self.settings = store, settings
+        self.lifecycle=GameLifecycle()
         self.session_id = session_id or store.session()
         self.lock = threading.RLock()
         self.current_id: str | None = None
@@ -99,6 +102,8 @@ class GameManager(AnalysisTracking,GameExtras):
         return Reconstructor(board, self.searcher(), roots, int(self.settings.confirm_on_reply))
 
     def _create(self, board, timestamp, roots=None, note=""):
+        initial_context=self.latest_context if self.rec is None else None
+        initial_names=dict(self.lifecycle.names) if self.rec is None else {}
         self._reset_extras()
         self._timed_base=None;self._timed_end=0
         self._settled_key=None;self._settled_since=None
@@ -113,6 +118,9 @@ class GameManager(AnalysisTracking,GameExtras):
                         "Date":timestamp[:10].replace("-","."),"Round":"?",
                         "White":"Unknown","Black":"Unknown","Result":"*"}
         self.rec = self.reconstructor(board, roots)
+        for color,name in initial_names.items():self.headers[color.title()]=name
+        self.latest_context=initial_context;self.observed_names=initial_names
+        self.lifecycle.bind(self,initial_context)
         self.note = note
         self.last_message = self.rec.status
         self.persist()
@@ -129,9 +137,10 @@ class GameManager(AnalysisTracking,GameExtras):
                 return False
             self._create(b, obs.timestamp)
             return True
-        opening_moves=self._infer_short_opening(obs)
+        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
+        if len(opening_moves)>1 and not self.settings.infer_unseen_opening:opening_moves=[]
         if (len(uncertain)<=2 and obs.confidence>=max(.80,self.settings.min_confidence)
-                and self._resume_latest_game_at_position(obs,allow_completed_review=not bool(opening_moves))):
+                and self._resume_initial_identity(obs)):
             return True
         if not uncertain and obs.placement() == chess.Board().board_fen():
             self._create(chess.Board(), obs.timestamp)
@@ -228,6 +237,9 @@ class GameManager(AnalysisTracking,GameExtras):
         for row in candidates:
             if chosen is not None:break
             try:
+                visible_names=self.lifecycle.names
+                saved_headers=json.loads(row['headers'])
+                if any(''.join(saved_headers.get(color.title(),'Unknown').casefold().split())!=''.join(name.casefold().split()) for color,name in visible_names.items()):continue
                 state=json.loads(row['state'])
                 if not allow_completed_review and (json.loads(row['headers']).get('Result','*')!='*' or state.get('terminal_message')):
                     continue
@@ -376,7 +388,8 @@ class GameManager(AnalysisTracking,GameExtras):
         threshold=max(.80,self.settings.min_confidence)
         if not obs.uncertain_squares(threshold) and obs.placement()==chess.Board().board_fen():
             return chess.Board(),None,""
-        moves=self._infer_short_opening(obs)
+        moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
+        if len(moves)>1 and not self.settings.infer_unseen_opening:moves=[]
         if moves:
             sans=self._san_line(chess.Board(),moves)
             note=self._opening_note()+' Selected line: '+' '.join(sans)+'.'
@@ -456,11 +469,15 @@ class GameManager(AnalysisTracking,GameExtras):
 
     def opening_ready(self, obs):
         with self.lock:
-            return bool(self._infer_short_opening(obs))
+            if obs.placement()==chess.Board().board_fen():return False
+            if self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1):return True
+            return (not obs.uncertain_squares(max(.8,self.settings.min_confidence))
+                    and len(chess.Board(f'{obs.placement()} w - - 0 1').piece_map())>=4
+                    and any(chess.Board(f'{obs.placement()} {turn} - - 0 1').is_valid() for turn in ('w','b')))
 
     def _backfill_opening_prefix(self):
         """Repair an application-created early FEN segment without losing its continuation."""
-        if (not self.rec or self.rec.initial_fen==chess.STARTING_FEN or self.headers.get('Result','*')!='*'
+        if (not self.settings.infer_unseen_opening or not self.rec or self.rec.initial_fen==chess.STARTING_FEN or self.headers.get('Result','*')!='*'
                 or not any(text in self.note for text in ('Recording began midgame','visible midgame FEN'))):
             return False
         old=self.rec;root=chess.Board(old.initial_fen)
@@ -537,7 +554,8 @@ class GameManager(AnalysisTracking,GameExtras):
         self._persisted_fingerprint=None
 
     def _start_from_visible(self, obs, reason, since=None):
-        opening_moves=self._infer_short_opening(obs)
+        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
+        if len(opening_moves)>1 and not self.settings.infer_unseen_opening:opening_moves=[]
         board,roots,note=self._visible_roots(obs)
         previous_id=self.current_id
         if self.rec:
@@ -563,6 +581,7 @@ class GameManager(AnalysisTracking,GameExtras):
 
     def _consider_new_opening(self,obs):
         """Prefer a fresh opening after a short stable divergence from recent PGNs."""
+        if not self.settings.infer_unseen_opening:return False
         if (self.settings.initial_fen or not self.rec or self.premove_state or obs.confidence<.85
                 or len(obs.uncertain_squares(max(.80,self.settings.min_confidence)))>2):
             self._new_opening_position=self._new_opening_since=None
@@ -685,6 +704,7 @@ class GameManager(AnalysisTracking,GameExtras):
     def process(self, obs: Observation) -> dict:
         with self.lock:
             self.last_observation = obs
+            if self.lifecycle_gate(obs):return self.lifecycle_snapshot(obs)
             move_evidence=obs
             self._recognition_ignored_squares=[]
             if self.rec and self._handle_saved_analysis(obs):
@@ -693,8 +713,8 @@ class GameManager(AnalysisTracking,GameExtras):
                 snapshot=self.snapshot()
                 snapshot.update(preview_fen=obs.placement()+' w - - 0 1',preview_moves=[],preview_last_move=None)
                 return snapshot
-            if self.rec:self._consider_new_opening(obs)
-            if self.rec:self._consider_unlinked_position(obs)
+            if self.rec and self.lifecycle.mode=='auto':self._consider_new_opening(obs)
+            if self.rec and self.lifecycle.mode=='auto':self._consider_unlinked_position(obs)
             if self.rec and self._handle_rewind(obs):
                 self.reset_settling()
                 self.persist()
@@ -896,7 +916,8 @@ class GameManager(AnalysisTracking,GameExtras):
         from .recovery import recover_gap
         with self.lock:
             if not self.rec:return False
-            token=(self.current_id,self.rec.initial_fen,tuple(self.rec.verified),obs.placement())
+            if self.lifecycle_gate(obs):return False
+            token=(self.current_id,self.rec.initial_fen,tuple(self.rec.verified),obs.placement(),self.lifecycle.generation)
             if self._recovery_future:
                 if not self._recovery_future.done():return self._recovery_token==token
                 try:result=self._recovery_future.result()
@@ -1322,6 +1343,7 @@ class GameManager(AnalysisTracking,GameExtras):
         data["note"] = self.note
         data["timed_base"]=self._timed_base;data["timed_end"]=self._timed_end
         data.update(self._extra_state())
+        data['lifecycle']=self.lifecycle.saved()
         data['result_override']=self.result_override
         fingerprint=json.dumps([self.current_id,self.name,self.headers,data,self.ended,self.settings.export_dir,self.settings.auto_export],sort_keys=True)
         if fingerprint==self._persisted_fingerprint:return
@@ -1334,7 +1356,7 @@ class GameManager(AnalysisTracking,GameExtras):
     def snapshot(self):
         with self.lock:
             if not self.rec:
-                return {"status":self.last_message,"game_id":None,"fen":None,"moves":[],"alternatives":[]}
+                return {"status":self.last_message,"game_id":None,"fen":None,"moves":[],"alternatives":[],"lifecycle":self.lifecycle.summary(self)}
             b = chess.Board(self.rec.initial_fen)
             san = []
             for uci in self.rec.verified:
@@ -1369,6 +1391,7 @@ class GameManager(AnalysisTracking,GameExtras):
                         leaf.push_uci(uci)
                     alternatives.append(" ".join(line) or ("White to move" if leaf.turn else "Black to move"))
             return {"status":self.last_message,"game_id":self.current_id,"name":self.name,
+                    "lifecycle":self.lifecycle.summary(self),
                     "recognition_ignored_squares":list(self._recognition_ignored_squares),
                     "fen":self.rec.board.fen(),"preview_fen":preview_board.fen(),
                     "preview_last_move":preview_last_move,"preview_moves":preview_moves,
@@ -1396,7 +1419,7 @@ class GameManager(AnalysisTracking,GameExtras):
         with self.lock:
             if not self.last_observation:
                 raise ValueError("Capture a clear board first")
-            self._start_from_visible(self.last_observation,"started manually from visible board")
+            self.start_separate_game(self.last_observation,'started manually from visible board')
 
     def repair_current(self,automatic=False):
         """Collapse removable excursions; retain the original PGN in the audit."""
@@ -1514,6 +1537,7 @@ class GameManager(AnalysisTracking,GameExtras):
             self._timed_base=state.get("timed_base");self._timed_end=state.get("timed_end",0)
             self._settled_key=None;self._settled_since=None
             self._load_extras(state)
+            self.lifecycle.load(state.get('lifecycle',{}),self)
             if self.terminal_message:self.ended=row['ended'] or utcnow()
             self.result_override=state.get('result_override',False)
             self.rec = Reconstructor.restore(state,self.searcher())

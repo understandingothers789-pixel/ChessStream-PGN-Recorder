@@ -177,6 +177,11 @@ class RecordingWorker(QThread):
         from .recovery import RecentFrames
         self.recent_frames=RecentFrames(12)
 
+    def layout_changed(self):
+        """Invalidate geometry-dependent evidence, retaining the game identity."""
+        self.manager.clear_position_recovery();self.manager.reset_settling()
+        self._text_detector.invalidate_layout();self._context_stabilizer.reset_candidates()
+
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
         self.manager.observe_frame(obs)
@@ -191,7 +196,9 @@ class RecordingWorker(QThread):
                     db.execute('UPDATE sessions SET ended=NULL WHERE id=?',(self.manager.session_id,))
             logging.info('Automatic recording started after a supported opening move appeared')
         if stable_count>=2 and not self.preview_only:
-            if self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id)):
+            if self.manager.lifecycle_gate(obs):
+                snapshot=self.manager.lifecycle_snapshot(obs)
+            elif self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id)):
                 snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues'}
             else:
                 snapshot=self.manager.process(obs)
@@ -202,14 +209,15 @@ class RecordingWorker(QThread):
             status=('Armed • recording starts when an opening move appears' if self.manager.settings.auto_record_opening else
                     'Previewing selected window • click Start recording')
             snapshot.update(status=status,preview_fen=obs.placement()+' w - - 0 1',preview_moves=[])
-        self.recent_frames.mark(self.manager.current_id,not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message)
+        self.recent_frames.mark(self.manager.current_id,not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
+            and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games'))
         if automatic:snapshot['recording_started_automatically']=True
         return snapshot
 
     def scan_context(self,image,rect,obs):
         settings=self.manager.settings
         if getattr(self,"_text_failed",False):return
-        if not self.manager.rec or not (settings.detect_results or settings.read_context):return
+        if not (settings.detect_results or settings.read_context):return
         if self._context_game!=self.manager.current_id:
             self._context_game=self.manager.current_id;self._text_detector.reset()
         before=self._text_detector.last_scan
@@ -259,12 +267,16 @@ class RecordingWorker(QThread):
                         action,value=self.commands.get()
                         try:
                             if action=="region":
-                                self.region=value;board_rect=None;last_shape=None;last_pixels=None;context_source_rect=None;self._text_detector.reset()
+                                self.region=value;board_rect=None;last_shape=None;last_pixels=None;context_source_rect=None;self.layout_changed()
                             elif action=="record":
                                 self.preview_only=False;stable_count=0
                                 self.manager.clear_position_recovery();self.manager.reset_settling()
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
+                            elif action=='game_mode':self.manager.set_game_mode(value)
+                            elif action=='split_game':
+                                if self.manager.current_id!=value[0]:raise ValueError('The active game changed. Select the split move again.')
+                                self.manager.split_game_at(value[1])
                             elif action=="repair":self.manager.repair_current()
                             elif action=="join_previous":self.manager.join_previous_recording()
                             elif action=="correct":
@@ -310,8 +322,7 @@ class RecordingWorker(QThread):
                                 # Fullscreen can move the board without resizing the
                                 # browser client. Reacquire geometry, never game state.
                                 stable_key=None;stable_count=0;last_pixels=None
-                                self.manager.clear_position_recovery();self.manager.reset_settling()
-                                self._text_detector.reset()
+                                self.layout_changed()
                             last_detect=tick
                             last_shape=image.shape
                             if board_rect is None and self.region.tracking_window:
@@ -341,7 +352,7 @@ class RecordingWorker(QThread):
                     if board_rect:context_source_rect=board_rect
                     if not settings.detect_board:context_source_rect=(0,0,image.shape[1],image.shape[0])
                     context_image=image;context_rect=context_source_rect
-                    context_due=(not self.preview_only and self.manager.rec is not None and (settings.read_context or settings.detect_results)
+                    context_due=((settings.read_context or settings.detect_results)
                                  and not getattr(self,'_text_failed',False) and time.monotonic()-self._text_detector.last_scan>=1)
                     if context_due and context_rect:
                         try:
@@ -372,7 +383,7 @@ class RecordingWorker(QThread):
                             from .domain import Observation
                             obs=Observation(last_obs.probabilities.copy(),orientation=last_obs.orientation,quality=last_obs.quality)
                         obs.timestamp=timestamp
-                        if not self.preview_only:self.scan_context(context_image,context_rect,obs)
+                        self.scan_context(context_image,context_rect,obs)
                         if settings.detect_board and obs.confidence<.6 and tick-last_detect>2:
                             board_rect=None
                         key=obs.placement()
@@ -409,7 +420,8 @@ class RecordingWorker(QThread):
                                         recognition_mode=settings.recognition_mode)
                     else:
                         if not self.preview_only:self.manager.clear_position_recovery();self.manager.reset_settling()
-                        if not self.preview_only:self.scan_context(context_image,context_rect,None)
+                        self.manager.lifecycle.set_phase('temporarily uncertain','Board hidden or not found; current PGN preserved')
+                        self.scan_context(context_image,context_rect,None)
                         snapshot=self.manager.snapshot()
                         self.frame.emit(image)
                         snapshot.update(status=(self.manager.last_message if self.manager.terminal_message else "Board hidden / not found • game preserved"),confidence=0)

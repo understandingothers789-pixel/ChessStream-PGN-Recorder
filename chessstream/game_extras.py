@@ -33,6 +33,10 @@ class GameExtras:
     def observe_context(self,context,timestamp):
         with self.lock:
             context={**context,'timestamp':timestamp}
+            self.lifecycle.metadata(context,timestamp,self._clock(),self.headers)
+            context={**context,'names':{color:name for color,name in self.lifecycle.names.items()
+                if color in self.lifecycle.raw_names and self.lifecycle.raw_names[color].casefold().replace(' ','')==name.casefold().replace(' ','')}}
+            if self.lifecycle.changed_names(self,True) or self.lifecycle.reset_reads:self.cancel_background_recovery()
             previous=self.latest_context
             self.latest_context=context
             clocks=context.get('clocks',{})
@@ -46,11 +50,13 @@ class GameExtras:
                 logging.info('Both visible clocks reset: %s',clocks)
             names=context.get('names',{})
             if not self.rec:return
-            changed=any(color in self.observed_names and ''.join(self.observed_names[color].casefold().split())!=''.join(name.casefold().split()) for color,name in names.items())
+            changed=any(self.headers.get(color.title(),'Unknown')!='Unknown' and ''.join(self.headers[color.title()].casefold().split())!=''.join(name.casefold().split()) for color,name in names.items())
             if changed:
                 self.pending_identity=names
                 logging.info('Stable visible player identity changed: %s -> %s',self.observed_names,names)
+                self.persist()
                 return
+            if not self.lifecycle.changed_names(self):self.pending_identity=None
             for color,name in names.items():
                 if color not in self.observed_names:
                     self.observed_names[color]=name

@@ -24,6 +24,7 @@ def test_queen_capture_gap_resumes_latest_with_or_without_pending_move_and_label
         store=Store(tmp_path/str(pending));settings=Settings(confirm_on_reply=pending)
         first,board=record(store,settings,PREFIX);gid=first.current_id;first.finish()
         board.push_san('Qxd4');resumed=GameManager(store,settings)
+        resumed.recover(gid);assert resumed._resume_latest_game_at_position(Observation.from_board(board))
         resumed.process(Observation.from_board(board))
         assert resumed.current_id==gid and len(store.games())==1
         board.push_san('Ne7');resumed.process(Observation.from_board(board))
@@ -51,7 +52,7 @@ def test_live_multi_move_gap_keeps_one_game_and_hovers_remain_provisional(tmp_pa
     assert 'Inferred across capture gap' in store.game(gid)['pgn']
     rewind=chess.Board()
     for san in 'e4 e5 Nf3'.split():rewind.push_san(san)
-    restored=GameManager(store,Settings());restored.process(Observation.from_board(rewind))
+    restored=GameManager(store,Settings());restored.recover(gid);restored.process(Observation.from_board(rewind))
     assert restored.current_id==gid and restored.rec.verified==manager.rec.verified
     assert 'Review position' in restored.last_message
     store.close()
@@ -117,7 +118,9 @@ def test_screenshot_images_are_opt_in_but_memory_capture_is_unaffected():
 def test_resumed_equal_shortest_lines_choose_one_deterministically(tmp_path):
     store=Store(tmp_path);first,board=record(store,Settings(),'');first.finish()
     for san in 'Nf3 Nf6 Nc3 Nc6'.split():board.push_san(san)
-    resumed=GameManager(store,Settings());resumed.process(Observation.from_board(board))
+    resumed=GameManager(store,Settings());resumed.recover(first.current_id)
+    assert resumed._resume_latest_game_at_position(Observation.from_board(board))
+    resumed.process(Observation.from_board(board))
     assert resumed.current_id==first.current_id and len(store.games())==1
     assert len(resumed.rec.branches)==1
     assert resumed.rec.branches[0].board().board_fen()==board.board_fen()
@@ -135,7 +138,8 @@ def test_terminal_game_and_unrelated_opening_remain_separate(tmp_path):
     store=Store(tmp_path/'mate');manager,board=record(store,Settings(confirm_on_reply=False),'f3 e5 g4 Qh4#')
     gid=manager.current_id;assert manager.headers['Result']=='0-1'
     manager.process(Observation.from_board(chess.Board()))
-    assert manager.current_id!=gid and len(store.games())==2
+    assert manager.current_id==gid and len(store.games())==1
+    manager.force_new();assert manager.current_id!=gid and len(store.games())==2
     store.close()
     store=Store(tmp_path/'reset');first,_=record(store,Settings(confirm_on_reply=False),'e4')
     other=chess.Board();other.push_san('d4')
@@ -173,6 +177,7 @@ def test_layout_ocr_changes_do_not_replace_verified_or_pending_game(tmp_path):
     assert manager.current_id==gid and manager.rec.verified==prefix
     assert manager.snapshot()['pending_moves']==['c3'] and len(store.games())==1
     manager.finish();resumed=GameManager(store,Settings())
+    resumed.recover(gid)
     resumed.pending_identity={'white':'another OCR reading'}
     resumed.process(Observation.from_board(board))
     assert resumed.current_id==gid and resumed.rec.verified==prefix
@@ -213,7 +218,7 @@ def test_combine_overlapping_recordings_saves_active_game_and_retains_sources(tm
     assert [node.san() for node in game.mainline()]==['e4','e5','Nf3','Nc6','Bb5']
     assert second.current_id==combined_id and len(store.games())==3
     assert store.game(first_id)['status'].startswith('combined source')
-    fresh=GameManager(store,settings);fresh.process(Observation.from_board(board))
+    fresh=GameManager(store,settings);fresh.recover(combined_id);fresh.process(Observation.from_board(board))
     assert fresh.current_id==combined_id
     store.close()
 
@@ -260,7 +265,7 @@ def test_settled_gap_uses_first_legal_path_and_three_second_errors_keep_prefix(t
     assert 'Recovery error' in manager.last_message and manager.rec.verified==prefix
     assert manager.current_id==gid
     manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(wrong))
-    assert manager._settled_since==20.
+    assert manager._settled_since is None  # Invalid boards stay quarantined, outside move acceptance.
     store.close()
 
 

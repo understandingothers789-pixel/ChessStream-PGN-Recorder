@@ -263,7 +263,8 @@ class Store:
     def audit(self, action, detail):
         logging.info("Audit %s %s",action,json.dumps(detail))
         with self.transaction() as db:
-            db.execute("INSERT INTO audit(timestamp,action,detail) VALUES(?,?,?)",(utcnow(),action,json.dumps(detail)))
+            cursor=db.execute("INSERT INTO audit(timestamp,action,detail) VALUES(?,?,?)",(utcnow(),action,json.dumps(detail)))
+            return cursor.lastrowid
 
     def delete_game(self, gid):
         with self.transaction() as db:

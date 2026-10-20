@@ -47,7 +47,7 @@ def test_first_opening_move_auto_starts_despite_uncertain_unchanged_d6(tmp_path)
 
 
 def test_initial_five_ply_opening_uses_pawns_first_and_standard_pgn_root(tmp_path):
-    store=Store(tmp_path);manager=GameManager(store,Settings())
+    store=Store(tmp_path);manager=GameManager(store,Settings(infer_unseen_opening=True))
     target=play('e4 c5 d3 Nc6 c3')
     snapshot=manager.process(Observation.from_board(target))
     assert manager.rec.initial_fen==chess.STARTING_FEN
@@ -79,7 +79,7 @@ def test_autostart_opt_out_and_sparse_or_uncertain_move_boards_wait(tmp_path):
 
 
 def test_resuming_legacy_early_fen_backfills_opening_and_preserves_clock(tmp_path):
-    store=Store(tmp_path);settings=Settings();first=GameManager(store,settings)
+    store=Store(tmp_path);settings=Settings(infer_unseen_opening=True);first=GameManager(store,settings)
     board=play('e4 c5 d3')
     first._create(chess.Board(f'{board.board_fen()} b - - 0 1'),utcnow(),
         note='Recording started from a visible midgame FEN. Earlier moves are not included.')
@@ -87,7 +87,7 @@ def test_resuming_legacy_early_fen_backfills_opening_and_preserves_clock(tmp_pat
     for san in 'Nc6 c3'.split():
         board.push_san(san);first.process(Observation.from_board(board))
     first.move_clocks['1']=584;first.finish()
-    resumed=GameManager(store,settings);snapshot=resumed.process(Observation.from_board(board))
+    resumed=GameManager(store,settings);resumed.recover(game_id);snapshot=resumed.process(Observation.from_board(board))
     assert resumed.current_id==game_id and len(store.games())==1
     assert resumed.rec.initial_fen==chess.STARTING_FEN
     assert snapshot['moves']==['e4','c5','d3','Nc6'] and snapshot['pending_moves']==['c3']

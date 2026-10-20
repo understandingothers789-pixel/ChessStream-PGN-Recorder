@@ -14,7 +14,7 @@ def board_after(line):
 
 
 def manager_at_old_game(tmp_path,enabled=True):
-    store=Store(tmp_path);manager=GameManager(store,Settings(split_unlinked_positions=enabled))
+    store=Store(tmp_path);manager=GameManager(store,Settings(split_unlinked_positions=enabled,infer_unseen_opening=True))
     manager._create(chess.Board(),utcnow());manager.correct_line(OLD)
     manager.rewind_state={'anchor_ply':len(manager.rec.verified),'cursor':6}
     return store,manager

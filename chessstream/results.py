@@ -140,6 +140,9 @@ class EndMessageDetector:
     def reset(self):
         self.pending=None;self.pending_since=None
 
+    def invalidate_layout(self):
+        self.reset();self._pixels=None;self.last_lines=[];self.last_scan=-100.
+
 
 def clock_seconds(text):
     compact=re.sub(r'\s+','',text)
@@ -170,10 +173,14 @@ def extract_context(lines,board_rect,orientation):
             distance=abs(y-(by+bh if y>=mid else by))
             if color not in clock_lines or distance<clock_lines[color][3]:clock_lines[color]=(seconds,rect,score,distance)
         else:candidates.append((color,text,rect,score))
-    names={}
-    excluded={'white','black','game review','review','rematch','new game','you won','you lost','game abandoned','game aborted','analysis','resign','draw','share','settings','play','play bots','computer','stockfish','unknown','hidden','redacted','censored'}
-    for color,clock in clock_lines.items():
-        _,rect,_,_=clock;cx=(rect[0]+rect[2])/2;cy=(rect[1]+rect[3])/2
+    names={};name_confidence={}
+    excluded={'white','black','game review','review','rematch','new game','you won','you lost','game abandoned','game aborted','analysis','resign','draw','share','settings','play','play bots','computer','stockfish','unknown','hidden','redacted','censored','rapid','blitz','bullet','classical','chess','you tube','youtube'}
+    for color in ('white','black'):
+        clock=clock_lines.get(color)
+        if clock:
+            _,rect,_,_=clock;cx=(rect[0]+rect[2])/2;cy=(rect[1]+rect[3])/2
+        else:
+            cx=bx+bw*.9;cy=by+bh*1.06 if color==orientation else by-bh*.06
         masked=False
         for side,text,r,score in candidates:
             compact=re.sub(r'[\W_]+','',text.lower())
@@ -182,25 +189,32 @@ def extract_context(lines,board_rect,orientation):
         nearby=[]
         for side,text,r,score in candidates:
             if side!=color:continue
+            if not clock and (score<.9 or not bx-bw*.1<=(r[0]+r[2])/2<=bx+bw*1.1):continue
             clean=re.sub(r'^(GM|IM|FM|NM|CM|WGM|WIM)\s+','',text.strip().rstrip(' :;|•'))
             clean=re.sub(r'\s*(?:\(\d{2,4}\)|\s\d{2,4})\s*$','',clean)
+            if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
             if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
             if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
             x=(r[0]+r[2])/2;y=(r[1]+r[3])/2
             if bx<=cx<=bx+bw and not bx-bw*.1<=x<=bx+bw*1.1:continue
             if abs(y-cy)<bh*.14 and abs(x-cx)<bw*1.05:
-                nearby.append((abs(y-cy)*4+abs(x-cx),clean))
-        if nearby:names[color]=min(nearby)[1]
-    return {'clocks':{c:v[0] for c,v in clock_lines.items()},'names':names}
+                nearby.append((abs(y-cy)*4+abs(x-cx),clean,score))
+        if nearby:
+            _,names[color],name_confidence[color]=min(nearby)
+    return {'clocks':{c:v[0] for c,v in clock_lines.items()},'names':names,'name_confidence':name_confidence}
 
 
 class ContextStabilizer:
     def __init__(self):self.names={}
     def observe(self,context):
         stable={};current=dict(self.names)
+        for color in list(current):
+            if color not in context.get('names',{}):current.pop(color)
         for color,name in context.get('names',{}).items():
             old,count=current.get(color,('',0));count=count+1 if old==name else 1
             current[color]=(name,count)
             if count>=3:stable[color]=name
         self.names=current
-        return {**context,'names':stable}
+        return {**context,'names':stable,'raw_names':dict(context.get('names',{})),'names_stable':True}
+
+    def reset_candidates(self):self.names={}

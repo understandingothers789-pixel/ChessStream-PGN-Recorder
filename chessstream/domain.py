@@ -58,6 +58,7 @@ class Settings:
     screenshot_mode: str = "positions"
     save_screenshots: bool = False
     auto_record_opening: bool = True
+    infer_unseen_opening: bool = False
     confirm_on_reply: bool = True
     unresolved_fen_seconds: float = 15.0
     new_game_change_seconds: float = 5.0
@@ -134,7 +135,7 @@ class Settings:
             if getattr(result,key) not in allowed:
                 setattr(result,key,fallback);logging.warning("Invalid saved setting %s; using its safe default",key)
         for key in ("adaptive","deduplicate","save_screenshots","auto_record_opening","confirm_on_reply","detect_results","read_context","auto_context",
-                    "detect_board","auto_export","split_unlinked_positions"):
+                    "detect_board","auto_export","split_unlinked_positions","infer_unseen_opening"):
             if not isinstance(getattr(result,key),bool):
                 setattr(result,key,getattr(cls(),key));logging.warning("Invalid saved setting %s; using its safe default",key)
         for key in ("export_dir","onnx_model","initial_fen","start_hotkey","stop_hotkey","region_hotkey"):
