@@ -71,7 +71,9 @@ def join_recordings(rows, searcher):
         later_moves=list(later.mainline_moves())
         for node in [combined,*combined.mainline()]:
             board=node.board();root=later.board()
-            if board.board_fen()!=root.board_fen() or (later_moves and board.turn!=root.turn):continue
+            if (board.board_fen()!=root.board_fen() or board.turn!=root.turn
+                    or board.castling_rights!=root.castling_rights
+                    or board.legal_en_passant_square()!=root.legal_en_passant_square()):continue
             cursor=node;compatible=True
             for move in later_moves:
                 if not cursor.variations:break
@@ -83,7 +85,6 @@ def join_recordings(rows, searcher):
         else:
             # A later recorded move establishes its root's side to move. A bare
             # FEN checkpoint may still have both turns as unconfirmed hypotheses.
-            turn=later.board().turn if later.variations else None
             result = _gap_search(source, later, searcher)
             if not result.exhaustive:
                 raise ValueError('The gap search reached its limit. Increase the search limits in Settings and retry.')
