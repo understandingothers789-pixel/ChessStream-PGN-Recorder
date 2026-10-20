@@ -29,11 +29,24 @@ def main():
         replay_video(args.replay,root,args.region,args.interval,args.orientation)
         return
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QTimer, QLockFile
     from PySide6.QtGui import QIcon
     from .gui import MainWindow
     app=QApplication(sys.argv[:1]);app.setApplicationName('ChessStream PGN Recorder');app.setStyle('Fusion')
     app.setWindowIcon(QIcon(str(Path(__file__).parent/'assets/icon.ico')))
+    # Two unpacked builds can use the same per-user Store and application.log.
+    # They then race to switch games, overwrite state, or replay a previous
+    # terminal result. Keep exactly one interactive writer for each data dir.
+    lock=QLockFile(str(root/'.chessstream-gui.lock'))
+    lock.setStaleLockTime(30000)
+    if not lock.tryLock(100):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(None,'ChessStream already running',
+            'Another ChessStream instance is using this data folder.\\n\\n'
+            'Close the other window (including older experimental builds), or '
+            'start this build with --data-dir pointing to a separate folder.')
+        logging.warning('Second ChessStream instance refused for data folder %s',root)
+        return
     window=MainWindow(root);window.show()
     if args.smoke:
         window.resize(1460,940)
@@ -41,7 +54,10 @@ def main():
             args.smoke.parent.mkdir(parents=True,exist_ok=True)
             window.grab().save(str(args.smoke));window.close();app.quit()
         QTimer.singleShot(700,save)
-    sys.exit(app.exec())
+    try:
+        sys.exit(app.exec())
+    finally:
+        lock.unlock()
 
 
 if __name__=='__main__':
