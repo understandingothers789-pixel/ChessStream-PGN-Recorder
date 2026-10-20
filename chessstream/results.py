@@ -222,8 +222,8 @@ class ContextStabilizer:
             # YouTube stream titles, and program labels. Repeated OCR does
             # not make these player names. Reject them even when a clock
             # position was detected, so they cannot trigger a new game.
-            if (re.fullmatch(r'(?i)v(?:ersion)?\\s*\\d+(?:\\.\\d+){1,4}',clean)
-                    or re.search(r'(?i)\\b(chess\\s+speedrun|speedrun|live\\s+stream|streaming|subscribe|playlist|tournament\\s+coverage)\\b',clean)):
+            if (re.fullmatch(r'(?i)v(?:ersion)?\s*\d+(?:\.\d+){1,4}',clean)
+                    or re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b',clean)):
                 continue
             if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
             if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
