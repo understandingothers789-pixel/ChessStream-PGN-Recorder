@@ -386,7 +386,11 @@ def test_reported_skipped_moves_hold_unproven_routes_and_allow_manual_verified_l
         # When the original video supplies the exact SAN, it can be supplied
         # as a non-destructive, explicit correction.
         if game.end().board().board_fen()!=board.board_fen():
-            manager.correct_line(CLARIFIED_OPENING+' Bg2 Nc5 O-O Nd3')
+            expected=(CLARIFIED_OPENING+' Bg2 Nc5 O-O Nd3').split()
+            assert sans==expected[:len(sans)],('Existing PGN diverged',sans)
+            remaining=expected[len(sans):]
+            assert remaining
+            manager.correct_line(' '.join(remaining))
         game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
         assert not game.errors
         assert [node.san() for node in game.mainline()][-5:]==[
