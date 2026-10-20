@@ -92,7 +92,8 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     assert '1. e4' not in window.store.game(window.manager.current_id)['pgn']
     window.manager.force_new();window.navigate(1);window.game_table.selectAll()
     actions={action.text():action for action in window.game_row_menu().actions()}
-    assert 'Delete saved PGN file(s)…' in actions
+    assert 'Remove saved .pgn copies…' in actions
+    assert 'Delete game(s) from library…' in actions
     assert actions['Join selected recordings…'].isEnabled()
     # Older saved PGNs can be combined during capture without recovering the
     # combined record into the manager that the capture worker is using.
@@ -178,3 +179,31 @@ def test_live_move_click_pins_history_until_return_to_live_or_game_change(tmp_pa
     window.move_table.itemClicked.emit(window.move_table.item(0,2))
     assert window.live_board.fen==black.fen()
     window.close();window.deleteLater();app.processEvents()
+
+
+def test_library_deletion_shows_difference_between_pgn_copy_and_game_record(tmp_path,monkeypatch):
+    """The old UI appeared not to delete anything because game rows remained."""
+    from PySide6.QtWidgets import QApplication,QMessageBox
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui,'windows',lambda:[])
+    monkeypatch.setattr(gui.MainWindow,'start_preview',lambda self:None)
+    win=gui.MainWindow(tmp_path)
+    win.manager.process(Observation.from_board(chess.Board()))
+    win.manager.finish()
+    gid=win.manager.current_id
+    assert gid and win.store.game(gid)
+    saved=win.store.root/'pgn'/(gid+'.pgn')
+    assert saved.is_file()
+    win.refresh_library()
+    i=next(i for i,game in enumerate(win.game_rows) if game['id']==gid)
+    assert win.game_table.item(i,6).text()=='Yes'
+    monkeypatch.setattr(gui.QMessageBox,'warning',lambda *args,**kwargs:QMessageBox.Yes)
+    monkeypatch.setattr(win,'selected_games',lambda:[win.store.game(gid)])
+    win.delete_saved_pgns()
+    assert not saved.exists() and win.store.game(gid)
+    i=next(i for i,game in enumerate(win.game_rows) if game['id']==gid)
+    assert win.game_table.item(i,6).text()=='No'
+    win.delete_games()
+    assert win.store.game(gid) is None and all(g['id']!=gid for g in win.game_rows)
+    win.close();win.deleteLater();app.processEvents()
