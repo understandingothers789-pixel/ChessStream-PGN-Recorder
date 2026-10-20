@@ -16,7 +16,7 @@ from .reconstruction import Reconstructor, LegalSearcher, Branch
 from .storage import Store
 from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
-from .gap_join import join_recordings
+from .gap_join import join_recordings, AmbiguousGapError
 from .opening import infer_visible_opening
 from .repair import simplify_shuffles,retained_annotations
 from .analysis_tracking import AnalysisTracking
@@ -1481,10 +1481,17 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             rows=self.store.query("SELECT * FROM games WHERE id!=? AND started<=? AND status!='imported' AND status NOT LIKE 'combined source%' AND status NOT LIKE 'reconnected%' ORDER BY started DESC,updated DESC LIMIT 2",
                                   (self.current_id,current['started']))
             pending=[branch.moves for branch in self.rec.branches]
+            join_blockers=[]
             for previous in rows:
                 if previous['id'] in self.separated_from:continue
                 try:pgn=join_recordings([previous,current],LegalSearcher(6,60000,500,self.settings.min_confidence))
-                except ValueError:continue
+                except AmbiguousGapError as error:
+                    join_blockers.append(f'{len(error.alternatives)} plausible move orders need confirmation')
+                    continue
+                except ValueError as error:
+                    if 'inconclusive' in str(error) or 'limit' in str(error):
+                        join_blockers.append('gap search limits reached')
+                    continue
                 self.cancel_background_recovery()
                 self.combine_games([previous,current],pgn)
                 branches=[]
@@ -1498,7 +1505,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 if branches:self.rec.branches=branches
                 self.last_message='Joined previous PGN • combined recording is now active; originals kept'
                 self.persist();return True
-            self.last_message='Join previous • no compatible connection found in the two previous PGNs'
+            self.last_message=('Join previous • '+join_blockers[0]+'; source PGNs preserved'
+                               if join_blockers else 'Join previous • no compatible connection found in the two previous PGNs')
             return False
 
     def visible_fens(self):
