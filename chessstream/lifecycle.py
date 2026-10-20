@@ -299,8 +299,7 @@ class GameLifecycle:
         # not change it back into a timed auto-split.
         same_pair = self.same_visible_players(manager)
         pending_same_pair = bool(self.candidate and self.candidate[0]=='same-pair-unlinked')
-        if ((same_pair or pending_same_pair) and not self.changed_names(manager,True)
-                and not self.reset_board_seen):
+        if (same_pair or pending_same_pair) and not self.changed_names(manager,True):
             return self.hold(manager,obs,
                 'Same players, unlinked position: possible video seek or missed moves; PGN preserved. '
                 'Use New game to split, or return to the live board.',
