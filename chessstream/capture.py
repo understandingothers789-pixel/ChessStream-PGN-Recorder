@@ -223,10 +223,10 @@ class RecordingWorker(QThread):
         before=self._text_detector.last_scan
         try:
             if rect:self._text_board_rect=rect
-            message=self._text_detector.scan(image,self.manager.result_player(),rect or getattr(self,'_text_board_rect',None),self.manager.observed_names)
+            orientation=obs.orientation if obs else (self.manager.last_observation.orientation if self.manager.last_observation else None)
+            message=self._text_detector.scan(image,self.manager.result_player(),rect or getattr(self,'_text_board_rect',None),self.manager.observed_names,orientation=orientation)
             if self._text_detector.last_scan!=before:
                 if settings.read_context:
-                    orientation=obs.orientation if obs else (self.manager.last_observation.orientation if self.manager.last_observation else None)
                     context=self._context_stabilizer.observe(extract_context(self._text_detector.last_lines,rect,orientation))
                     self.manager.observe_context(context,obs.timestamp if obs else utcnow())
                     if context.get('clocks') or context.get('names'):
