@@ -2,7 +2,7 @@
 import itertools
 import chess
 from chessstream.domain import Observation
-from chessstream.reconstruction import LegalSearcher,Reconstructor,select_capture_path
+from chessstream.reconstruction import LegalSearcher,Reconstructor,select_capture_path,speculative_detour
 
 
 def play(board,line):
@@ -110,3 +110,33 @@ def test_guesses_put_double_pawn_push_before_single_push_in_fast_and_exhaustive_
     assert guess_move_priority(source,source.parse_san('exd5')) < guess_move_priority(source,source.parse_san('d4'))
     assert guess_move_priority(source,source.parse_san('d4')) < guess_move_priority(source,source.parse_san('d3'))
     assert guess_move_priority(source,source.parse_san('d3')) < guess_move_priority(source,source.parse_san('Nf3'))
+
+
+def test_repeated_queen_excursion_is_unverified_but_ordinary_three_plies_are_not():
+    # Concrete dubious route present in the reported YouTube recording.
+    from unittest.mock import patch
+    from chessstream.reconstruction import SearchResult
+    source=play(chess.Board(),'d4 Nf6 Bf4 g6 e3 Bg7 h3 d6 Nf3 O-O Be2 Bf5 O-O Be4 c4 Re8 Nc3 c6')
+    state=source.copy()
+    route=[]
+    for san in 'Qb1 Bd5 Qe4'.split():
+        move=state.parse_san(san);route.append(move);state.push(move)
+    assert speculative_detour(source,tuple(route))
+    rec=Reconstructor(source,confirmation_plies=0)
+    with patch('chessstream.reconstruction.LegalSearcher.search',
+               return_value=SearchResult(paths=[tuple(route)],exhaustive=True,shortest_proven=True)):
+        update=rec.observe(Observation.from_board(state))
+    assert not rec.verified
+    assert rec.gap_requires_confirmation
+    assert [b.moves for b in rec.branches]==[tuple(m.uci() for m in route)]
+    restored=Reconstructor.restore(rec.serialize())
+    assert restored.gap_requires_confirmation and not restored.verified
+    rec.choose(0)
+    assert not rec.gap_requires_confirmation and rec.verified==[m.uci() for m in route]
+
+    # True rapid captures/moves by distinct pieces must not be blocked.
+    normal=play(chess.Board(),'e4 e5 Nf3 Nc6 Bc4 Bc5 d4 Bxd4 c3 Bb6')
+    trial=normal.copy();moves=[]
+    for san in 'Ng5 Nh6 Qf3'.split():
+        move=trial.parse_san(san);moves.append(move);trial.push(move)
+    assert not speculative_detour(normal,tuple(moves))
