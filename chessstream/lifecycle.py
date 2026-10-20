@@ -14,6 +14,26 @@ from .reconstruction import LegalSearcher
 def name_key(value):return ''.join(value.casefold().split())
 
 
+def probable_ocr_variant(left,right):
+    """One interior OCR character error is not evidence of a new opponent.
+
+    Do not equate different trailing ID suffixes (OpponentA/OpponentB).
+    An actual game reset is evaluated separately using board and clocks.
+    """
+    a,b=name_key(left),name_key(right)
+    if a==b:return True
+    if min(len(a),len(b))<8 or abs(len(a)-len(b))>1:return False
+    changes=[(tag,i,j,x,y) for tag,i,j,x,y in SequenceMatcher(None,a,b).get_opcodes() if tag!='equal']
+    if len(changes)!=1:return False
+    tag,i,j,x,y=changes[0]
+    if i==0 or x==0 or j==len(a) or y==len(b):return False
+    if tag in ('insert','delete'):return max(j-i,y-x)==1
+    if tag=='replace' and j-i==y-x==1:
+        pair={a[i],b[x]}
+        return any(pair<=group for group in ({'i','l','1'},{'o','0'},{'b','8'},{'s','5'},{'g','q'}))
+    return False
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str = 'continue'
@@ -38,7 +58,7 @@ class GameLifecycle:
         self.metadata_time=timestamp;self.context={**context,'timestamp':timestamp}
         self.raw_names=dict(context.get('raw_names',context.get('names',{})))
         self.raw_names={color:name for color,name in self.raw_names.items() if context.get('name_confidence',{}).get(color,1.)>=.9}
-        self._metadata_pending=any(headers.get(color.title(),'Unknown')!='Unknown' and name_key(value)!=name_key(headers[color.title()]) for color,value in self.raw_names.items())
+        self._metadata_pending=any(headers.get(color.title(),'Unknown')!='Unknown' and name_key(value)!=name_key(headers[color.title()]) and not probable_ocr_variant(value,headers[color.title()]) for color,value in self.raw_names.items())
         confirmed=context.get('names',{}) if context.get('names_stable') else {}
         for color in ('white','black'):
             value=self.raw_names.get(color)
@@ -73,6 +93,7 @@ class GameLifecycle:
         return {color:value for color,value in names.items()
                 if manager.headers.get(color.title(),'Unknown')!='Unknown'
                 and name_key(value)!=name_key(manager.headers[color.title()])
+                and not (not self.reset_confirmed and probable_ocr_variant(value,manager.headers[color.title()]))
                 and name_key(value)!=self.ignored_names.get(color)}
 
     def set_phase(self,phase,reason):
