@@ -191,7 +191,40 @@ def extract_context(lines,board_rect,orientation):
             if side!=color:continue
             if not clock and (score<.9 or not bx-bw*.1<=(r[0]+r[2])/2<=bx+bw*1.1):continue
             clean=re.sub(r'^(GM|IM|FM|NM|CM|WGM|WIM)\s+','',text.strip().rstrip(' :;|•'))
-            clean=re.sub(r'\s*(?:\(\d{2,4}\)|\s\d{2,4})\s*$','',clean)
+            clean=re.sub(r'\s*(?:\(\d{2,4}\)|\s\d{2,4})\s*            if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
+            if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
+            if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
+            x=(r[0]+r[2])/2;y=(r[1]+r[3])/2
+            if bx<=cx<=bx+bw and not bx-bw*.1<=x<=bx+bw*1.1:continue
+            if abs(y-cy)<bh*.14 and abs(x-cx)<bw*1.05:
+                nearby.append((abs(y-cy)*4+abs(x-cx),clean,score))
+        if nearby:
+            _,names[color],name_confidence[color]=min(nearby)
+    return {'clocks':{c:v[0] for c,v in clock_lines.items()},'names':names,'name_confidence':name_confidence}
+
+
+class ContextStabilizer:
+    def __init__(self):self.names={}
+    def observe(self,context):
+        stable={};current=dict(self.names)
+        for color in list(current):
+            if color not in context.get('names',{}):current.pop(color)
+        for color,name in context.get('names',{}).items():
+            old,count=current.get(color,('',0));count=count+1 if old==name else 1
+            current[color]=(name,count)
+            if count>=3:stable[color]=name
+        self.names=current
+        return {**context,'names':stable,'raw_names':dict(context.get('names',{})),'names_stable':True}
+
+    def reset_candidates(self):self.names={}
+,'',clean)
+            # Overlays close to clocks can contain application versions,
+            # YouTube stream titles, and program labels. Repeated OCR does
+            # not make these player names. Reject them even when a clock
+            # position was detected, so they cannot trigger a new game.
+            if (re.fullmatch(r'(?i)v(?:ersion)?\\s*\\d+(?:\\.\\d+){1,4}',clean)
+                    or re.search(r'(?i)\\b(chess\\s+speedrun|speedrun|live\\s+stream|streaming|subscribe|playlist|tournament\\s+coverage)\\b',clean)):
+                continue
             if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
             if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
             if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
