@@ -25,7 +25,10 @@ def test_midopening_video_rewind_cannot_commit_false_nb8(tmp_path):
     m._clock=lambda:now[0]
     four=board('e4 c5 Nf3 Nc6')
     early=board('e4 c5 Nf3')
-    m._create(four,utcnow(),note='Recording began midgame. Earlier moves are unavailable.')
+    wrong_turn=four.copy()
+    wrong_turn.turn=chess.BLACK  # Actual screenshot FEN had unknown side-to-move.
+    wrong_turn.ep_square=None
+    m._create(wrong_turn,utcnow(),note='Recording began midgame. Earlier moves are unavailable.')
     gid=m.current_id
     snapshot=m.process(Observation.from_board(early))
     now[0]=101.
