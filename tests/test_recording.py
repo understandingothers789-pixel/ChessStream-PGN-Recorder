@@ -223,6 +223,31 @@ def test_combine_overlapping_recordings_saves_active_game_and_retains_sources(tm
     store.close()
 
 
+def test_combine_older_recordings_does_not_replace_a_live_game(tmp_path):
+    store=Store(tmp_path);settings=Settings(confirm_on_reply=False)
+    first,board=record(store,settings,'e4 e5 Nf3');first.finish()
+    first_id=first.current_id
+    second=GameManager(store,settings);second._create(chess.Board(),Observation.from_board(board).timestamp)
+    board=chess.Board()
+    for san in 'e4 e5 Nf3 Nc6 Bb5'.split():
+        board.push_san(san);second.rec.board.push_san(san)
+        second.rec.verified.append(second.rec.board.peek().uci());second.rec.history.append(board.board_fen())
+    from chessstream.reconstruction import Branch
+    second.rec.branches=[Branch(board.fen(),())];second.persist()
+    second_id=second.current_id
+
+    live,live_board=record(store,settings,'d4 d5')
+    live_id=live.current_id;live_moves=live.rec.verified[:];live_headers=dict(live.headers)
+    joined_id=live.combine_games([store.game(first_id),store.game(second_id)],activate=False)
+
+    assert store.game(joined_id)['status']=='combined'
+    assert live.current_id==live_id and live.rec.verified==live_moves and live.headers==live_headers
+    assert live.rec.board.board_fen()==live_board.board_fen()
+    assert store.game(first_id)['status'].startswith('combined source')
+    assert store.game(second_id)['status'].startswith('combined source')
+    store.close()
+
+
 def test_half_second_settling_exports_without_reply_and_revises_latest_guess(tmp_path):
     store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6')
     now=[0.];manager._clock=lambda:now[0];manager.reset_settling()

@@ -1,4 +1,4 @@
-# Game identity, separation and verification — v1.6.22
+# Game identity, separation and verification — v1.6.23
 
 ## Why boundaries were missed
 
@@ -33,7 +33,7 @@ Uncertain transitions retain at most 24 board distributions/context observations
 
 ## Reproducible coverage
 
-The local suite has **99 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 27 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
+The local suite has **100 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 27 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
 
 | Requested situation | Representative checks |
 | --- | --- |

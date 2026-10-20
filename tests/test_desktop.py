@@ -94,6 +94,29 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     actions={action.text():action for action in window.game_row_menu().actions()}
     assert 'Delete saved PGN file(s)…' in actions
     assert actions['Join selected recordings…'].isEnabled()
+    # Older saved PGNs can be combined during capture without recovering the
+    # combined record into the manager that the capture worker is using.
+    window.manager.force_new();window.refresh_library()
+    class ActiveWorker:
+        running=True
+        def isRunning(self):return True
+        def stop(self):self.running=False
+        def wait(self,_timeout):return True
+    window.worker=ActiveWorker();older=[g for g in window.game_rows if g['id']!=window.manager.current_id]
+    assert len(older)>=2
+    errors=[];combined=[]
+    monkeypatch.setattr(window,'error',errors.append)
+    monkeypatch.setattr(window,'selected_games',lambda:[window.store.game(window.manager.current_id),older[0]])
+    monkeypatch.setattr(window,'background',lambda fn,done:combined.append(('unexpected',None)))
+    window.join_selected()
+    assert errors and not combined
+    monkeypatch.setattr(window,'selected_games',lambda:older[:2])
+    monkeypatch.setattr(window.manager,'combine_games',lambda rows,pgn,*,activate:
+                        combined.append((rows,activate)))
+    monkeypatch.setattr(window,'background',lambda fn,done:done('combined PGN'))
+    window.join_selected()
+    assert len(combined)==1 and combined[0][1] is False
+    assert window.stack.currentIndex()==1
     window.close();window.deleteLater();app.processEvents()
 
 

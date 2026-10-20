@@ -2,7 +2,7 @@
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, optionally saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
-**Version 1.6.22 keeps short replay fragments attached to their longer active PGN.** A saved line that already appears contiguously inside the active game's move history can no longer pull the recorder back and forth between two records while a replay is being recognized. Version 1.6.21 added the shared lifecycle gate for consecutive games, names, clocks and recovery. The live Game menu explains uncertain transitions and offers New game, Continue, Analysis, Undo and a move-based PGN split. Midgame starts use a visible FEN by default; unseen opening recovery is opt-in. Startup still selects a chess-related YouTube window, and screenshot saving remains off by default. See the [release notes](docs/RELEASE-v1.6.22.md), [lifecycle validation](docs/GAME_LIFECYCLE.md), [user guide](docs/USER_GUIDE.md), [security audit](SECURITY.md), and [known limitations](docs/KNOWN_LIMITATIONS.md).
+**Version 1.6.23 lets you combine older saved PGNs while a recording continues.** Select two or more saved games that do not include the active PGN; the combined copy is saved separately and the live recorder stays on its current game. Version 1.6.22 also prevents short replay fragments from switching the active PGN back and forth. See the [release notes](docs/RELEASE-v1.6.23.md), [game lifecycle validation](docs/GAME_LIFECYCLE.md), and [user guide](docs/USER_GUIDE.md).
 
 ![PGN viewer with clock comments and a manual alternative line](docs/variations-v1.4-preview.png)
 

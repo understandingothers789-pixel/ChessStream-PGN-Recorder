@@ -86,7 +86,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.22"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.23"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -705,13 +705,17 @@ class MainWindow(ReviewTools,QMainWindow):
         selected=self.selected_games()
         if len(selected)<2:
             self.error('Ctrl-click two or more recordings, then choose Join selected recordings.');return
-        if self.worker and self.worker.isRunning():
-            self.error('Stop capture before combining recordings.');return
+        capture_running=bool(self.worker and self.worker.isRunning())
+        if capture_running and any(g['id']==self.manager.current_id for g in selected):
+            self.error('The active PGN is still changing. Select older saved PGNs to combine while recording continues.');return
         def saved(pgn):
-            self.manager.combine_games(selected,pgn)
+            self.manager.combine_games(selected,pgn,activate=not capture_running)
             self.refresh_library()
-            self.on_update(self.manager.snapshot())
-            self.navigate(0)
+            if capture_running:
+                self.statusBar().showMessage('Older PGNs combined • live recording continues unchanged',8000)
+            else:
+                self.on_update(self.manager.snapshot())
+                self.navigate(0)
         self.background(lambda:join_recordings(selected,self.manager.searcher()),saved)
     def export_all(self):self.write_export(list(reversed(self.store.games())))
     def export_session(self):

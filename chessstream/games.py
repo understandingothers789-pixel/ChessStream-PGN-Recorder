@@ -1618,8 +1618,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 pgn = export_pgn(state["initial_fen"],state["verified"],headers,state.get("note",""),state.get("review_pgn",""),state.get("move_clocks",{}),state.get('inferred_moves',{}))
                 self.store.save_game(gid,row["session_id"],name,row["started"],row["status"],headers,state,pgn,row["ended"])
 
-    def combine_games(self, rows, pgn=None):
-        """Save a validated combined game; source records and files remain intact."""
+    def combine_games(self, rows, pgn=None, *, activate=True):
+        """Save a validated combined game; optionally leave live recording active."""
         with self.lock:
             pgn = pgn or join_recordings(rows,self.searcher())
             game=chess.pgn.read_game(io.StringIO(pgn))
@@ -1636,9 +1636,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             with self.store.transaction() as db:
                 for row in rows:
                     db.execute('UPDATE games SET status=? WHERE id=?',(f'combined source • see {gid}',row['id']))
-            self.recover(gid,persist=False)
-            self.last_message='Selected PGNs combined • originals kept'
-            self.persist()
+            if activate:
+                self.recover(gid,persist=False)
+                self.last_message='Selected PGNs combined • originals kept'
+                self.persist()
             self.store.audit('PGNs combined',{'game_id':gid,'sources':[row['id'] for row in rows]})
             return gid
 
