@@ -90,7 +90,8 @@ class LegalSearcher:
         self.path_limit = path_limit
 
     def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None,
-               first_shortest: bool = False, pawn_first: bool = False) -> SearchResult:
+               first_shortest: bool = False, pawn_first: bool = False,
+               target_castling_rights: int | None = None) -> SearchResult:
         result = SearchResult()
         start = perf_counter()
         target = observed.labels.tolist()
@@ -98,7 +99,9 @@ class LegalSearcher:
         if mask.sum() < 60:
             result.exhaustive = False
             return result
-        if observed.matches(board, self.threshold) and (target_turn is None or board.turn==target_turn):
+        if (observed.matches(board, self.threshold)
+                and (target_turn is None or board.turn == target_turn)
+                and (target_castling_rights is None or board.castling_rights == target_castling_rights)):
             result.paths = [()]
             result.shortest_proven = True
             return result
@@ -159,6 +162,8 @@ class LegalSearcher:
             # Captured material cannot reappear; promotions preserve piece count.
             if white.bit_count() < min_white or black.bit_count() < min_black:
                 return False
+            if target_castling_rights is not None and (target_castling_rights & ~state.castling_rights):
+                return False
             mismatch = ((state.pawns ^ wanted[1]) | (state.knights ^ wanted[2]) |
                         (state.bishops ^ wanted[3]) | (state.rooks ^ wanted[4]) |
                         (state.queens ^ wanted[5]) | (state.kings ^ wanted[6]) |
@@ -168,7 +173,9 @@ class LegalSearcher:
                            (state.bishops ^ initial[2]) | (state.rooks ^ initial[3]) |
                            (state.queens ^ initial[4]) | (state.kings ^ initial[5]) |
                            (white ^ initial[6]))
-                if mismatch == 0 and not changed & ~known and (target_turn is None or state.turn==target_turn):
+                if (mismatch == 0 and not changed & ~known
+                        and (target_turn is None or state.turn == target_turn)
+                        and (target_castling_rights is None or state.castling_rights == target_castling_rights)):
                     result.paths.append(tuple(path))
                     result.shortest_proven = True
                     if first_shortest or len(result.paths) >= self.path_limit:
