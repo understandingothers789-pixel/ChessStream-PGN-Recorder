@@ -1,12 +1,13 @@
 """Essential recording, gap, ambiguity, result and PGN export regressions."""
 import io
+import pytest
 import chess
 import chess.pgn
 from chessstream.domain import Settings,Observation
 from chessstream.storage import Store
 from chessstream.games import GameManager,export_pgn
 from chessstream.reconstruction import LegalSearcher
-from chessstream.gap_join import join_recordings
+from chessstream.gap_join import join_recordings,AmbiguousGapError
 from chessstream.capture import should_save_screenshot
 
 PREFIX='e4 e6 d4 d5 e5 c5 Bb5+ Bd7 a4 cxd4'
@@ -115,22 +116,23 @@ def test_screenshot_images_are_opt_in_but_memory_capture_is_unaffected():
     assert should_save_screenshot(settings,False,True,True,obs,2)
 
 
-def test_resumed_equal_shortest_lines_choose_one_deterministically(tmp_path):
+def test_resumed_equal_shortest_lines_are_preserved_not_arbitrarily_selected(tmp_path):
     store=Store(tmp_path);first,board=record(store,Settings(),'');first.finish()
     for san in 'Nf3 Nf6 Nc3 Nc6'.split():board.push_san(san)
     resumed=GameManager(store,Settings());resumed.recover(first.current_id)
     assert resumed._resume_latest_game_at_position(Observation.from_board(board))
     resumed.process(Observation.from_board(board))
     assert resumed.current_id==first.current_id and len(store.games())==1
-    assert len(resumed.rec.branches)==1
-    assert resumed.rec.branches[0].board().board_fen()==board.board_fen()
-    assert 'Equal shortest legal paths reached this position' in store.game(first.current_id)['pgn']
+    assert len(resumed.rec.branches)>1
+    assert all(b.board().board_fen()==board.board_fen() for b in resumed.rec.branches)
+    # The screenshot is insufficient to establish the four move order.
+    assert 'Equal shortest legal paths reached this position' not in store.game(first.current_id)['pgn']
     target=chess.pgn.Game();target.setup(board)
     rows=[dict(id='a',started='2026-10-19T10:00:00',pgn=export_pgn(chess.STARTING_FEN,[],{'Result':'*'})),
           dict(id='b',started='2026-10-19T10:04:00',pgn=str(target))]
-    joined=chess.pgn.read_game(io.StringIO(join_recordings(rows,LegalSearcher())))
-    assert not joined.errors and joined.end().board().board_fen()==board.board_fen()
-    assert len(list(joined.mainline_moves()))==4
+    with pytest.raises(AmbiguousGapError) as error:
+        join_recordings(rows,LegalSearcher())
+    assert len(error.value.alternatives)>1
     store.close()
 
 
