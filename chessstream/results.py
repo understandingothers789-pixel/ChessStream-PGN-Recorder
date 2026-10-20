@@ -17,10 +17,30 @@ class EndMessage:
     color_basis: str = "explicit result text"
 
 
+def _result_line_is_an_announcement(value):
+    """Reject ordinary prose, navigation and win/draw/loss lists as results.
+
+    This is purposely conservative: a false positive permanently terminates
+    the live PGN, while a missed caption merely leaves its result unknown.
+    """
+    text=re.sub(r'\\s+',' ',str(value).strip().replace('–','-').replace('−','-'))
+    if not text:return False
+    if re.search(r'(?i)\\b(?:wins?\\s*[/|]\\s*draw|draw\\s*[/|]\\s*loss|win\\s*[/|]\\s*loss|database|variation|percentage|statistics)\\b',text):
+        return False
+    if re.fullmatch(r'(?i)(?:1\\s*-\\s*0|0\\s*-\\s*1|1\\s*/\\s*2\\s*-\\s*1\\s*/\\s*2|½\\s*-\\s*½|draw|drawn|stalemate|checkmate|you\\s+(?:won|lost)|white\\s+won|black\\s+won|game\\s+(?:over|ended|drawn|aborted|abandoned))\\s*[!.]?',text):
+        return True
+    if len(text.split())>9:return False
+    return bool(re.fullmatch(
+        r'(?i)(?:(?:you|white|black|[A-Za-z0-9_]{3,24})\\s+)?'
+        r'(?:won|lost|wins|resigned|abandoned|timeout|timed out|checkmate|stalemate|drawn|draw)'
+        r'(?:\\s+(?:by|on|via|due to)\\s+(?:checkmate|resignation|timeout|time|repetition|agreement|stalemate|insufficient material))?'
+        r'[!.]?',text))
+
+
 def parse_end_message(lines, player_color=None, names=None):
     """Only strong end-message vocabulary can terminate a game, never arbitrary digits."""
     strong=[(re.sub(r'\b(You|White|Black|Game)(Won|Lost|Aborted|Abandoned)\b',r'\1 \2',str(text).strip().replace('–','-').replace('−','-'),flags=re.I),score) for text,score,*_ in lines if score >= .80]
-    strong=[(text,score) for text,score in strong if re.search(r'\b(won|wins|lost|draw|drawn|stalemate|checkmate|abandoned|resigned|resignation|timeout|time out|game over|game ended|aborted)\b',text,re.I) or re.fullmatch(r'\s*(?:1\s*-\s*0|0\s*-\s*1|1/2\s*-\s*1/2|½\s*-\s*½)\s*',text)]
+    strong=[(text,score) for text,score in strong if _result_line_is_an_announcement(text)]
     good=[text for text,score in strong]
     text=" | ".join(good)
     normalized=re.sub(r"\s+"," ",text.lower().replace('½','1/2').replace('–','-').replace('−','-'))
