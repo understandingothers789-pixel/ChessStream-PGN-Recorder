@@ -459,3 +459,26 @@ def test_same_names_without_clock_reset_and_large_gap_quarantines_without_splitt
     assert manager.rec.verified==original
     assert manager.lifecycle.summary(manager)['state']=='uncertain transition'
     store.close()
+
+
+def test_active_game_cannot_return_to_archived_false_draw_even_when_position_matches(tmp_path):
+    """An earlier false 'draw' ended the six-ply game during a live broadcast.
+
+    Reusing the same data folder must not auto-resume that terminal record,
+    leaving the active recorder trapped in review-only mode.
+    """
+    store,manager,now=setup(tmp_path)
+    old_id=manager.current_id
+    old_position=manager.rec.board.copy()
+    assert manager.declare_end(EndMessage('1/2-1/2','game ended','Draw',.99))
+    assert store.game(old_id)['headers'] and manager.headers['Result']=='1/2-1/2'
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4 e5 Nf3 Nc6')
+    manager.observe_context({'names':NAMES,'names_stable':True},'current')
+    fresh_id=manager.current_id
+    assert manager.headers.get('Result','*')=='*'
+    # Identical people and exact archived endpoint do not constitute
+    # evidence that the live, ongoing game has already ended.
+    assert manager.lifecycle._return_game(manager,Observation.from_board(old_position)) is None
+    assert manager.current_id==fresh_id!=old_id
+    store.close()
