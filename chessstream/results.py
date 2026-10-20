@@ -37,10 +37,22 @@ def _result_line_is_an_announcement(value):
         r'[!.]?',text))
 
 
+def _result_line_is_reason(value):
+    """An auxiliary overlay caption, useful only with a winner/result line."""
+    return bool(re.fullmatch(
+        r'(?i)\s*(?:by\s+)?(?:resignation|resigned|checkmate|stalemate|timeout|time\s+out|repetition|agreement|insufficient\s+material)\s*[!.]?\s*',
+        str(value)))
+
+
 def parse_end_message(lines, player_color=None, names=None):
     """Only strong end-message vocabulary can terminate a game, never arbitrary digits."""
     strong=[(re.sub(r'\b(You|White|Black|Game)(Won|Lost|Aborted|Abandoned)\b',r'\1 \2',str(text).strip().replace('–','-').replace('−','-'),flags=re.I),score) for text,score,*_ in lines if score >= .80]
-    strong=[(text,score) for text,score in strong if _result_line_is_an_announcement(text)]
+    main=[(text,score) for text,score in strong if _result_line_is_an_announcement(text)]
+    if not main:return None
+    # Real chess sites often split "Martinfoot Won" / "by resignation"
+    # into two OCR rectangles. A reason-only caption cannot end a game.
+    reasons=[(text,score) for text,score in strong if _result_line_is_reason(text)]
+    strong=main+reasons
     good=[text for text,score in strong]
     text=" | ".join(good)
     normalized=re.sub(r"\s+"," ",text.lower().replace('½','1/2').replace('–','-').replace('−','-'))
@@ -178,7 +190,7 @@ class EndMessageDetector:
             x,y,w,h=board_rect
             result_lines=[
                 line for line in relevant if len(line)>=3
-                and _result_line_is_an_announcement(line[0])
+                and (_result_line_is_an_announcement(line[0]) or _result_line_is_reason(line[0]))
                 and (x-w*.08 <= (line[2][0]+line[2][2])/2 <= x+w*1.08)
                 and (y-h*.08 <= (line[2][1]+line[2][3])/2 <= y+h*1.08)
             ]
