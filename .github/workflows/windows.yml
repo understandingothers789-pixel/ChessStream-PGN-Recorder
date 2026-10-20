@@ -6,7 +6,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      PACKAGE_WINDOWS: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+      PACKAGE_WINDOWS: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/fix/non-destructive-pgn-gap-joins' && github.event_name == 'push') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
