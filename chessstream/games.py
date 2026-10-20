@@ -140,7 +140,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
         if len(opening_moves)>1 and not self.settings.infer_unseen_opening:opening_moves=[]
         if (len(uncertain)<=2 and obs.confidence>=max(.80,self.settings.min_confidence)
-                and self._resume_initial_identity(obs)):
+                and self._resume_initial_identity(obs,opening_moves)):
             return True
         if not uncertain and obs.placement() == chess.Board().board_fen():
             self._create(chess.Board(), obs.timestamp)
