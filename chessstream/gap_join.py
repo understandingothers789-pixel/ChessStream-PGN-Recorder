@@ -1,5 +1,7 @@
 """Non-destructive joining of saved PGN segments across a shortest legal gap."""
 import io
+import json
+import base64
 import chess
 import chess.pgn
 from .domain import Observation
@@ -119,8 +121,11 @@ def join_recordings(rows, searcher):
         if later.comment:end.comment=(end.comment+' Segment note: '+later.comment).strip()
         # Keep later recording identity and original headers in a sidecar note;
         # the source PGNs remain untouched in storage.
-        extra = ' Source recording metadata: '+repr(dict(later.headers))+'.'
-        end.comment=(end.comment+extra).strip()
+        # PGN comments cannot contain raw curly braces. Encode the complete
+        # secondary headers losslessly so the exported PGN remains parseable.
+        encoded_headers=base64.urlsafe_b64encode(json.dumps(dict(later.headers),
+            ensure_ascii=False).encode('utf-8')).decode('ascii')
+        end.comment=(end.comment+' Secondary recording headers (base64url JSON): '+encoded_headers).strip()
 
         def copy_tree(old,new,board):
             for child in old.variations:
