@@ -16,7 +16,7 @@ def configure_logging(root):
     target=(root/'application.log').resolve()
     if not any(isinstance(h,RotatingFileHandler) and Path(h.baseFilename)==target for h in logger.handlers):
         handler=RotatingFileHandler(target,maxBytes=2_000_000,backupCount=3,encoding='utf-8')
-        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s pid=%(process)d thread=%(threadName)s %(name)s %(message)s'))
         logger.addHandler(handler)
     def exception_hook(kind,value,traceback):
         logging.critical('Unhandled application exception',exc_info=(kind,value,traceback))
