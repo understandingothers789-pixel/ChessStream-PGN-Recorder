@@ -4,6 +4,9 @@ Uses the exact 25.Bb5 endpoint and the later nonstandard FEN, with the
 recorded move prefix. This deliberately does not assert guessed gap history.
 """
 import io
+import json
+import base64
+import re
 from unittest.mock import patch
 import chess
 import chess.pgn
@@ -103,3 +106,46 @@ def test_ambiguous_join_does_not_alter_input_or_pick_arbitrary_path():
             join_recordings(rows, DummySearcher())
     assert len(error.value.alternatives) == 2
     assert [row["pgn"] for row in rows] == originals
+
+
+def test_full_first_part_eval_variation_and_later_clock_survive_unique_join():
+    decorated = PREFIX.replace(
+        '[Event "YouTube Chess Recording"]',
+        '[Event "YouTube Chess Recording - Part 1"]'
+    ).replace(
+        '1. d4 Nf6',
+        '1. d4 { [%eval 0.25,26] } Nf6'
+    ).replace(
+        '3. e3 Bg7',
+        '3. e3 Bg7 (3... Nh5 { [%eval 0.17,16] } 4. Be5)'
+    )
+    game = chess.pgn.read_game(io.StringIO(decorated))
+    assert not game.errors
+    assert len(list(game.mainline())[5].parent.variations) >= 2
+    before = game.end().board()
+    bridge = witness(before, 'Qd8 Qa4 Qc7 Qb3 Qd7 Bxc6 bxc6')
+    rows = [
+        {'id':'first','started':'2026-10-20T01:00:00','pgn':decorated},
+        {'id':'second','started':'2026-10-20T01:10:00','pgn':LATER},
+    ]
+    originals = [row['pgn'] for row in rows]
+    class Dummy:
+        max_plies=4; node_limit=60000; time_limit_ms=350
+        threshold=.7; path_limit=128
+    with patch('chessstream.gap_join._gap_search',
+               return_value=SearchResult(paths=[bridge],exhaustive=True,shortest_proven=True)):
+        text = join_recordings(rows,Dummy())
+    merged = chess.pgn.read_game(io.StringIO(text))
+    assert merged is not None and not merged.errors
+    assert merged.headers['Event'] == 'YouTube Chess Recording - Part 1'
+    assert '[%eval 0.25,26]' in text
+    assert '[%eval 0.17,16]' in text
+    assert 'Nh5' in text and 'Be5' in text
+    assert '[%clk 0:08:57]' in text
+    assert merged.end().board().board_fen() == chess.pgn.read_game(io.StringIO(LATER)).end().board().board_fen()
+    encoded = re.search(r'Secondary recording headers \(base64url JSON\): ([A-Za-z0-9_=-]+)', text)
+    assert encoded
+    headers = json.loads(base64.urlsafe_b64decode(encoded.group(1)))
+    assert headers['White'] == 'SukunaTakingOver'
+    assert headers['Black'] == 'Itadoriclueless'
+    assert [row['pgn'] for row in rows] == originals
