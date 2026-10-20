@@ -482,8 +482,6 @@ class Reconstructor:
                     update.search_ms += result.elapsed_ms
                 all_complete &= result.exhaustive
                 for path in result.paths:
-                    if speculative_detour(state, path):
-                        self.gap_requires_confirmation = True
                     survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path)))
             if survivors or not all_complete:
                 break
@@ -507,9 +505,13 @@ class Reconstructor:
         # frames can eliminate hypotheses. Only their shared legal prefix may
         # enter the authoritative PGN, and user selection remains available.
         self.branches = list(unique.values())
-        if recovered is not None and any(speculative_detour(self.board,
-                [chess.Move.from_uci(move) for move in branch.moves]) for branch in recovered):
-            self.gap_requires_confirmation = True
+        # Recompute from surviving pending hypotheses on EVERY completed
+        # observation. A discarded queen excursion cannot poison future
+        # ordinary moves, and rejected/incomplete searches must not set flags.
+        self.gap_requires_confirmation = any(
+            speculative_detour(chess.Board(branch.root_fen),
+                               [chess.Move.from_uci(uci) for uci in branch.moves])
+            for branch in self.branches)
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
             self.initial_fen = self.branches[0].root_fen
