@@ -460,21 +460,11 @@ class Reconstructor:
             return update
         self.incomplete = False
         unique = {(b.root_fen, b.moves): b for b in survivors}
-        # When several shortest move orders explain the same observed endpoint,
-        # prefer a natural capture/recapture sequence and keep one stable line.
-        # Distinct starting roots remain separate hypotheses.
-        grouped = {}
-        for branch in unique.values():
-            endpoint = branch.board().board_fen()
-            grouped.setdefault((branch.root_fen, endpoint), []).append(branch)
-        self.branches = []
-        for (root_fen, _), branches in grouped.items():
-            root = chess.Board(root_fen)
-            update.tie_broken |= len(branches) > 1
-            selected = select_capture_path(root, [tuple(chess.Move.from_uci(m) for m in b.moves)
-                                                    for b in branches])[0]
-            selected_uci = tuple(m.uci() for m in selected)
-            self.branches.append(next(b for b in branches if b.moves == selected_uci))
+        # A plausible-looking capture heuristic is not evidence for move order.
+        # Keep EVERY exhausted shortest alternative pending so subsequent board
+        # frames can eliminate hypotheses. Only their shared legal prefix may
+        # enter the authoritative PGN, and user selection remains available.
+        self.branches = list(unique.values())
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
             self.initial_fen = self.branches[0].root_fen
@@ -518,8 +508,8 @@ class Reconstructor:
         """Atomically attach the shortest legal continuation from the saved prefix.
 
         Pending hovers are hypotheses, so search again from the verified board.
-        Equal shortest paths to the same endpoint are resolved by capture
-        continuity, then stable UCI ordering. A limited search changes nothing.
+        Equal shortest paths are kept as unresolved alternatives. A limited
+        search changes nothing; only their common prefix can be committed.
         """
         searcher = searcher or self.searcher
         if observed.uncertain_squares(max(.8, searcher.threshold)):
