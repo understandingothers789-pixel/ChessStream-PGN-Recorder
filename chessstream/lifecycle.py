@@ -275,8 +275,18 @@ class GameLifecycle:
         # When the displayed players still match this *ongoing* game, a
         # historical endpoint is often a video seek, not a request to switch
         # between short PGN fragments with identical headers.
-        previous_game_allowed = (manager.terminal_message is not None
-                                 or not self.same_visible_players(manager))
+        # A freshly recognized opening is stronger evidence than an older
+        # app-created checkpoint with the same placement but unknown turn.
+        # Never swap away from a newly created opening merely because a
+        # previous recording contains that identical screenshot. The old
+        # recording may have guessed a different side to move, forcing
+        # artificial Qe2-Qd1 detours to make the parity fit.
+        fresh_opening=(manager.rec.initial_fen==chess.STARTING_FEN
+                       and len(manager.rec.verified)<2
+                       and manager.headers.get('Result','*')=='*')
+        previous_game_allowed = (not fresh_opening
+                                 and (manager.terminal_message is not None
+                                      or not self.same_visible_players(manager)))
         prior=(self._return_game(manager,obs)
                if not current and self.names and previous_game_allowed else None)
         if prior:return Decision('return','Visible players and established board match a saved game',prior)
