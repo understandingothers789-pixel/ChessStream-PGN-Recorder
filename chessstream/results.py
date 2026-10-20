@@ -232,6 +232,16 @@ def extract_context(lines,board_rect,orientation):
             if not clock and (score<.9 or not bx-bw*.1<=(r[0]+r[2])/2<=bx+bw*1.1):continue
             clean=re.sub(r'^(GM|IM|FM|NM|CM|WGM|WIM)\s+','',text.strip().rstrip(' :;|•'))
             clean=re.sub(r'\s*(?:\(\d{2,4}\)|\s\d{2,4})\s*$','',clean)
+            # Overlay controls, URLs, and app labels are *not* player IDs.
+            # False names here corrupt lifecycle identity and may split a real
+            # game despite a perfectly legal board continuation.
+            folded=re.sub(r'\s+',' ',clean.casefold()).strip()
+            if (folded in {'flip','copy fen','copy pgn','youtube chess recording',
+                           'download','share','next','previous','play','pause',
+                           'game in progress','chessstream','copy','settings'}
+                    or re.search(r'(?i)(?:https?://|www\.|youtube\.com|\.pgn$|\.exe$)',folded)
+                    or folded.startswith(('copy fen ', 'youtube chess recording ', 'flip board '))):
+                continue
             # Reject overlay metadata even when OCR finds a nearby clock.
             if (re.fullmatch(r'(?i)v(?:ersion)?\s*\d+(?:\.\d+){1,4}', clean)
                     or re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b', clean)):
