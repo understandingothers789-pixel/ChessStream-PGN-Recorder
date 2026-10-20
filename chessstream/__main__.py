@@ -2,6 +2,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import hashlib
+import tempfile
 from pathlib import Path
 import sys
 from platformdirs import user_data_path
@@ -34,19 +36,27 @@ def main():
     from .gui import MainWindow
     app=QApplication(sys.argv[:1]);app.setApplicationName('ChessStream PGN Recorder');app.setStyle('Fusion')
     app.setWindowIcon(QIcon(str(Path(__file__).parent/'assets/icon.ico')))
-    # Two unpacked builds can use the same per-user Store and application.log.
-    # They then race to switch games, overwrite state, or replay a previous
-    # terminal result. Keep exactly one interactive writer for each data dir.
-    lock=QLockFile(str(root/'.chessstream-gui.lock'))
-    lock.setStaleLockTime(30000)
+    # Prevent simultaneous live captures of the same monitor from *any*
+    # portable builds or data folders for the same Windows user.  A per-data-
+    # folder lock did not stop the two independent recorders in the Oct 20 log.
+    # Explicit video --replay remains a separate headless workflow.
+    user_token=hashlib.sha256(os.path.normcase(str(Path.home())).encode('utf-8')).hexdigest()[:20]
+    global_lock_path=Path(tempfile.gettempdir())/f'ChessStream-recorder-{user_token}.lock'
+    lock=QLockFile(str(global_lock_path))
+    lock.setStaleLockTime(0)  # Living PID owns the lock; don't time out a slow stream.
     if not lock.tryLock(100):
         from PySide6.QtWidgets import QMessageBox
+        logging.error('ChessStream GUI already active for this user; current PID=%d, lock=%s',
+                      os.getpid(),global_lock_path)
         QMessageBox.warning(None,'ChessStream already running',
-            'Another ChessStream instance is using this data folder.\\n\\n'
-            'Close the other window (including older experimental builds), or '
-            'start this build with --data-dir pointing to a separate folder.')
-        logging.warning('Second ChessStream instance refused for data folder %s',root)
+            'A ChessStream recorder is already running, possibly from another '
+            'extracted build or a different data folder.\\n\\n'
+            'Close all other ChessStream instances before starting another. '
+            'Running two recorders simultaneously can create separate PGNs '
+            'and make analysis/replay indicators appear to flicker.')
         return
+    logging.info('Exclusive ChessStream GUI acquired: pid=%d data_dir=%s lock=%s',
+                 os.getpid(),root,global_lock_path)
     window=MainWindow(root);window.show()
     if args.smoke:
         window.resize(1460,940)
