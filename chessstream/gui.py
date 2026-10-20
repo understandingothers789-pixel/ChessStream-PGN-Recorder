@@ -574,14 +574,14 @@ class MainWindow(ReviewTools,QMainWindow):
         bar=QHBoxLayout()
         for name,fn in [("Combine selected PGNs",self.join_selected),("Export selected",self.export_selected),("Export entire session",self.export_session),("Export all",self.export_all),("Open PGN…",self.import_pgn),("Refresh",self.refresh_library)]:bar.addWidget(button(name,fn))
         bar.addStretch();box.addLayout(bar)
-        self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
+        self.game_table=QTableWidget(0,7);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result","Saved .pgn"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
         box.addWidget(self.game_table,2)
         detail=QSplitter(Qt.Horizontal);self.library_board=BoardView();detail.addWidget(self.library_board);detail.addWidget(self.make_review_tabs());detail.setSizes([350,650]);box.addWidget(detail,2)
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Review ply"));self.review_slider=QSlider(Qt.Horizontal);self.review_slider.valueChanged.connect(self.review_game);timeline.addWidget(self.review_slider,1);self.review_label=muted("0");timeline.addWidget(self.review_label);box.addLayout(timeline)
         actions=QHBoxLayout()
         for name,fn in [("Rename / edit headers",self.edit_game),("Copy PGN",self.copy_selected),("Resume recording",self.resume_game),("Screenshots",self.game_screenshots)]:actions.addWidget(button(name,fn))
-        actions.addWidget(button("Delete saved PGN files…",self.delete_saved_pgns,danger=True))
-        actions.addStretch();actions.addWidget(button("Delete game data…",self.delete_games,danger=True));box.addLayout(actions)
+        actions.addWidget(button("Remove saved .pgn copies…",self.delete_saved_pgns,danger=True))
+        actions.addStretch();actions.addWidget(button("Delete from library…",self.delete_games,danger=True));box.addLayout(actions)
         variations=QHBoxLayout()
         for label,fn in [('Add alternative line…',self.add_review_variation),('Edit comment…',self.edit_review_comment),('Remove alternative line',self.delete_review_variation)]:variations.addWidget(button(label,fn))
         variations.addWidget(muted('Select a position before an existing move; alternatives are saved in exported PGNs.'));box.addLayout(variations)
@@ -593,7 +593,7 @@ class MainWindow(ReviewTools,QMainWindow):
             duration='—'
             if g['ended']:
                 seconds=max(0,int((datetime.fromisoformat(g['ended'])-datetime.fromisoformat(g['started'])).total_seconds()));duration=f"{seconds//60}:{seconds%60:02d}"
-            values=[g['name'],local_time(g['started']),duration,str(g['plies']),g['status'],json.loads(g['headers']).get('Result','*')]
+            values=[g['name'],local_time(g['started']),duration,str(g['plies']),g['status'],json.loads(g['headers']).get('Result','*'),('Yes' if (self.store.root/'pgn'/(g['id']+'.pgn')).is_file() else 'No')]
             for col,value in enumerate(values):self.game_table.setItem(row,col,QTableWidgetItem(value))
 
     def selected_games(self):
@@ -617,7 +617,8 @@ class MainWindow(ReviewTools,QMainWindow):
         action=menu.addAction("Join selected recordings…",self.join_selected)
         action.setEnabled(len(self.selected_games())>=2)
         menu.addSeparator()
-        menu.addAction("Delete saved PGN file(s)…",self.delete_saved_pgns)
+        menu.addAction("Remove saved .pgn copies…",self.delete_saved_pgns)
+        menu.addAction("Delete game(s) from library…",self.delete_games)
         return menu
 
     def show_game(self):
@@ -673,6 +674,7 @@ class MainWindow(ReviewTools,QMainWindow):
             self.store.delete_game(g['id'])
             if g['id']==self.manager.current_id:self.manager=GameManager(self.store,self.settings)
         self.refresh_library()
+        self.statusBar().showMessage(f"Deleted {len(selected)} game(s) from the library; screenshots kept.",10000)
 
     def delete_saved_pgns(self):
         selected=self.selected_games()
@@ -688,7 +690,8 @@ class MainWindow(ReviewTools,QMainWindow):
                 QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
         try:
             deleted=self.store.delete_pgn_files([g['id'] for g in selected],self.settings.export_dir)
-            self.statusBar().showMessage(f"Deleted {len(deleted)} saved PGN file(s); game records kept",8000)
+            self.refresh_library()
+            self.statusBar().showMessage(f"Removed {len(deleted)} saved .pgn file(s). Game entries remain; choose Delete from library to remove entries.",15000)
         except Exception as e:self.error(str(e))
 
     def write_export(self,rows):
