@@ -21,7 +21,8 @@ def _gap_search(source, later, searcher):
     """Separate, capped saved-PGN search budget; never widen live capture budgets.
 
     The target is the later segment's actual starting FEN, including its turn.
-    A FEN-only checkpoint is also valid evidence for a possible join.
+    A FEN-only checkpoint is valid. Positive castling rights are evidence,
+    while absent rights in an image-derived initial FEN are not proof of loss.
     """
     target = later.board()
     if not source.is_valid() or not target.is_valid():
@@ -40,7 +41,7 @@ def _gap_search(source, later, searcher):
                           threshold=searcher.threshold,
                           path_limit=max(256, searcher.path_limit))
     return probe.search(source, Observation.from_board(target), target_turn=target.turn,
-                        target_castling_rights=target.castling_rights)
+                        target_castling_rights=target.castling_rights or None)
 
 
 
@@ -74,7 +75,7 @@ def join_recordings(rows, searcher):
         for node in [combined,*combined.mainline()]:
             board=node.board()
             if (board.board_fen()!=root.board_fen() or board.turn!=root.turn
-                    or board.castling_rights!=root.castling_rights
+                    or (root.castling_rights and board.castling_rights!=root.castling_rights)
                     or (board.ep_square if board.has_legal_en_passant() else None)
                         != (root.ep_square if root.has_legal_en_passant() else None)):continue
             cursor=node;compatible=True
@@ -100,7 +101,7 @@ def join_recordings(rows, searcher):
                 # can conceal wrong turn or lost castling rights.
                 if (trial.board_fen()!=root.board_fen()
                         or trial.turn!=root.turn
-                        or trial.castling_rights!=root.castling_rights
+                        or (root.castling_rights and trial.castling_rights!=root.castling_rights)
                         or (trial.ep_square if trial.has_legal_en_passant() else None)
                             != (root.ep_square if root.has_legal_en_passant() else None)):
                     continue
@@ -149,6 +150,6 @@ def join_recordings(rows, searcher):
     # Obsolete checkpoint notices are administrative status, not chess evidence.
     # The original PGN and its complete note remain in the source recording.
     combined.comment=combined.comment.replace(
-        " A separate PGN segment was started from the visible board FEN; this game's saved moves remain unchanged.", "")
+        "A separate PGN segment was started from the visible board FEN; this game's saved moves remain unchanged.", "").strip()
     combined.comment=(combined.comment+' Joined saved recording segments; gap moves are explicitly annotated as inferred.').strip()
     return combined.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
