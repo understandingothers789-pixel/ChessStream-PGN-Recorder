@@ -11,8 +11,10 @@ from .reconstruction import LegalSearcher
 class AmbiguousGapError(ValueError):
     """More than one equally short legal reconstruction; nothing was committed."""
 
-    def __init__(self, alternatives):
+    def __init__(self, alternatives, *, source_fen=None, later_id=None):
         self.alternatives = tuple(tuple(move.uci() for move in path) for path in alternatives)
+        self.source_fen = source_fen
+        self.later_id = str(later_id) if later_id is not None else None
         super().__init__(f'{len(self.alternatives)} shortest legal gap paths exist. '
                          'Choose a verified sequence; automatic joining would invent history.')
 
@@ -45,7 +47,7 @@ def _gap_search(source, later, searcher):
 
 
 
-def join_recordings(rows, searcher):
+def join_recordings(rows, searcher, confirmed_paths=None):
     rows = sorted(rows,key=lambda row: row['started'])
     if len(rows)<2 or len({row['id'] for row in rows})!=len(rows):
         raise ValueError('Select at least two different recordings to join.')
@@ -114,8 +116,14 @@ def join_recordings(rows, searcher):
                 raise ValueError('No legal connection was found within the configured gap limit.')
             # Never use a capture heuristic or UCI ordering as historical evidence.
             if len(valid) != 1:
-                raise AmbiguousGapError(valid)
-            chosen = valid[0]
+                requested = (confirmed_paths or {}).get(str(row['id']))
+                if requested is None:
+                    raise AmbiguousGapError(valid,source_fen=source.fen(),later_id=row['id'])
+                if tuple(requested) not in {tuple(move.uci() for move in path) for path in valid}:
+                    raise ValueError('The confirmed gap sequence is no longer valid for these source PGNs.')
+                chosen = next(path for path in valid if tuple(move.uci() for move in path)==tuple(requested))
+            else:
+                chosen = valid[0]
             for move in chosen:
                 end = end.add_main_variation(move)
                 end.comment = 'Inferred across recording gap: shortest legal continuation; intermediate frames were not recorded.'
