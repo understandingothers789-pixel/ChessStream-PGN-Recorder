@@ -183,6 +183,17 @@ class AnalysisTracking:
                 and (self.terminal_message or self.headers.get('Result','*')!='*')
                 and any(self.headers.get(color,'Unknown')=='Unknown' for color in ('White','Black'))):
             return False
+        # Live capture is not analysis. A future screen position may happen
+        # to match a legal variation from six moves ago, but this is no
+        # evidence that the streamer is reviewing rather than continuing.
+        # The actual backward-seek detector runs later in process() and sets
+        # rewind_state based on a witnessed earlier position. Once witnessed,
+        # existing analysis tracking works as before. Explicit Analysis mode
+        # always remains available.
+        if self.lifecycle.mode!='analysis' and not self.rewind_state:
+            self.analysis_cursor=None
+            self._analysis_pending=None
+            return False
         if self._try_replay_recording(obs):return True
         if obs.matches(self.rec.board,threshold):
             self.analysis_cursor=None;self._analysis_pending=None
@@ -209,6 +220,12 @@ class AnalysisTracking:
                     path,_=found
             self._analysis_pending=None
             self._activate_analysis_cursor(game,path)
+            return True
+        # Even in a witnessed replay, a bounded first-found path is not a
+        # recorded sequence. Do not append an invented analysis line without
+        # explicit Analysis mode; save only exact observed tree positions.
+        if self.lifecycle.mode!='analysis':
+            self.last_message='Review position • move order unresolved; PGN preserved'
             return True
         signature=(self.current_id,obs.placement(),path,moves)
         if not self._analysis_pending or self._analysis_pending[0]!=signature:
