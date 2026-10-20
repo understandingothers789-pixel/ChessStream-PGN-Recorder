@@ -218,13 +218,12 @@ class ContextStabilizer:
 
     def reset_candidates(self):self.names={}
 ,'',clean)
-            # Overlays close to clocks can contain application versions,
-            # YouTube stream titles, and program labels. Repeated OCR does
-            # not make these player names. Reject them even when a clock
-            # position was detected, so they cannot trigger a new game.
-            if (re.fullmatch(r'(?i)v(?:ersion)?\s*\d+(?:\.\d+){1,4}',clean)
-                    or re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b',clean)):
+            # A clock-adjacent application version or stream title is not a player.
+            # Reject such metadata even when OCR has found a reliable clock.
+            if (re.fullmatch(r'(?i)v(?:ersion)?\s*\d+(?:\.\d+){1,4}', clean)
+                    or re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b', clean)):
                 continue
+
             if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
             if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
             if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
