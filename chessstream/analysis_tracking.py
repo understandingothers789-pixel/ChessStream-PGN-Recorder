@@ -221,12 +221,9 @@ class AnalysisTracking:
             self._analysis_pending=None
             self._activate_analysis_cursor(game,path)
             return True
-        # Even in a witnessed replay, a bounded first-found path is not a
-        # recorded sequence. Do not append an invented analysis line without
-        # explicit Analysis mode; save only exact observed tree positions.
-        if self.lifecycle.mode!='analysis':
-            self.last_message='Review position • move order unresolved; PGN preserved'
-            return True
+        # A replay reached from an actual recorded fragment or rewind keeps
+        # its analysis branch functionality. Ordinary live play is filtered
+        # before this point unless it has an explicit analysis context.
         signature=(self.current_id,obs.placement(),path,moves)
         if not self._analysis_pending or self._analysis_pending[0]!=signature:
             self._analysis_pending=(signature,self._clock())
