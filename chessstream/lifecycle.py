@@ -93,6 +93,12 @@ class GameLifecycle:
     def _return_game(self,manager,obs):
         if self.reset_reads:return None
         visible={c:n for c,n in self.names.items() if c in self.raw_names and name_key(self.raw_names[c])==name_key(n)}
+        # A short replay can be saved as its own PGN before the replay linker
+        # has had enough observations to attach it to the longer recording.
+        # Do not switch away from the active game just because the current
+        # board equals that fragment's endpoint when its full line is already
+        # present contiguously in the active main line.
+        active_line=self._active_position_line(manager)
         matches=[]
         rows=manager.store.query("SELECT id,headers,state FROM games WHERE id!=? AND status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC LIMIT 8",(manager.current_id,))
         for row in rows:
@@ -101,11 +107,41 @@ class GameLifecycle:
                 if len(state['verified'])<4 and state['initial_fen']==chess.STARTING_FEN:continue
                 if not visible or any(name_key(headers.get(c.title(),'Unknown'))!=name_key(n) for c,n in visible.items()):continue
                 board=chess.Board(state['initial_fen'])
+                candidate_line=[board.board_fen()]
                 for move in state['verified']:board.push_uci(move)
+                candidate_line.extend(self._positions_after(board, state['verified'], state['initial_fen']))
+                if self._is_replay_subline(candidate_line,active_line):continue
                 # Specific established endpoints, not generic opening matches.
                 if obs.placement()==board.board_fen():matches.append(row['id'])
             except (ValueError,TypeError,KeyError):continue
         return matches[0] if len(matches)==1 else None
+
+    @staticmethod
+    def _positions_after(board, moves, initial_fen):
+        """Return each successive placement for a saved main-line move list."""
+        current=chess.Board(initial_fen);positions=[]
+        for uci in moves:
+            current.push_uci(uci);positions.append(current.board_fen())
+        return positions
+
+    @staticmethod
+    def _active_position_line(manager):
+        if not manager.rec:return []
+        board=chess.Board(manager.rec.initial_fen);positions=[board.board_fen()]
+        try:
+            for uci in manager.rec.verified:
+                board.push_uci(uci);positions.append(board.board_fen())
+        except (ValueError,chess.IllegalMoveError):
+            return []
+        return positions
+
+    @staticmethod
+    def _is_replay_subline(candidate, active):
+        """Whether candidate's whole observed line is a contiguous active line."""
+        if len(candidate)<5 or len(candidate)>len(active):return False
+        width=len(candidate)
+        return any(active[index:index+width]==candidate
+                   for index in range(len(active)-width+1))
 
     def _linked(self,manager,obs):
         key=(manager.current_id,tuple(manager.rec.verified),obs.placement())

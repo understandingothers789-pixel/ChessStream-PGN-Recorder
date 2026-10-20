@@ -86,7 +86,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.21"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.22"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)

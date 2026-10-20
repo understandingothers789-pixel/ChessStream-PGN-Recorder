@@ -1,4 +1,4 @@
-# Game identity, separation and verification — v1.6.21
+# Game identity, separation and verification — v1.6.22
 
 ## Why boundaries were missed
 
@@ -17,6 +17,7 @@ Lifecycle states distinguish waiting, game in progress, new game detected, game 
 - Confirmed boundaries preserve the old record and create a separate ID. The new game starts at an actually visible FEN, or with a chain of witnessed single moves from an observed root. No legal search connects the new game to the old prefix. Unknown results stay `*`.
 - Returning to another saved game requires a unique established endpoint and matching currently visible player evidence. Fresh-start automatic reuse requires matching known players and an unambiguous exact saved position. Explicit library resume remains available when metadata is absent.
 - Existing replay fragments can still reconnect when there is a replay/checkpoint context, matching names and a legal connection. Deliberate separations are excluded from ordinary automatic joins.
+- Before returning to another saved game, the detector checks whether that saved PGN's full main line is already a contiguous segment of the active game. Such a short replay fragment stays attached to the longer PGN, preventing active-record switching as the video moves between earlier and later positions.
 
 Unseen opening reconstruction is now explicitly opt-in. The existing bounded algorithms and labeled gap inference within an identified game remain available. Their legal reachability is not evidence that two confirmed different games should be combined.
 
@@ -32,7 +33,7 @@ Uncertain transitions retain at most 24 board distributions/context observations
 
 ## Reproducible coverage
 
-The local suite has **98 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 26 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
+The local suite has **99 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 27 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
 
 | Requested situation | Representative checks |
 | --- | --- |
@@ -53,6 +54,7 @@ The local suite has **98 passing tests**, about **7 seconds** on this execution 
 | Switch to another midstream game | Independent FEN game, no old-prefix reuse |
 | Start in the middle | Visible FEN and no fabricated opening by default |
 | Return to a saved game | Matching players and unique established endpoint |
+| Replay fragment active-record oscillation | Repeatedly alternate between an earlier fragment endpoint and later main-game endpoint; active PGN ID remains stable |
 | PGN/metadata separation | Distinct IDs, preserved results/clocks, Unknown hidden metadata, setup headers |
 | Increments/corrections | Small increases and large simultaneous increments retain the game |
 | Recovery still processing | Ready stale future cancelled; worker gate executes before recovery |

@@ -152,6 +152,27 @@ def test_return_to_other_established_game_requires_its_identity_and_exact_board(
     store.close()
 
 
+def test_replay_fragment_endpoint_does_not_switch_active_game_back_and_forth(tmp_path):
+    store,manager,now=setup(tmp_path);long_id=manager.current_id
+    long_board=manager.rec.board.copy()
+
+    # Reproduce a short recording made while the same game is being replayed.
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4 e5 Nf3 Nc6')
+    manager.headers.update({'White':'Streamer','Black':'OpponentA'})
+    manager.persist();short_id=manager.current_id
+    manager.recover(long_id)
+    manager.observe_context({'names':NAMES,'names_stable':True},'replay-names')
+    assert short_id!=long_id
+
+    replay_endpoint=board_after('e4 e5 Nf3 Nc6')
+    for board in (replay_endpoint,long_board,replay_endpoint,long_board,replay_endpoint):
+        frame(manager,now,board,NAMES)
+        assert manager.current_id==long_id
+    assert store.game(short_id) and store.game(long_id)
+    store.close()
+
+
 def test_late_recovery_cannot_commit_while_an_identity_change_is_pending(tmp_path):
     store,manager,now=setup(tmp_path);old=manager.current_id;prefix=manager.rec.verified[:]
     board=manager.rec.board.copy();board.push_san('O-O')
