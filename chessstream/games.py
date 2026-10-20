@@ -87,6 +87,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._review_candidate=None
         self._review_recorded=None
         self._settled_key=None;self._settled_since=None;self._settled_error=None
+        self._early_opening_candidate=None
         self._frame_placement=None;self._frame_since=None
         self._timed_base=None;self._timed_end=0
         self._recovery_executor=None;self._recovery_future=None;self._recovery_token=None
@@ -173,6 +174,76 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         note = ("Recording began midgame. Earlier moves are unavailable. Side to move is inferred from later evidence. "
                 "Castling rights and en passant history were not visible; no rights were assumed. Set an exact initial FEN if needed.")
         self._create(chess.Board(roots[0]), obs.timestamp, roots, note)
+        return True
+
+    def _opening_rewind_rebase(self, obs):
+        """Recover an actual beginning observed after a mid-opening startup.
+
+        A chess screenshot cannot recover the order of four unseen opening
+        plies. If the viewer seeks backward and a stable START or unique
+        one-ply position appears, anchor the *same* game to that evidence.
+        Do not replace a game with already confirmed moves. Audit the old root
+        so the original recording information is recoverable.
+        """
+        rec=self.rec
+        if (rec is None or rec.verified or self.terminal_message
+                or self.settings.initial_fen or rec.initial_fen==chess.STARTING_FEN):
+            self._early_opening_candidate=None
+            return False
+        threshold=max(.8,self.settings.min_confidence)
+        if (obs.confidence<threshold or obs.uncertain_squares(threshold)):
+            self._early_opening_candidate=None
+            return False
+        old=chess.Board(rec.initial_fen)
+        if (len(old.piece_map())!=32
+                or old.board_fen()==chess.Board().board_fen()):
+            self._early_opening_candidate=None
+            return False
+        beginning=chess.Board()
+        paths=[]
+        if obs.matches(beginning,threshold):
+            paths=[()]
+        else:
+            result=LegalSearcher(1,2000,70,threshold).search(beginning,obs)
+            if result.exhaustive and len(result.paths)==1:
+                paths=result.paths
+        if len(paths)!=1:
+            self._early_opening_candidate=None
+            return False
+        start_labels=board_labels(beginning)
+        old_distance=int(np.count_nonzero(board_labels(old)!=start_labels))
+        new_distance=int(np.count_nonzero(obs.labels!=start_labels))
+        if new_distance>=old_distance:
+            self._early_opening_candidate=None
+            return False
+        key=(obs.placement(),tuple(m.uci() for m in paths[0]))
+        seen,count=self._early_opening_candidate or (None,0)
+        count=count+1 if seen==key else 1
+        self._early_opening_candidate=(key,count)
+        if count<2:
+            self.last_message='Earlier opening detected • waiting for another clear board frame'
+            return False
+        original=rec.serialize()
+        self.cancel_background_recovery()
+        self.reset_settling()
+        self.clear_position_recovery()
+        self.rewind_state=None
+        self._timed_base=None;self._timed_end=0
+        self.rec=self.reconstructor(chess.Board())
+        path=[move.uci() for move in paths[0]]
+        self.inferred_moves={}
+        self.move_clocks={}
+        if path:self._seed_opening(path)
+        self.note=('Opening start recovered from an earlier visible position in the video. '
+                   'Only the uniquely established opening move was inferred; '
+                   'unseen move orders were not guessed.')
+        self._early_opening_candidate=None
+        self.last_message='Opening rewind recovered • original game identity preserved'
+        self.store.audit('opening root corrected after video seek',{
+            'game_id':self.current_id,'previous_state':original,
+            'observed_earlier_placement':obs.placement(),
+            'unique_opening_moves':path,'source':'two stable earlier board frames'})
+        self.persist()
         return True
 
     def _resume_latest_game_at_position(self, obs, allow_completed_review=True):
@@ -711,6 +782,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
     def process(self, obs: Observation) -> dict:
         with self.lock:
             self.last_observation = obs
+            self._opening_rewind_rebase(obs)
             if self.lifecycle_gate(obs):return self.lifecycle_snapshot(obs)
             move_evidence=obs
             self._recognition_ignored_squares=[]
@@ -1013,6 +1085,22 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 self.store.audit('video rewind ended',{'game_id':self.current_id,'placement':placement})
                 self.rewind_state=None
             return False
+        # A just-captured mid-opening FEN has no known earlier move history.
+        # If the image moves CLOSER to the standard opening, suspect a video
+        # seek rather than treating a knight's return home as forward play.
+        if (not self.rec.verified and self.rec.initial_fen!=chess.STARTING_FEN
+                and len(chess.Board(self.rec.initial_fen).piece_map())==32):
+            initial_labels=board_labels(chess.Board())
+            source_distance=int(np.count_nonzero(board_labels(chess.Board(self.rec.initial_fen))!=initial_labels))
+            visible_distance=int(np.count_nonzero(obs.labels!=initial_labels))
+            if visible_distance < source_distance:
+                if not self.rewind_state:
+                    self.rewind_state={'anchor_ply':0,'cursor':0,'early_opening':True}
+                    self.store.audit('opening video rewind suspected',{
+                        'game_id':self.current_id,'source_fen':self.rec.initial_fen,
+                        'earlier_placement':placement})
+                self.rec.status=self.last_message='Earlier opening / video rewind • PGN protected'
+                return True
         # A genuine terminal/new-game reset is handled by the ordinary game logic.
         if placement==chess.Board().board_fen() and (self.terminal_message or self.headers.get('Result','*')!='*' or self.clocks_recently_reset()):
             self.rewind_state=None;return False
