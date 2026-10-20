@@ -7,6 +7,7 @@ import chess
 import chess.pgn
 from .domain import utcnow,board_labels
 from .pgn_tools import node_at
+from .lifecycle import probable_ocr_variant
 
 
 class GameExtras:
@@ -51,7 +52,7 @@ class GameExtras:
                 logging.info('Both visible clocks reset: %s',clocks)
             names=context.get('names',{})
             if not self.rec:return
-            changed=any(self.headers.get(color.title(),'Unknown')!='Unknown' and ''.join(self.headers[color.title()].casefold().split())!=''.join(name.casefold().split()) for color,name in names.items())
+            changed=any(self.headers.get(color.title(),'Unknown')!='Unknown' and ''.join(self.headers[color.title()].casefold().split())!=''.join(name.casefold().split()) and not (not self.lifecycle.reset_confirmed and probable_ocr_variant(self.headers[color.title()],name)) for color,name in names.items())
             if changed:
                 self.pending_identity=names
                 logging.info('Stable visible player identity changed: %s -> %s',self.observed_names,names)
