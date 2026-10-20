@@ -12,7 +12,7 @@ import numpy as np
 import chess
 import chess.pgn
 from .domain import Settings, Observation, utcnow, atomic_text, board_labels
-from .reconstruction import Reconstructor, LegalSearcher, Branch
+from .reconstruction import Reconstructor, LegalSearcher, Branch, speculative_detour
 from .storage import Store
 from .game_extras import GameExtras
 from .pgn_tools import merge_annotations
@@ -1191,8 +1191,9 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             for uci in old.verified[:before]:
                 probe.board.push_uci(uci);probe.verified.append(uci);probe.history.append(probe.board.board_fen())
             search=LegalSearcher(max(6,self.settings.max_plies),nodes-used,remaining_ms,self.settings.min_confidence)
-            result=search.search(probe.board,obs,first_shortest=True);used+=result.nodes
-            if not result.paths:continue
+            result=search.search(probe.board,obs);used+=result.nodes
+            if (not result.exhaustive or not result.shortest_proven or len(result.paths)!=1
+                    or speculative_detour(probe.board,result.paths[0])):continue
             base=probe.serialize()
             for move in result.paths[0]:
                 probe.board.push(move);probe.verified.append(move.uci());probe.history.append(probe.board.board_fen())
@@ -1216,7 +1217,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             self._settled_since=(self._frame_since if self._frame_placement==obs.placement() and self._frame_since is not None else now)
             self._settled_error=None
         elapsed=now-self._settled_since
-        if elapsed<.5 or self.terminal_message:return
+        if elapsed<.5 or self.terminal_message or self.rewind_state:return
         if obs.matches(self.rec.board,self.settings.min_confidence):return
         if obs.placement() in self.rec.history[:-1]:return  # review is not play
         # A reply that extends the committed suffix removes its rollback privilege.
@@ -1225,16 +1226,22 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         candidates=[b for b in self.rec.branches if b.moves and obs.matches(b.board(),self.settings.min_confidence)]
         base=None;chosen=None
         if candidates:
-            # Preserve the existing capture-continuity ordering on known paths.
-            branch=candidates[0]
-            base=self.rec.serialize()
-            probe=Reconstructor.restore(base,self.searcher())
-            probe.incomplete=False
-            probe.choose(self.rec.branches.index(branch))
-            chosen=probe
+            # Time verifies that the IMAGE is stable, not which route pieces
+            # took to reach it. Only a single already-exhaustive branch can be
+            # committed here, and never a flagged reversible detour.
+            if (len(self.rec.branches)==1 and len(candidates)==1
+                    and not self.rec.incomplete and not self.rec.gap_requires_confirmation
+                    and not speculative_detour(chess.Board(candidates[0].root_fen),
+                                               [chess.Move.from_uci(x) for x in candidates[0].moves])):
+                branch=candidates[0]
+                base=self.rec.serialize()
+                probe=Reconstructor.restore(base,self.searcher())
+                probe.choose(0)
+                chosen=probe
         else:
-            # Search only until the first shortest endpoint match. Exhausting all
-            # equivalent move orders is unnecessary for an explicitly guessed line.
+            # A timeout, path-limit hit, or first-search match is not proof of
+            # a unique move sequence. Preserve the position for later frames
+            # instead of exporting one arbitrary candidate after 0.5 seconds.
             states=([self._timed_base] if self._timed_base else [])+[self.rec.serialize()]
             budget_started=time.monotonic();used=0
             for state in states:
@@ -1242,10 +1249,14 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 remaining_ms=self.settings.search_ms-(time.monotonic()-budget_started)*1000
                 remaining_nodes=self.settings.search_nodes-used
                 if remaining_ms<=0 or remaining_nodes<=0:break
-                search=LegalSearcher(max(6,self.settings.max_plies),remaining_nodes,remaining_ms,self.settings.min_confidence)
-                result=search.search(probe.board,obs,first_shortest=True)
+                search=LegalSearcher(max(6,self.settings.max_plies),remaining_nodes,
+                                     remaining_ms,self.settings.min_confidence,path_limit=32)
+                result=search.search(probe.board,obs)
                 used+=result.nodes
-                if not result.paths:continue
+                if (not result.exhaustive or not result.shortest_proven
+                        or len(result.paths)!=1
+                        or speculative_detour(probe.board,result.paths[0])):
+                    continue
                 before=len(probe.verified)
                 for move in result.paths[0]:
                     probe.board.push(move);probe.verified.append(move.uci());probe.history.append(probe.board.board_fen())
