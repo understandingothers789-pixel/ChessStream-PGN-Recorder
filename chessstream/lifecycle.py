@@ -34,6 +34,23 @@ def probable_ocr_variant(left,right):
     return False
 
 
+
+def clipped_ocr_name(candidate, established):
+    """A visible fragment of the established username is not a new opponent.
+
+    On chess overlays OCR may see only 'th' from A-TrainOutOfBreath or
+    'anderNoMercy' from HomelanderNoMercy. A full name after a genuine
+    board/clock reset is handled separately by lifecycle evidence.
+    """
+    observed=name_key(candidate)
+    known=name_key(established)
+    return (known not in ('', 'unknown') and len(known)>=6
+            and 1<len(observed)<len(known)
+            and observed in known)
+
+
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str = 'continue'
@@ -57,7 +74,10 @@ class GameLifecycle:
         if timestamp==self.metadata_time:return
         self.metadata_time=timestamp;self.context={**context,'timestamp':timestamp}
         self.raw_names=dict(context.get('raw_names',context.get('names',{})))
-        self.raw_names={color:name for color,name in self.raw_names.items() if context.get('name_confidence',{}).get(color,1.)>=.9}
+        self.raw_names={color:name for color,name in self.raw_names.items()
+                        if context.get('name_confidence',{}).get(color,1.)>=.9
+                        and not (clipped_ocr_name(name,headers.get(color.title(),'Unknown'))
+                                 and not (self.reset_confirmed and self.reset_board_seen))}
         self._metadata_pending=any(headers.get(color.title(),'Unknown')!='Unknown' and name_key(value)!=name_key(headers[color.title()]) and not probable_ocr_variant(value,headers[color.title()]) for color,value in self.raw_names.items())
         confirmed=context.get('names',{}) if context.get('names_stable') else {}
         for color in ('white','black'):
@@ -95,6 +115,12 @@ class GameLifecycle:
                 and name_key(value)!=name_key(manager.headers[color.title()])
                 and not (not self.reset_confirmed and probable_ocr_variant(value,manager.headers[color.title()]))
                 and name_key(value)!=self.ignored_names.get(color)}
+
+    def observed_same_player(self,manager):
+        """A single exact visible identity can protect continuity from OCR loss."""
+        return any(name_key(value)==name_key(manager.headers.get(color.title(),'Unknown'))
+                   and name_key(value)!='unknown'
+                   for color,value in self.raw_names.items())
 
     def same_visible_players(self,manager):
         """Require current OCR evidence for *both* unchanged player identities.
@@ -322,8 +348,10 @@ class GameLifecycle:
         # Once matching names triggered a hold, transient missing OCR must
         # not change it back into a timed auto-split.
         same_pair = self.same_visible_players(manager)
+        partial_same_pair=(self.observed_same_player(manager)
+                           and not self.reset_confirmed and not self.reset_board_seen)
         pending_same_pair = bool(self.candidate and self.candidate[0]=='same-pair-unlinked')
-        if (same_pair or pending_same_pair) and not self.changed_names(manager,True):
+        if (same_pair or partial_same_pair or pending_same_pair) and not self.changed_names(manager,True):
             return self.hold(manager,obs,
                 'Same players, unlinked position: possible video seek or missed moves; PGN preserved. '
                 'Use New game to split, or return to the live board.',
