@@ -324,6 +324,9 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                         break
         for row in candidates:
             if chosen is not None:break
+            # A failed segment join cannot be bypassed by connecting only
+            # the old endpoint to the latest image and dropping the segment.
+            if is_fen_checkpoint and row['id']!=latest['id']:continue
             try:
                 visible_names=self.lifecycle.names
                 saved_headers=json.loads(row['headers'])
@@ -352,7 +355,13 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                             and obs.placement()==chess.Board().board_fen())):
                     continue
                 saved.confirmation_plies=int(self.settings.confirm_on_reply)
-                bridge_update=saved.bridge_gap(obs,self.searcher())
+                if is_fen_checkpoint:
+                    remaining=75-(time.monotonic()-live_join_started)*1000
+                    if remaining<=0:continue
+                    probe=LegalSearcher(min(4,self.settings.max_plies),min(8000,self.settings.search_nodes),
+                                        remaining,self.settings.min_confidence)
+                else:probe=self.searcher()
+                bridge_update=saved.bridge_gap(obs,probe)
                 if bridge_update is None:continue
                 bridged=True
             chosen=(row,saved,before,previous_pending,bridged,bridge_update,review)

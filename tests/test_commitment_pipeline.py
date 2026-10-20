@@ -299,6 +299,25 @@ def test_live_checkpoint_join_respects_live_budget_instead_of_expanding_to_five_
     store.close()
 
 
+def test_failed_checkpoint_join_fallback_also_uses_remaining_live_budget(tmp_path,monkeypatch):
+    store=Store(tmp_path);manager=GameManager(store,Settings(confirm_on_reply=False))
+    manager._create(chess.Board(),utcnow());manager.correct_line('e4 e5')
+    original_id=manager.current_id
+    manager._start_from_visible(Observation.from_board(played('e4 e5 Nf3')),'fullscreen reacquisition')
+    checkpoint_id=manager.current_id;original=store.game(original_id)['pgn']
+    def failed(*args,**kwargs):raise ValueError('No complete segment join')
+    monkeypatch.setattr(manager,'_join_checkpoint',failed)
+    real=LegalSearcher.search;budgets=[]
+    def traced(searcher,*args,**kwargs):
+        budgets.append((searcher.time_limit_ms,searcher.node_limit))
+        return real(searcher,*args,**kwargs)
+    monkeypatch.setattr(LegalSearcher,'search',traced)
+    manager._resume_latest_game_at_position(Observation.from_board(played('e4 e5 Nf3 Nc6')))
+    assert budgets and all(ms<=75 and nodes<=8000 for ms,nodes in budgets)
+    assert manager.current_id==checkpoint_id and store.game(original_id)['pgn']==original
+    store.close()
+
+
 def test_incomplete_pending_move_cannot_be_promoted_by_a_result_popup(tmp_path):
     store=Store(tmp_path);manager=GameManager(store,Settings())
     manager._create(chess.Board(),utcnow())

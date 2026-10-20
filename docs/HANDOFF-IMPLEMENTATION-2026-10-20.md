@@ -31,8 +31,8 @@ were retained. The unchanged starting suite passed 151 tests locally.
    remain navigable without generating new moves.
 2. **Saved search budgets leaked into live capture.** The saved helper raised
    limits to at least five seconds even when called by checkpoint recovery.
-   Live checkpoint attempts now share 75 ms, four plies and at most 8,000
-   nodes. Join previous snapshots its inputs, performs deeper work outside the
+   Live checkpoint attempts and their fallback share 75 ms, with four plies and
+   at most 8,000 nodes per search. Join previous snapshots its inputs, performs deeper work outside the
    capture thread and recorder lock, then validates the result before applying
    it. Saved requests share a five-second total budget across previous
    candidates; library searches share a bounded total budget across segments.
@@ -53,6 +53,8 @@ were retained. The unchanged starting suite passed 151 tests locally.
    en-passant state, are respected. Explicitly unknown image-derived history is
    stored separately. A bare screenshot with both turn hypotheses can use the
    uniquely established continuation instead of forcing its default White root.
+   A failed full segment join cannot be bypassed with a direct old-endpoint
+   path that discards the intervening segment; both records stay separate.
 6. **OCR vocabulary was being used as identity evidence.** Python, Codex,
    Slowkaru and Candidate are accepted as usernames in appropriate player bands.
    Spatial/rating/clock evidence and prose/URL/control structure filter overlays.
@@ -145,7 +147,8 @@ race, incomplete terminal moves, actual FEN constraints, an unresolved gap
 that successfully recovers, and known opening turn recovery.
 It also covers populated versus empty libraries, incomplete identity readings,
 confirmed rematches, common openings at restart, result/stop invalidation,
-repeat-coalesced FEN traces and trace retention/export without images.
+repeat-coalesced FEN traces, trace retention/export without images, and failed
+checkpoint fallback limits without dropping a source segment.
 
 No tests were deleted. Earlier tests that explicitly demanded a guessed
 five/ten-ply opening now assert the visible FEN and subsequent observed moves;
@@ -155,7 +158,7 @@ declares its unknown history. The synthetic queen-shuttle preservation test
 now also asserts that automatic joining refuses it before exercising explicit
 confirmation. The UI callback mock accepts the new asynchronous keyword.
 
-Local validation on Linux/Python 3.12: **180 passed in 8.79 seconds**;
+Local validation on Linux/Python 3.12: **181 passed in 8.58 seconds**;
 git diff --check passed, and the offscreen application launch rendered the
 desktop successfully. The unchanged baseline had 151 tests. Windows portable
 validation and its downloadable artifact are linked in the delivery message.
