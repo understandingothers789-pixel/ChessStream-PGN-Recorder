@@ -8,7 +8,10 @@ def context_region(source,board_rect,desktop,padding_percent=18):
     left,top=source.left+x,source.top+y
     if left<desktop["left"] or top<desktop["top"] or left+w>desktop["left"]+desktop["width"] or top+h>desktop["top"]+desktop["height"]:
         raise ValueError("Board is partly outside the visible desktop")
-    pad_x=round(w*padding_percent/100);pad_y=round(h*padding_percent/100)
+    # Player nameplates typically sit above and below the board; give these
+    # rows more pixels than the horizontal gutters without expanding to the
+    # entire stream or breaking the user-adjustable base padding setting.
+    pad_x=round(w*padding_percent/100);pad_y=round(h*padding_percent/100*1.35)
     x0=max(desktop['left'],left-pad_x);y0=max(desktop['top'],top-pad_y)
     x1=min(desktop['left']+desktop['width'],left+w+pad_x)
     y1=min(desktop['top']+desktop['height'],top+h+pad_y)
