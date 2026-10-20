@@ -149,3 +149,30 @@ def test_full_first_part_eval_variation_and_later_clock_survive_unique_join():
     assert headers['White'] == 'SukunaTakingOver'
     assert headers['Black'] == 'Itadoriclueless'
     assert [row['pgn'] for row in rows] == originals
+
+
+def test_confirmed_gap_choice_requires_exact_revalidation_and_preserves_sources():
+    before=prefix_board()
+    a=witness(before,'Qd8 Qa4 Qc7 Qb3 Qd7 Bxc6 bxc6')
+    b=witness(before,'Qd8 Qc2 Qc7 Qb3 Qd7 Bxc6 bxc6')
+    rows=[
+        {'id':'1','started':'2026-10-20T01:00:00','pgn':PREFIX},
+        {'id':'2','started':'2026-10-20T01:10:00','pgn':LATER},
+    ]
+    originals=[r['pgn'] for r in rows]
+    class Dummy:
+        max_plies=4; node_limit=60000; time_limit_ms=350
+        threshold=.70; path_limit=128
+    complete=SearchResult(paths=[a,b],exhaustive=True,shortest_proven=True)
+    with patch('chessstream.gap_join._gap_search',return_value=complete):
+        with pytest.raises(AmbiguousGapError) as err:
+            join_recordings(rows,Dummy())
+        assert err.value.later_id=='2'
+        assert err.value.source_fen==before.fen()
+        with pytest.raises(ValueError,match='no longer valid'):
+            join_recordings(rows,Dummy(),confirmed_paths={'2':['e2e4']})
+        chosen=join_recordings(rows,Dummy(),confirmed_paths={'2':tuple(m.uci() for m in b)})
+    merged=chess.pgn.read_game(io.StringIO(chosen))
+    assert merged is not None and not merged.errors
+    assert merged.end().board().board_fen() == chess.pgn.read_game(io.StringIO(LATER)).end().board().board_fen()
+    assert [r['pgn'] for r in rows]==originals
