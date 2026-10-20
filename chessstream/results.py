@@ -171,7 +171,20 @@ class EndMessageDetector:
         if board_rect:
             x,y,w,h=board_rect
             relevant=[line for line in relevant if len(line)<3 or (x-w*.15<=(line[2][0]+line[2][2])/2<=x+w*1.45 and y-h*.05<=(line[2][1]+line[2][3])/2<=y+h*1.05)]
-        message=parse_end_message(relevant,player_color,names)
+        # Only a result visibly overlaid on the board can terminate the
+        # current game. A browser sidebar, title, chess analysis tab, or
+        # other unrelated window may say "Draw" while the clock still runs.
+        if board_rect:
+            x,y,w,h=board_rect
+            result_lines=[
+                line for line in relevant if len(line)>=3
+                and _result_line_is_an_announcement(line[0])
+                and (x-w*.08 <= (line[2][0]+line[2][2])/2 <= x+w*1.08)
+                and (y-h*.08 <= (line[2][1]+line[2][3])/2 <= y+h*1.08)
+            ]
+        else:
+            result_lines=[]  # Without a grounded board, don't end a PGN.
+        message=parse_end_message(result_lines,player_color,names)
         key=(message.result,message.reason,message.color_basis) if message else None
         if key is None:self.pending=None;self.pending_since=None;return None
         if key!=self.pending:
