@@ -96,6 +96,19 @@ class GameLifecycle:
                 and not (not self.reset_confirmed and probable_ocr_variant(value,manager.headers[color.title()]))
                 and name_key(value)!=self.ignored_names.get(color)}
 
+    def same_visible_players(self,manager):
+        """Require current OCR evidence for *both* unchanged player identities.
+
+        The last known player names alone do not prove continuity: they may
+        survive a hidden overlay when the streamer starts a different game.
+        """
+        if len(self.raw_names)<2:return False
+        return all(
+            name_key(manager.headers.get(color.title(),'Unknown'))!='unknown'
+            and name_key(self.raw_names.get(color,''))==name_key(manager.headers[color.title()])
+            for color in ('white','black')
+        )
+
     def set_phase(self,phase,reason):
         self.phase=phase;self.reason=reason
         key=(phase,reason)
@@ -251,7 +264,14 @@ class GameLifecycle:
                 decision=self.hold(manager,obs,'Aborted game; waiting for a fresh opening',('aborted-reset',))
                 self.set_phase('between games',decision.reason);return decision
             return self.hold(manager,obs,'Starting position revisited; awaiting game identity',('reset',))
-        prior=self._return_game(manager,obs) if not current and self.names else None
+        # When the displayed players still match this *ongoing* game, a
+        # historical endpoint is often a video seek, not a request to switch
+        # between short PGN fragments with identical headers.
+        previous_game_allowed = (self.reset_board_seen or self.reset_confirmed
+                                 or manager.terminal_message is not None
+                                 or not self.same_visible_players(manager))
+        prior=(self._return_game(manager,obs)
+               if not current and self.names and previous_game_allowed else None)
         if prior:return Decision('return','Visible players and established board match a saved game',prior)
         if current or known or any(placement==b.board().board_fen() for b in manager.rec.branches):
             self.candidate=None;self.since=None;self.frames.clear()
@@ -270,6 +290,21 @@ class GameLifecycle:
             return Decision()
         if self.mode=='continue':return Decision('hold','Position is not linked to the current PGN; choose New game or Analysis')
         if not manager.settings.split_unlinked_positions:return Decision()
+        # IMPORTANT: a failed four-ply search is *absence of a connection*,
+        # not positive evidence of a new game. Video rewinds, fast playback,
+        # and unobserved captures routinely create larger gaps. If both player
+        # names are visibly unchanged, preserve the same PGN until a true
+        # boundary (new player, confirmed opening reset, or user action).
+        # Once matching names triggered a hold, transient missing OCR must
+        # not change it back into a timed auto-split.
+        same_pair = self.same_visible_players(manager)
+        pending_same_pair = bool(self.candidate and self.candidate[0]=='same-pair-unlinked')
+        if ((same_pair or pending_same_pair) and not self.changed_names(manager,True)
+                and not self.reset_board_seen):
+            return self.hold(manager,obs,
+                'Same players, unlinked position: possible video seek or missed moves; PGN preserved. '
+                'Use New game to split, or return to the live board.',
+                ('same-pair-unlinked',))
         visible=chess.Board(f'{placement} w - - 0 1')
         if not any(chess.Board(f'{placement} {turn} - - 0 1').is_valid() for turn in ('w','b')):return Decision('hold','Recovery error: visible position is not a valid FEN')
         changed_squares=sum(manager.rec.board.piece_at(s)!=visible.piece_at(s) for s in chess.SQUARES)
