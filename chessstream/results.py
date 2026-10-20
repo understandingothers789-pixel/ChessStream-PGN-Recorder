@@ -48,7 +48,15 @@ def parse_end_message(lines, player_color=None, names=None):
     """Only strong end-message vocabulary can terminate a game, never arbitrary digits."""
     strong=[(re.sub(r'\b(You|White|Black|Game)(Won|Lost|Aborted|Abandoned)\b',r'\1 \2',str(text).strip().replace('–','-').replace('−','-'),flags=re.I),score) for text,score,*_ in lines if score >= .80]
     main=[(text,score) for text,score in strong if _result_line_is_an_announcement(text)]
-    if not main:return None
+    if not main:
+        # Some chess sites only display "by resignation" on the result
+        # overlay. Preserve this strong end condition, but never infer who
+        # won from the fragment by itself. Geometric filtering in scan()
+        # still requires the caption to be over the captured chessboard.
+        if len(strong)==1 and re.fullmatch(r'(?i)\s*by\s+resignation\s*[!.]?\s*',strong[0][0]):
+            return EndMessage('*','resignation',strong[0][0],strong[0][1],
+                              'winner color unknown; edit result in library')
+        return None
     # Real chess sites often split "Martinfoot Won" / "by resignation"
     # into two OCR rectangles. A reason-only caption cannot end a game.
     reasons=[(text,score) for text,score in strong if _result_line_is_reason(text)]
