@@ -128,7 +128,7 @@ class GameExtras:
             observed=obs or self.last_observation
             if observed:
                 decision=self.lifecycle.evaluate(self,observed)
-                if decision.action in ('hold','new','return'):
+                if decision.action in ('hold','new','return','analysis'):
                     self.cancel_background_recovery();self.reset_settling()
                     self.last_message='Result attribution pending • '+decision.reason
                     key=(self.current_id,message.result,message.reason,decision.reason)

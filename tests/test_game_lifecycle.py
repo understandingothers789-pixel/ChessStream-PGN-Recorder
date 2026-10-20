@@ -330,3 +330,11 @@ def test_result_popup_cannot_be_attributed_to_old_pgn_before_board_processing(tm
     assert manager.declare_end(result,Observation.from_board(target))
     assert manager.headers['Result']=='1-0' and json_game(store,old).headers['Result']=='*'
     store.close()
+
+
+def test_explicit_analysis_mode_preserves_the_played_result(tmp_path):
+    store,manager,now=setup(tmp_path);old=manager.current_id
+    manager.set_game_mode('analysis')
+    assert not manager.declare_end(EndMessage('1-0','checkmate','Checkmate',.99),Observation.from_board(manager.rec.board))
+    assert manager.current_id==old and manager.headers['Result']=='*' and manager.terminal_message is None
+    store.close()
