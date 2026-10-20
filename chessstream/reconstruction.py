@@ -282,6 +282,9 @@ class Reconstructor:
         self.status = "recording" if len(self.branches) == 1 else "awaiting side to move"
         self.incomplete = False
         self.confirmation_plies = confirmation_plies
+        # One image cannot verify the order of three or more unseen moves.
+        # Retain the path as a hypothesis until explicit user confirmation.
+        self.gap_requires_confirmation = False
 
     def _recover_provisional(self, observed, update):
         """Replace an unconfirmed hover or unsupported reversible detour.
@@ -354,7 +357,7 @@ class Reconstructor:
         return tuple(sorted(candidates)) if len(candidates)<=4 else ()
 
     def _adopt_probe(self, probe):
-        for name in ('initial_fen','board','branches','verified','history','incomplete','status'):
+        for name in ('initial_fen','board','branches','verified','history','incomplete','status','gap_requires_confirmation'):
             setattr(self,name,getattr(probe,name))
 
     def _retry_noisy_squares(self, observed, original_update, candidates):
@@ -442,6 +445,8 @@ class Reconstructor:
                     update.search_ms += result.elapsed_ms
                 all_complete &= result.exhaustive
                 for path in result.paths:
+                    if len(path)>2:
+                        self.gap_requires_confirmation = True
                     survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path)))
             if survivors or not all_complete:
                 break
@@ -465,6 +470,8 @@ class Reconstructor:
         # frames can eliminate hypotheses. Only their shared legal prefix may
         # enter the authoritative PGN, and user selection remains available.
         self.branches = list(unique.values())
+        if (any(len(path) > 2 for path in [b.moves for b in recovered] ) if recovered is not None else False):
+            self.gap_requires_confirmation = True
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
             self.initial_fen = self.branches[0].root_fen
@@ -478,6 +485,10 @@ class Reconstructor:
                 prefix = i
                 break
         common = self.branches[0].moves[:prefix]
+        if self.gap_requires_confirmation:
+            # Subsequent identical frames cannot corroborate an unseen order.
+            # Do not silently confirm a speculative 3+ ply reconstruction.
+            common = ()
         if self.confirmation_plies:
             # Repetition or elapsed time cannot prove a piece was dropped.
             # The opponent's reply confirms the preceding move, while the last
@@ -496,7 +507,9 @@ class Reconstructor:
         if common:
             root = self.board.fen()
             self.branches = [Branch(root, b.moves[len(common):]) for b in self.branches]
-        if self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
+        if self.gap_requires_confirmation:
+            self.status = "unverified multi-move gap • select a legal sequence"
+        elif self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
             self.status = "provisional move • waiting for opponent response"
         else:
             self.status = "uncertain • choose a legal sequence" if any(b.moves for b in self.branches) or len(self.branches)>1 else "recording"
@@ -529,6 +542,7 @@ class Reconstructor:
             self.verified.append(uci)
             self.history.append(self.board.board_fen())
         self.branches = probe.branches
+        self.gap_requires_confirmation = probe.gap_requires_confirmation
         self.incomplete = False
         self.status = probe.status
         return update
@@ -566,13 +580,15 @@ class Reconstructor:
             self.verified.append(uci)
             self.history.append(self.board.board_fen())
         self.branches = [Branch(self.board.fen(), ())]
+        self.gap_requires_confirmation = False
         self.status = "recording • sequence confirmed manually"
         return moves
 
     def serialize(self) -> dict:
         return {"initial_fen":self.initial_fen,"verified":list(self.verified),
                 "branches":[{"root_fen":b.root_fen,"moves":list(b.moves)} for b in self.branches],
-                "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies}
+                "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies,
+                "gap_requires_confirmation":self.gap_requires_confirmation}
 
     @classmethod
     def restore(cls, data: dict, searcher: LegalSearcher | None = None) -> Reconstructor:
@@ -585,4 +601,5 @@ class Reconstructor:
         r.status = data.get("status", "recovered")
         r.incomplete = data.get("incomplete",False)
         r.confirmation_plies = data.get("confirmation_plies",0)
+        r.gap_requires_confirmation = data.get("gap_requires_confirmation",False)
         return r
