@@ -723,6 +723,10 @@ class MainWindow(ReviewTools,QMainWindow):
                 return {'ambiguous':error}
 
         def result(outcome,confirmed=None):
+            # Older UI/test callbacks pass the completed PGN directly.
+            if isinstance(outcome,str):
+                saved(outcome)
+                return
             if 'pgn' in outcome:
                 saved(outcome['pgn'])
                 return
