@@ -4,7 +4,7 @@ from time import monotonic
 import cv2
 import numpy as np
 import chess
-from .reconstruction import Reconstructor,LegalSearcher,Branch
+from .reconstruction import Reconstructor,LegalSearcher,Branch,speculative_detour
 
 
 class RecentFrames:
@@ -46,9 +46,15 @@ def recover_gap(states,observed,max_plies,node_limit,time_limit_ms,evidence=(),t
                 if frame.uncertain_squares(max(.8,threshold)):continue
                 remaining=time_limit_ms-(monotonic()-started)*1000
                 if remaining<=0 or node_limit-used<=0:complete=False;break
-                step=LegalSearcher(max_plies,node_limit-used,remaining,threshold).search(trial.board,frame,first_shortest=True)
+                step=LegalSearcher(max_plies,node_limit-used,remaining,threshold,path_limit=32).search(trial.board,frame)
                 used+=step.nodes
-                if not step.paths:complete=False;break
+                # Do not turn a first-match search or an unfinished search
+                # into verified PGN history. Equal-length move orders can
+                # have identical endpoints; neither is uniquely observed.
+                if (not step.exhaustive or not step.shortest_proven
+                        or len(step.paths)!=1
+                        or speculative_detour(trial.board,step.paths[0])):
+                    complete=False;break
                 for move in step.paths[0]:
                     trial.board.push(move);trial.verified.append(move.uci());trial.history.append(trial.board.board_fen())
             if complete and trial.board.board_fen()==observed.placement():
@@ -56,9 +62,12 @@ def recover_gap(states,observed,max_plies,node_limit,time_limit_ms,evidence=(),t
                 return state,trial.serialize()
         remaining=time_limit_ms-(monotonic()-started)*1000
         if remaining<=0 or node_limit-used<=0:break
-        result=LegalSearcher(max_plies,node_limit-used,remaining,threshold).search(probe.board,observed,first_shortest=True)
+        result=LegalSearcher(max_plies,node_limit-used,remaining,threshold,path_limit=32).search(probe.board,observed)
         used+=result.nodes
-        if not result.paths:continue
+        if (not result.exhaustive or not result.shortest_proven
+                or len(result.paths)!=1
+                or speculative_detour(probe.board,result.paths[0])):
+            continue
         for move in result.paths[0]:
             probe.board.push(move);probe.verified.append(move.uci());probe.history.append(probe.board.board_fen())
         if probe.board.board_fen()!=observed.placement():continue
