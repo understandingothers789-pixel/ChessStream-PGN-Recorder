@@ -18,11 +18,9 @@ class AmbiguousGapError(ValueError):
 def _gap_search(source, later, searcher):
     """Separate, capped saved-PGN search budget; never widen live capture budgets.
 
-    The root board is the later segment's actual starting FEN, not a standard
-    initial position. Do not quietly discard its known turn or castling rights.
+    The target is the later segment's actual starting FEN, including its turn.
+    A FEN-only checkpoint is also valid evidence for a possible join.
     """
-    if not later.variations:
-        raise ValueError('The newer segment has no move to confirm its side to move.')
     target = later.board()
     if not source.is_valid() or not target.is_valid():
         raise ValueError('A segment endpoint contains an invalid position.')
@@ -73,7 +71,8 @@ def join_recordings(rows, searcher):
             board=node.board();root=later.board()
             if (board.board_fen()!=root.board_fen() or board.turn!=root.turn
                     or board.castling_rights!=root.castling_rights
-                    or board.legal_en_passant_square()!=root.legal_en_passant_square()):continue
+                    or (board.ep_square if board.has_legal_en_passant() else None)
+                        != (root.ep_square if root.has_legal_en_passant() else None)):continue
             cursor=node;compatible=True
             for move in later_moves:
                 if not cursor.variations:break
@@ -87,7 +86,7 @@ def join_recordings(rows, searcher):
             # FEN checkpoint may still have both turns as unconfirmed hypotheses.
             result = _gap_search(source, later, searcher)
             if not result.exhaustive:
-                raise ValueError('The gap search reached its limit. Increase the search limits in Settings and retry.')
+                raise ValueError('Saved-PGN gap search was inconclusive (node/time/path limit); originals preserved.')
             valid = []
             for path in result.paths:
                 trial = source.copy()
@@ -131,5 +130,9 @@ def join_recordings(rows, searcher):
             if combined.headers.get(color,'Unknown') in ('Unknown','?',''):
                 name=later.headers.get(color,'Unknown')
                 combined.headers[color]=name if name not in ('?','') else 'Unknown'
+    # Obsolete checkpoint notices are administrative status, not chess evidence.
+    # The original PGN and its complete note remain in the source recording.
+    combined.comment=combined.comment.replace(
+        " A separate PGN segment was started from the visible board FEN; this game's saved moves remain unchanged.", "")
     combined.comment=(combined.comment+' Joined saved recording segments; gap moves are explicitly annotated as inferred.').strip()
     return combined.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
