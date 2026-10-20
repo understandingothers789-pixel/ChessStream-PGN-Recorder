@@ -37,7 +37,8 @@ def _gap_search(source, later, searcher):
                           time_limit_ms=max(5000, searcher.time_limit_ms),
                           threshold=searcher.threshold,
                           path_limit=max(256, searcher.path_limit))
-    return probe.search(source, Observation.from_board(target), target_turn=target.turn)
+    return probe.search(source, Observation.from_board(target), target_turn=target.turn,
+                        target_castling_rights=target.castling_rights)
 
 
 
@@ -67,8 +68,9 @@ def join_recordings(rows, searcher):
         # Only accept overlap when the shared mainline agrees move for move.
         overlap=None
         later_moves=list(later.mainline_moves())
+        root=later.board()
         for node in [combined,*combined.mainline()]:
-            board=node.board();root=later.board()
+            board=node.board()
             if (board.board_fen()!=root.board_fen() or board.turn!=root.turn
                     or board.castling_rights!=root.castling_rights
                     or (board.ep_square if board.has_legal_en_passant() else None)
@@ -82,8 +84,8 @@ def join_recordings(rows, searcher):
         if overlap is not None:
             end=overlap
         else:
-            # A later recorded move establishes its root's side to move. A bare
-            # FEN checkpoint may still have both turns as unconfirmed hypotheses.
+            # Preserve the newer PGN's initial FEN, turn and castling rights.
+            # These are constraints, not reasons to guess missing moves.
             result = _gap_search(source, later, searcher)
             if not result.exhaustive:
                 raise ValueError('Saved-PGN gap search was inconclusive (node/time/path limit); originals preserved.')
@@ -91,6 +93,15 @@ def join_recordings(rows, searcher):
             for path in result.paths:
                 trial = source.copy()
                 for move in path:trial.push(move)
+                # Compare the *join position*, not merely the endpoint reached
+                # after replaying the later segment. Matching placement alone
+                # can conceal wrong turn or lost castling rights.
+                if (trial.board_fen()!=root.board_fen()
+                        or trial.turn!=root.turn
+                        or trial.castling_rights!=root.castling_rights
+                        or (trial.ep_square if trial.has_legal_en_passant() else None)
+                            != (root.ep_square if root.has_legal_en_passant() else None)):
+                    continue
                 for move in later.mainline_moves():
                     if move not in trial.legal_moves:break
                     trial.push(move)
