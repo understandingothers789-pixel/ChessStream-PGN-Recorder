@@ -10,7 +10,7 @@ from .reconstruction import Branch,LegalSearcher
 
 
 class GameBoundaries:
-    def _resume_initial_identity(self,obs):
+    def _resume_initial_identity(self,obs,opening_moves=()):
         names=self.lifecycle.names
         if len(names)<2 or self.lifecycle.reset_reads:return False
         matches=[]
@@ -21,8 +21,18 @@ class GameBoundaries:
             positions=[chess.Board(state['initial_fen'])]
             for uci in state['verified']:
                 board=positions[-1].copy();board.push_uci(uci);positions.append(board)
-            if not any(board.board_fen()==obs.placement() for board in positions):
-                continue
+            compatible=[board for board in positions if board.board_fen()==obs.placement()]
+            if not compatible:continue
+            # Placement alone cannot establish a saved game's side to move.
+            # A fresh, unique standard opening such as 1.e4 proves Black is
+            # next. Reject old FEN-only checkpoints initialized with White
+            # to move on that same placement.
+            if opening_moves:
+                initial=chess.Board()
+                try:
+                    for move in opening_moves:initial.push_uci(move)
+                except (ValueError,chess.IllegalMoveError):continue
+                if not any(board.turn==initial.turn for board in compatible):continue
             matches.append(row['id'])
         if len(matches)!=1:return False
         context=self.latest_context;self.recover(matches[0],persist=False);self.latest_context=context
