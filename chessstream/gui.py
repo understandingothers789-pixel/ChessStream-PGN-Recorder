@@ -29,7 +29,7 @@ from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEdito
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
 from .model_security import import_custom_model, validate_custom_model
-from .gap_join import join_recordings
+from .gap_join import join_recordings, AmbiguousGapError
 
 
 def human_bytes(n):
@@ -716,7 +716,43 @@ class MainWindow(ReviewTools,QMainWindow):
             else:
                 self.on_update(self.manager.snapshot())
                 self.navigate(0)
-        self.background(lambda:join_recordings(selected,self.manager.searcher()),saved)
+        def search(confirmed):
+            try:
+                return {'pgn':join_recordings(selected,self.manager.searcher(),confirmed)}
+            except AmbiguousGapError as error:
+                return {'ambiguous':error}
+
+        def result(outcome,confirmed=None):
+            if 'pgn' in outcome:
+                saved(outcome['pgn'])
+                return
+            error=outcome['ambiguous']
+            if not error.source_fen or error.later_id is None or len(error.alternatives)>32:
+                self.error(str(error)+' Too many choices to safely display; originals kept.')
+                return
+            options=[]
+            for path in error.alternatives:
+                board=chess.Board(error.source_fen)
+                names=[]
+                for uci in path:
+                    move=chess.Move.from_uci(uci)
+                    names.append(board.san(move))
+                    board.push(move)
+                options.append(' '.join(names) or '(no missing moves)')
+            labels=[f"{i+1}. {name}" for i,name in enumerate(options)]
+            answer,ok=QInputDialog.getItem(self,'Verify unobserved chess moves',
+                'Multiple legal paths fit the board images. Only select a line '
+                'if you can verify its moves from the video. Cancel to preserve both PGNs.',
+                labels,0,False)
+            if not ok:
+                self.statusBar().showMessage('PGN join canceled • original recordings retained',8000)
+                return
+            selection=labels.index(answer)
+            overrides=dict(confirmed or {})
+            overrides[error.later_id]=error.alternatives[selection]
+            self.background(lambda:search(overrides),lambda next_result:result(next_result,overrides))
+
+        self.background(lambda:search({}),result)
     def export_all(self):self.write_export(list(reversed(self.store.games())))
     def export_session(self):
         selected=self.selected_games()
