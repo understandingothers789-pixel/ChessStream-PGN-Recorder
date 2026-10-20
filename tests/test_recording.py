@@ -273,26 +273,25 @@ def test_half_second_settling_exports_without_reply_and_revises_latest_guess(tmp
     store.close()
 
 
-def test_settled_gap_uses_first_legal_path_and_three_second_errors_keep_prefix(tmp_path):
+def test_settled_gap_keeps_prefix_when_search_is_inconclusive(tmp_path):
     store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6')
     now=[0.];manager._clock=lambda:now[0]
-    gid=manager.current_id
+    gid=manager.current_id;prefix=manager.rec.verified[:]
     for san in 'Bc4 Bc5 d3'.split():board.push_san(san)
     obs=Observation.from_board(board)
-    # Force an unresolved normal search to exercise the non-exhaustive fallback.
     from chessstream.reconstruction import ReconstructionUpdate
     manager.rec.observe=lambda obs:ReconstructionUpdate(status='search limit • evidence retained')
     manager.process(obs);now[0]=2.;manager.process(obs)
-    assert manager.rec.board.board_fen()==board.board_fen()
-    assert manager.current_id==gid and 'Inferred:' in store.game(gid)['pgn']
-    prefix=manager.rec.verified[:]
-    wrong=board.copy();wrong.remove_piece_at(chess.E1)
-    now[0]=3.;manager.process(Observation.from_board(wrong))
-    now[0]=6.;manager.process(Observation.from_board(wrong))
-    assert 'Recovery error' in manager.last_message and manager.rec.verified==prefix
-    assert manager.current_id==gid
-    manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(wrong))
-    assert manager._settled_since is None  # Invalid boards stay quarantined, outside move acceptance.
+    # A stable board does NOT make first_shortest guesses historical truth.
+    assert manager.rec.verified==prefix
+    assert manager.current_id==gid and len(store.games())==1
+    assert 'Bc4' not in [node.san() for node in chess.pgn.read_game(io.StringIO(store.game(gid)['pgn'])).mainline()]
+    invalid=board.copy();invalid.remove_piece_at(chess.E1)
+    now[0]=3.;manager.process(Observation.from_board(invalid))
+    now[0]=6.;manager.process(Observation.from_board(invalid))
+    assert manager.rec.verified==prefix and manager.current_id==gid
+    manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(invalid))
+    assert manager._settled_since is None
     store.close()
 
 
@@ -363,7 +362,7 @@ def test_half_second_counts_from_first_frame_before_worker_animation_gate(tmp_pa
 CLARIFIED_OPENING='e4 c5 d3 Nc6 c3 d5 f3 e5 Ne2 Nf6 g3 c4 dxc4 dxe4 Qxd8+ Nxd8 fxe4 Nxe4'
 
 
-def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(tmp_path):
+def test_reported_skipped_moves_hold_unproven_routes_and_allow_manual_verified_line(tmp_path):
     for skip in (False,True):
         store=Store(tmp_path/str(skip));manager,board=record(store,Settings(),CLARIFIED_OPENING)
         gid=manager.current_id;now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
@@ -373,7 +372,6 @@ def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(
             now[0]+=5. if skip else 1.
             obs=Observation.from_board(board)
             if san=='Nd3':
-                # The reported screenshot flags the now-empty c5 at 74.9%.
                 obs.probabilities[chess.C5]=0
                 obs.probabilities[chess.C5,0]=.749
                 obs.probabilities[chess.C5,8]=.251
@@ -381,10 +379,19 @@ def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(
             now[0]+=.5;manager.process(obs)
         game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
         sans=[node.san() for node in game.mainline()]
-        assert sans[-5:]==['Nxe4','Bg2','Nc5','O-O','Nd3']
+        assert not game.errors
         assert 'Rb8' not in sans and 'Ra8' not in sans
-        assert game.end().board().fen()==board.fen()
         assert manager.current_id==gid and len(store.games())==1
+        # The previous behavior forced a guessed skipped-move path after 0.5s.
+        # When the original video supplies the exact SAN, it can be supplied
+        # as a non-destructive, explicit correction.
+        if game.end().board().board_fen()!=board.board_fen():
+            manager.correct_line(CLARIFIED_OPENING+' Bg2 Nc5 O-O Nd3')
+        game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+        assert not game.errors
+        assert [node.san() for node in game.mainline()][-5:]==[
+            'Nxe4','Bg2','Nc5','O-O','Nd3']
+        assert game.end().board().board_fen()==board.board_fen()
         store.close()
 
 
