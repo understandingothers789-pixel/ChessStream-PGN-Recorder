@@ -190,11 +190,11 @@ class AnalysisTracking:
         # rewind_state based on a witnessed earlier position. Once witnessed,
         # existing analysis tracking works as before. Explicit Analysis mode
         # always remains available.
+        if self._try_replay_recording(obs):return True
         if self.lifecycle.mode!='analysis' and not self.rewind_state:
             self.analysis_cursor=None
             self._analysis_pending=None
             return False
-        if self._try_replay_recording(obs):return True
         if obs.matches(self.rec.board,threshold):
             self.analysis_cursor=None;self._analysis_pending=None
             return False
