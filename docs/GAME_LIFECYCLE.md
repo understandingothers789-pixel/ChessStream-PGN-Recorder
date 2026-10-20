@@ -1,4 +1,4 @@
-# Game identity, separation and verification — v1.6.19
+# Game identity, separation and verification — v1.6.20
 
 ## Why boundaries were missed
 
@@ -6,7 +6,7 @@ The old logic usually required changed names **and** a clock reset, often alongs
 
 ## Shared decision gate
 
-`lifecycle.py` combines repeated player-name evidence, clock history, witnessed resets, results, current positions and saved history. `GameManager.process`, the capture worker and background recovery all enter this gate before accepting moves. A pending name change or uncertain unrelated position cancels old recovery work. Pending identity checks survive restart, so fresh metadata or an explicit override is required before continuing a previously uncertain identity. Recovery tokens include a game-generation counter as well as the game ID, root, prefix and target.
+`lifecycle.py` combines repeated player-name evidence, clock history, witnessed resets, results, current positions and saved history. `GameManager.process`, the capture worker and background recovery all enter this gate before accepting moves. A pending name change or uncertain unrelated position cancels old recovery work. Pending identity checks survive restart, so fresh metadata or an explicit override is required before continuing a previously uncertain identity. Result messages pass through the same identity check before their result is assigned to a PGN. Recovery tokens include a game-generation counter as well as the game ID, root, prefix and target.
 
 Lifecycle states distinguish waiting, game in progress, new game detected, game completed, between games, analysis/replay and uncertain transitions. The live **Game** menu exposes the state, evidence reason and correction actions. Diagnostics retain observations, boundary reasons, IDs, names, actual clock readings and starting FENs.
 
@@ -32,7 +32,7 @@ Uncertain transitions retain at most 24 board distributions/context observations
 
 ## Reproducible coverage
 
-The local suite has **96 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 24 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
+The local suite has **97 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 25 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
 
 | Requested situation | Representative checks |
 | --- | --- |
@@ -57,7 +57,7 @@ The local suite has **96 passing tests**, about **7 seconds** on this execution 
 | Increments/corrections | Small increases and large simultaneous increments retain the game |
 | Recovery still processing | Ready stale future cancelled; worker gate executes before recovery |
 
-Additional checks exercise identical-board/opponent changes, restart recognition, manual split/undo with clocks and variations, manual Continue, unrelated positions quarantined until confirmation, and the previously supplied Rc1 analysis FEN. These are controlled board/context sequences and retained image fixtures, not a replay of the user's complete YouTube session.
+Additional checks ensure that a result popup seen before board processing is held during an opponent change and later assigned only to the new PGN. Other checks exercise identical-board/opponent changes, restart recognition, manual split/undo with clocks and variations, manual Continue, unrelated positions quarantined until confirmation, and the previously supplied Rc1 analysis FEN. These are controlled board/context sequences and retained image fixtures, not a replay of the user's complete YouTube session.
 
 ## Remaining limits
 

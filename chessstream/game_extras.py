@@ -14,6 +14,7 @@ class GameExtras:
         self.review_pgn='';self.terminal_message=None;self.player_color=None
         self.review_tracker=None;self.review_anchor=None;self.rewind_state=None;self.premove_state=None
         self.analysis_cursor=None;self._analysis_pending=None;self._analysis_retry=None
+        self._held_result_key=None
         self.separated_from=[]
         self.move_clocks={};self.inferred_moves={};self.clock_evidence={};self.latest_context=None;self._clock_samples=[]
         self.observed_names={};self.pending_identity=None;self.clock_reset_seen=False
@@ -125,6 +126,17 @@ class GameExtras:
         with self.lock:
             if not self.rec or self.terminal_message:return False
             observed=obs or self.last_observation
+            if observed:
+                decision=self.lifecycle.evaluate(self,observed)
+                if decision.action in ('hold','new','return'):
+                    self.cancel_background_recovery();self.reset_settling()
+                    self.last_message='Result attribution pending • '+decision.reason
+                    key=(self.current_id,message.result,message.reason,decision.reason)
+                    if key!=self._held_result_key:
+                        self.store.audit('result held during game transition',{'game_id':self.current_id,
+                            'result':message.result,'text':message.text,'reason':decision.reason})
+                        self._held_result_key=key
+                    self.persist();return False
             confirmed=self._confirm_terminal_pending(observed) if observed and message.reason!='aborted' else False
             if self.premove_state:
                 self.store.audit('premove discarded at game end',{'game_id':self.current_id,**self.premove_state})

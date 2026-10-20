@@ -315,3 +315,18 @@ def test_pending_identity_survives_restart_and_cannot_append_before_fresh_metada
     restarted.set_game_mode('continue');restarted.process(Observation.from_board(board))
     assert not restarted.lifecycle.pending_restart and restarted.snapshot()['pending_moves']==['O-O']
     store.close()
+
+
+def test_result_popup_cannot_be_attributed_to_old_pgn_before_board_processing(tmp_path):
+    store,manager,now=setup(tmp_path);old=manager.current_id
+    target=manager.rec.board.copy();target.push_san('O-O')
+    names={**NAMES,'black':'OpponentB'}
+    manager.observe_context({'names':names},'first new opponent OCR')
+    result=EndMessage('1-0','resignation','You Won by resignation',.99)
+    assert not manager.declare_end(result,Observation.from_board(target))
+    assert manager.headers['Result']=='*' and not manager.terminal_message
+    for _ in range(4):frame(manager,now,target,names)
+    assert manager.current_id!=old
+    assert manager.declare_end(result,Observation.from_board(target))
+    assert manager.headers['Result']=='1-0' and json_game(store,old).headers['Result']=='*'
+    store.close()
