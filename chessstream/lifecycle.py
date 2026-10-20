@@ -250,6 +250,14 @@ class GameLifecycle:
                 self.set_phase('game in progress','Clock increase with continuous play; treating it as increment or correction')
                 return Decision()
             if self.reset_confirmed and (self.clock_running or (manager.terminal_message and not known)):
+                # Seeking an older portion of the *same* video makes clocks
+                # jump to an earlier value, often while the board is midgame.
+                # A clock jump without a witnessed opening reset is not a
+                # rematch. Require affirmative boundary evidence.
+                if self.same_visible_players(manager) and not (start or self.reset_board_seen):
+                    return self.hold(manager,obs,
+                        'Clocks jumped for the same players without a board reset; possible video seek',
+                        ('clock-seek-same-pair',))
                 return self.hold(manager,obs,reason+(' and the board reset' if start or self.reset_board_seen else ''),('clock-reset',),.5)
             if start or self.reset_board_seen or not current:
                 self.reset_board_seen|=start
@@ -267,8 +275,7 @@ class GameLifecycle:
         # When the displayed players still match this *ongoing* game, a
         # historical endpoint is often a video seek, not a request to switch
         # between short PGN fragments with identical headers.
-        previous_game_allowed = (self.reset_board_seen or self.reset_confirmed
-                                 or manager.terminal_message is not None
+        previous_game_allowed = (manager.terminal_message is not None
                                  or not self.same_visible_players(manager))
         prior=(self._return_game(manager,obs)
                if not current and self.names and previous_game_allowed else None)
