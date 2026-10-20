@@ -81,6 +81,36 @@ def select_capture_path(board: chess.Board, paths):
     return [ranked[0]]
 
 
+def speculative_detour(board: chess.Board, path) -> bool:
+    """Detect multiple unobserved moves by the same piece.
+
+    Two snapshots cannot distinguish a real queen/bishop excursion from a
+    fabricated shortest-route shuttle. Do not automatically confirm such
+    routes. Distinct one-move-per-piece gaps may still be reconstructed.
+    """
+    if len(path) < 3:
+        return False
+    state = board.copy(stack=False)
+    visited_destinations = {chess.WHITE: set(), chess.BLACK: set()}
+    for move in path:
+        color = state.turn
+        piece = state.piece_at(move.from_square)
+        if piece is None or move not in state.legal_moves:
+            return True
+        prior = visited_destinations[color]
+        if (move.from_square in prior and piece.piece_type != chess.PAWN
+                and not state.is_castling(move)):
+            return True
+        # Castling is an explicitly supported two-piece move, not evidence of
+        # an unobserved reversible shuttle; don't flag the following rook move.
+        if not state.is_castling(move):
+            prior.discard(move.from_square)
+            if piece.piece_type != chess.PAWN:
+                prior.add(move.to_square)
+        state.push(move)
+    return False
+
+
 class LegalSearcher:
     def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128):
         self.max_plies = max_plies
@@ -289,8 +319,8 @@ class Reconstructor:
         self.status = "recording" if len(self.branches) == 1 else "awaiting side to move"
         self.incomplete = False
         self.confirmation_plies = confirmation_plies
-        # One image cannot verify the order of three or more unseen moves.
-        # Retain the path as a hypothesis until explicit user confirmation.
+        # Repeated unobserved piece excursions are not proof of actual moves.
+        # Retain such paths as hypotheses until explicit user confirmation.
         self.gap_requires_confirmation = False
 
     def _recover_provisional(self, observed, update):
@@ -452,7 +482,7 @@ class Reconstructor:
                     update.search_ms += result.elapsed_ms
                 all_complete &= result.exhaustive
                 for path in result.paths:
-                    if len(path)>2:
+                    if speculative_detour(state, path):
                         self.gap_requires_confirmation = True
                     survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path)))
             if survivors or not all_complete:
@@ -477,7 +507,8 @@ class Reconstructor:
         # frames can eliminate hypotheses. Only their shared legal prefix may
         # enter the authoritative PGN, and user selection remains available.
         self.branches = list(unique.values())
-        if (any(len(path) > 2 for path in [b.moves for b in recovered] ) if recovered is not None else False):
+        if recovered is not None and any(speculative_detour(self.board,
+                [chess.Move.from_uci(move) for move in branch.moves]) for branch in recovered):
             self.gap_requires_confirmation = True
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
@@ -494,7 +525,7 @@ class Reconstructor:
         common = self.branches[0].moves[:prefix]
         if self.gap_requires_confirmation:
             # Subsequent identical frames cannot corroborate an unseen order.
-            # Do not silently confirm a speculative 3+ ply reconstruction.
+            # Do not silently confirm a speculative reversible reconstruction.
             common = ()
         if self.confirmation_plies:
             # Repetition or elapsed time cannot prove a piece was dropped.
@@ -515,7 +546,7 @@ class Reconstructor:
             root = self.board.fen()
             self.branches = [Branch(root, b.moves[len(common):]) for b in self.branches]
         if self.gap_requires_confirmation:
-            self.status = "unverified multi-move gap • select a legal sequence"
+            self.status = "possible invented move detour • confirm sequence"
         elif self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
             self.status = "provisional move • waiting for opponent response"
         else:
