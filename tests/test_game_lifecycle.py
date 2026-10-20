@@ -359,3 +359,52 @@ def test_explicit_analysis_mode_preserves_the_played_result(tmp_path):
     assert not manager.declare_end(EndMessage('1-0','checkmate','Checkmate',.99),Observation.from_board(manager.rec.board))
     assert manager.current_id==old and manager.headers['Result']=='*' and manager.terminal_message is None
     store.close()
+
+
+def test_hikaru_opening_e4_kept_after_name_ocr_typo_and_continuation(tmp_path):
+    """Observed 2026-10-20 bug: e4 was saved; OCR typo triggered a new FEN PGN.
+
+    Input was white DoingMyBest, black Builtifferent / BuiltDifferent,
+    then 1.e4 c5 2.Nf3 Nc6 with Black shown at the bottom.
+    """
+    from chessstream.lifecycle import probable_ocr_variant
+    assert probable_ocr_variant('Builtifferent','BuiltDifferent')
+    assert probable_ocr_variant('BulltDifferent','BuiltDifferent')
+    assert not probable_ocr_variant('OpponentA','OpponentB')
+    assert not probable_ocr_variant('Alice123','Alice124')
+    store=Store(tmp_path);manager=GameManager(store,Settings())
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4')
+    manager.observe_context({'names':{'white':'DoingMyBest','black':'Builtifferent'},
+                             'names_stable':True,'clocks':{'white':599,'black':593}},'opening-1')
+    first=manager.current_id
+    assert store.game(first) and '1. e4' in store.game(first)['pgn']
+    board=board_after('e4 c5')
+    for i in range(8):
+        manager.observe_context({'names':{'white':'DoingMyBest','black':'BuiltDifferent'},
+                                 'names_stable':True,'clocks':{'white':599,'black':593-i}},
+                                f'opening-variant-{i}')
+        manager.process(Observation.from_board(board))
+    assert manager.current_id==first
+    assert len(store.games())==1
+    assert '1. e4' in store.game(first)['pgn']
+    assert not manager.lifecycle.changed_names(manager,raw=True)
+    store.close()
+
+
+def test_false_overlay_names_do_not_trigger_a_game_boundary():
+    board=(100,120,700,700)
+    false=[
+        ('YouTube Chess Recording',.99,(160,80,410,100)),
+        ('Copy FEN',.99,(160,855,270,880)),
+        ('Flip',.99,(160,855,220,880)),
+        ('www.youtube.com',.99,(160,82,320,105)),
+    ]
+    context=extract_context(false,board,'white')
+    assert not context['names'] and not context['clocks']
+    real=[
+        ('DoingMyBest (1673)',.97,(160,80,340,101)),
+        ('BuiltDifferent (1671)',.97,(160,855,360,880)),
+    ]
+    context=extract_context(false+real,board,'white')
+    assert context['names']=={'black':'DoingMyBest','white':'BuiltDifferent'}
