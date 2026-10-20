@@ -248,6 +248,14 @@ def extract_context(lines,board_rect,orientation):
                 continue
 
             if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
+            # Stream headlines, browser tabs, visible PGN move lists and
+            # multiword prompts regularly appear near a captured board. A
+            # high OCR score cannot turn that surrounding prose into an ID.
+            if (len(clean.split())>3
+                    or re.search(r'\b(?:codex|python|prompt|candidate|slowkaru|download[s]?|file explorer|open alongside|optimi[sz]e|work with)\b',clean,re.I)
+                    or re.search(r'\b\d+\s*\.\s*(?:\.\s*\.)?\s*[a-hKQRBNOP][\w+#=-]*',clean,re.I)
+                    or (not clock and len(clean)<3)):
+                continue
             if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
             if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
             x=(r[0]+r[2])/2;y=(r[1]+r[3])/2
