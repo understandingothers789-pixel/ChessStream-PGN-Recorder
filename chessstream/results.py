@@ -105,7 +105,7 @@ class EndMessageDetector:
         self.reader=reader;self.clock=clock;self.last_scan=-100.;self.pending=None;self.pending_since=None
         self.last_lines=[];self._pixels=None
 
-    def scan(self,image,player_color=None,board_rect=None,names=None):
+    def scan(self,image,player_color=None,board_rect=None,names=None,orientation=None):
         now=self.clock()
         if now-self.last_scan<1:return None
         self.last_scan=now
@@ -125,6 +125,28 @@ class EndMessageDetector:
                         if len(line)<3:self.last_lines.append(line);continue
                         text,score,(a,b,c,d)=line
                         self.last_lines.append((text,score,(a+x0,b+y0,c+x0,d+y0)))
+            # Player names sit on narrow strips directly above or below the
+            # board, often at the opposite end of the clock. Read those strips
+            # at native resolution when whole-frame OCR missed a player. The
+            # result-message reader's board-only retry does not cover them.
+            if board_rect and orientation in ('white','black'):
+                found=extract_context(self.last_lines,board_rect,orientation).get('names',{})
+                bands=player_info_bands(image.shape,board_rect)
+                for side,color in (('top','black' if orientation=='white' else 'white'),
+                                   ('bottom',orientation)):
+                    if color in found:continue
+                    x0,y0,x1,y1=bands[side]
+                    if x1-x0<80 or y1-y0<18:continue
+                    for line in self.reader.read(image[y0:y1,x0:x1]):
+                        if len(line)<3:continue
+                        text,score,(a,b,c,d)=line
+                        absolute=(a+x0,b+y0,c+x0,d+y0)
+                        # Avoid duplicating a line from the whole-frame pass.
+                        if any(old[0]==text and len(old)>2
+                               and max(abs(old[2][i]-absolute[i]) for i in range(4))<12
+                               for old in self.last_lines):
+                            continue
+                        self.last_lines.append((text,score,absolute))
         relevant=self.last_lines
         if board_rect:
             x,y,w,h=board_rect
@@ -142,6 +164,24 @@ class EndMessageDetector:
 
     def invalidate_layout(self):
         self.reset();self._pixels=None;self.last_lines=[];self.last_scan=-100.
+
+
+def player_info_bands(image_shape, board_rect):
+    """Narrow native-resolution OCR regions above/below the detected board.
+
+    Avoid a whole-video OCR resize, which shrinks clock-adjacent usernames.
+    Each rectangle is (x0, y0, x1, y1) in the context image coordinates.
+    No pixels inside the playable board are required for the name search.
+    """
+    height,width=image_shape[:2]
+    bx,by,bw,bh=map(int,board_rect)
+    x0=max(0,bx-round(bw*.12))
+    x1=min(width,bx+bw+round(bw*.12))
+    margin=max(24,round(bh*.22))
+    overlap=round(bh*.025)
+    top=(x0,max(0,by-margin),x1,min(height,by+overlap))
+    bottom=(x0,max(0,by+bh-overlap),x1,min(height,by+bh+margin))
+    return {"top":top,"bottom":bottom}
 
 
 def clock_seconds(text):
