@@ -408,3 +408,54 @@ def test_false_overlay_names_do_not_trigger_a_game_boundary():
     ]
     context=extract_context(false+real,board,'white')
     assert context['names']=={'black':'DoingMyBest','white':'BuiltDifferent'}
+
+
+def test_slowkaru_video_seek_over_same_opponents_never_creates_three_games(tmp_path):
+    """Real October 20 stream: older e4 position reappeared, then checkmate.
+
+    A finite search is not a game-boundary detector, even when the stable
+    screenshot is >4 plies from the current PGN and the stream clocks jump.
+    """
+    store=Store(tmp_path)
+    manager=GameManager(store,Settings())
+    now=[100.]
+    manager._clock=lambda:now[0]
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4 c5 Nf3 Nc6 c4 g6 b3 Bg7')
+    pair={'white':'DoingMyBest','black':'BuiltDifferent'}
+    manager.observe_context({'names':pair,'raw_names':pair,'names_stable':True,
+                             'clocks':{'white':510,'black':523}},'before-seek')
+    gid=manager.current_id
+    verified=list(manager.rec.verified)
+    far=board_after('e4 c5 Nf3 Nc6 c4 g6 b3 Bg7 d4 Nxd4 Nxd4 Bxd4 Qf3 Bxa1 Na3 d6 e5 Bxe5 Nb5 Nf6 Bf4')
+    for i in range(12):
+        snapshot=frame(manager,now,far,pair,{'white':509-i*.2,'black':522-i*.2})
+        assert manager.current_id==gid and len(store.games())==1
+        assert manager.rec.verified==verified
+    assert 'PGN protected' in snapshot['status']
+    # The video jumps back to its earlier e4-only position with the clocks
+    # again near 10 minutes, then forward to the later chess position.
+    early=board_after('e4')
+    for i in range(4):
+        frame(manager,now,early,pair,{'white':597,'black':588})
+        assert manager.current_id==gid
+    for i in range(8):
+        frame(manager,now,far,pair,{'white':503-i*.2,'black':520-i*.2})
+        assert manager.current_id==gid and len(store.games())==1
+    assert manager.rec.verified==verified
+    assert '1. e4' in store.game(gid)['pgn']
+    store.close()
+
+
+def test_same_names_without_clock_reset_and_large_gap_quarantines_without_splitting(tmp_path):
+    store,manager,now=setup(tmp_path)
+    gid=manager.current_id
+    original=list(manager.rec.verified)
+    far=board_after('d4 d5 c4 e6 Nc3 Nf6 Bg5 Be7 e3 O-O Nf3 h6 Bh4 b6 cxd5 exd5')
+    for i in range(10):
+        frame(manager,now,far,NAMES,{'white':40-i*.1,'black':76-i*.1})
+        assert manager.current_id==gid
+    assert len(store.games())==1
+    assert manager.rec.verified==original
+    assert manager.lifecycle.summary(manager)['state']=='uncertain transition'
+    store.close()
