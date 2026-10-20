@@ -187,6 +187,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         """
         rec=self.rec
         if (rec is None or rec.verified or self.terminal_message
+                or (self.lifecycle.reset_confirmed and self.lifecycle.reset_board_seen)
                 or self.settings.initial_fen or rec.initial_fen==chess.STARTING_FEN):
             self._early_opening_candidate=None
             return False
@@ -224,6 +225,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             self.last_message='Earlier opening detected • waiting for another clear board frame'
             return False
         original=rec.serialize()
+        original_record=self.store.game(self.current_id)
+        previous_pgn=original_record['pgn'] if original_record else None
         self.cancel_background_recovery()
         self.reset_settling()
         self.clear_position_recovery()
@@ -241,6 +244,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self.last_message='Opening rewind recovered • original game identity preserved'
         self.store.audit('opening root corrected after video seek',{
             'game_id':self.current_id,'previous_state':original,
+            'previous_pgn':previous_pgn,
             'observed_earlier_placement':obs.placement(),
             'unique_opening_moves':path,'source':'two stable earlier board frames'})
         self.persist()
