@@ -141,14 +141,14 @@ class GameLifecycle:
         if key!=self._logged:
             logging.info('Game lifecycle: %s • %s',phase,reason);self._logged=key
 
-    def hold(self,manager,obs,reason,key,delay=None):
+    def hold(self,manager,obs,reason,key,delay=None,*,phase='uncertain transition',action='hold'):
         now=manager._clock()
         if self.candidate!=key:self.candidate=key;self.since=now
         if not self.frames or (self.frames[-1][0].timestamp,self.frames[-1][0].placement())!=(obs.timestamp,obs.placement()):
             self.frames.append((obs,self.context.copy()))
-        self.set_phase('uncertain transition',reason)
+        self.set_phase(phase,reason)
         if delay is not None and now-self.since>=delay:return Decision('new',reason)
-        return Decision('hold',reason)
+        return Decision(action,reason)
 
     def _return_game(self,manager,obs):
         if self.reset_reads:return None
@@ -160,10 +160,11 @@ class GameLifecycle:
         # present contiguously in the active main line.
         active_line=self._active_position_line(manager)
         matches=[]
-        rows=manager.store.query("SELECT id,headers,state FROM games WHERE id!=? AND status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC LIMIT 8",(manager.current_id,))
+        rows=manager.store.query("SELECT id,headers,state FROM games WHERE id!=? AND status!='imported' AND status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC LIMIT 8",(manager.current_id,))
         for row in rows:
             try:
                 headers=json.loads(row['headers']);state=json.loads(row['state'])
+                if row['id'] in manager.separated_from or not manager.archive_identity_matches(headers):continue
                 # A currently running game must never be auto-replaced with
                 # a previously completed PGN just because the screenshot
                 # revisits its final board. A wrong result OCR in an archived
@@ -355,7 +356,7 @@ class GameLifecycle:
             return self.hold(manager,obs,
                 'Same players, unlinked position: possible video seek or missed moves; PGN preserved. '
                 'Use New game to split, or return to the live board.',
-                ('same-pair-unlinked',))
+                ('same-pair-unlinked',),phase='unresolved move gap',action='recover')
         visible=chess.Board(f'{placement} w - - 0 1')
         if not any(chess.Board(f'{placement} {turn} - - 0 1').is_valid() for turn in ('w','b')):return Decision('hold','Recovery error: visible position is not a valid FEN')
         changed_squares=sum(manager.rec.board.piece_at(s)!=visible.piece_at(s) for s in chess.SQUARES)

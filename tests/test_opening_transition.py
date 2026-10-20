@@ -14,7 +14,7 @@ def board_after(sans):
     return board
 
 
-def test_ten_ply_castled_opening_is_one_legal_guessed_pgn(tmp_path):
+def test_ten_ply_castled_opening_proposal_does_not_become_an_unobserved_mainline(tmp_path):
     target=board_after('e4 b5 d4 a6 Bd3 g6 Nf3 Bb7 O-O Bg7')
     path=infer_visible_opening(Observation.from_board(target))
     assert len(path)==10
@@ -23,13 +23,15 @@ def test_ten_ply_castled_opening_is_one_legal_guessed_pgn(tmp_path):
     assert result.board_fen()==target.board_fen() and 'e1g1' in path
     store=Store(tmp_path);manager=GameManager(store,Settings(infer_unseen_opening=True))
     snapshot=manager.process(Observation.from_board(target))
-    assert manager.rec.initial_fen==chess.STARTING_FEN
-    assert len(snapshot['moves'])==9 and len(snapshot['pending_moves'])==1
+    assert manager.rec.initial_fen.split()[0]==target.board_fen()
+    assert not snapshot['moves'] and not snapshot['pending_moves']
+    for san in ('Nc3','d6'):
+        target.push_san(san);manager.process(Observation.from_board(target))
     manager.choose(0)
     game=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
     assert not game.errors and game.end().board().board_fen()==target.board_fen()
-    assert 'FEN' not in game.headers
-    assert all('Guessed opening prefix' in node.comment for node in game.mainline())
+    assert 'FEN' in game.headers
+    assert [node.san() for node in game.mainline()]==['Nc3','d6']
     store.close()
 
 
@@ -65,11 +67,12 @@ def test_skipped_opening_continuation_keeps_existing_game(tmp_path):
     old=board_after('e4 a6 d4 b5')
     target=board_after('e4 a6 d4 b5 Bd3 g6 Nf3 Bb7 O-O Bg7')
     manager.process(Observation.from_board(old));game_id=manager.current_id
+    prefix=manager.rec.verified[:]
     manager.process(Observation.from_board(target));time[0]=1.1
     manager.process(Observation.from_board(target))
     assert manager.current_id==game_id and len(store.games())==1
-    assert (manager.rec.board.board_fen()==target.board_fen()
-            or any(branch.board().board_fen()==target.board_fen() for branch in manager.rec.branches))
+    assert manager.rec.verified==prefix
+    assert manager.last_observation.placement()==target.board_fen()
     store.close()
 
 

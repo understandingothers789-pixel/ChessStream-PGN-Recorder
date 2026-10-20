@@ -176,15 +176,20 @@ class RecordingWorker(QThread):
         self.commands=queue.SimpleQueue()
         from .recovery import RecentFrames
         self.recent_frames=RecentFrames(12)
+        self._processed_frames=0;self._late_capture_slots=0
 
     def layout_changed(self):
         """Invalidate geometry-dependent evidence, retaining the game identity."""
+        self.manager.cancel_background_recovery()
+        self.manager.cancel_saved_join()
+        self.manager._evidence_revision+=1
         self.manager.clear_position_recovery();self.manager.reset_settling()
         self._text_detector.invalidate_layout();self._context_stabilizer.reset_candidates()
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
         self.manager.observe_frame(obs)
+        self.manager.poll_saved_join()
         automatic=False
         if (self.preview_only and stable_count>=2 and self.manager.settings.auto_record_opening
                 and self.manager.opening_ready(obs)):
@@ -197,6 +202,8 @@ class RecordingWorker(QThread):
             logging.info('Automatic recording started after a supported opening move appeared')
         if stable_count>=2 and not self.preview_only:
             if self.manager.lifecycle_gate(obs):
+                if self.manager.lifecycle.phase=='unresolved move gap':
+                    self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id))
                 snapshot=self.manager.lifecycle_snapshot(obs)
             elif self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id)):
                 snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues'}
@@ -212,6 +219,7 @@ class RecordingWorker(QThread):
         self.recent_frames.mark(self.manager.current_id,not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
             and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games'))
         if automatic:snapshot['recording_started_automatically']=True
+        self.manager.trace_frame(obs,stable_count,snapshot)
         return snapshot
 
     def scan_context(self,image,rect,obs):
@@ -284,7 +292,7 @@ class RecordingWorker(QThread):
                                 if self.manager.current_id!=value[0]:raise ValueError('The active game changed. Select the split move again.')
                                 self.manager.split_game_at(value[1])
                             elif action=="repair":self.manager.repair_current()
-                            elif action=="join_previous":self.manager.join_previous_recording()
+                            elif action=="join_previous":self.manager.join_previous_recording(background=True)
                             elif action=="correct":
                                 if isinstance(value,tuple):self.manager.correct_line(*value)
                                 else:self.manager.correct_line(value)
@@ -442,10 +450,17 @@ class RecordingWorker(QThread):
                         next_saved=tick+settings.interval
                     snapshot["buffered_frames"]=len(self.recent_frames.frames)
                     snapshot["buffered_bytes"]=sum(frame["image"].nbytes for frame in self.recent_frames.frames)
-                    snapshot["processing_ms"]=round((time.monotonic()-tick)*1000)
+                    elapsed=time.monotonic()-tick
+                    period=recognition_period(settings)
+                    self._processed_frames+=1
+                    # Estimated missed scheduling slots, not unseen source
+                    # video frames. The video frame rate is not observable.
+                    self._late_capture_slots+=max(0,int(elapsed/period))
+                    snapshot["processing_ms"]=round(elapsed*1000)
+                    snapshot["capture_metrics"]={'processed_frames':self._processed_frames,
+                        'estimated_late_slots':self._late_capture_slots,'period_ms':round(period*1000)}
                     snapshot["saved_count"]=store.deletion_estimate({"session_id":self.manager.session_id})["count"]
                     self.update.emit(snapshot)
-                    period=recognition_period(settings)
                     self.stopping.wait(max(.005,period-(time.monotonic()-tick)))
         except Exception as e:
             import logging
@@ -453,6 +468,7 @@ class RecordingWorker(QThread):
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
             self.manager.cancel_background_recovery()
+            self.manager.cancel_saved_join()
             try:
                 if not self.preview_only:
                     self.manager.finish()

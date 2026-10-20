@@ -7,32 +7,42 @@ import chess.pgn
 
 from .domain import Observation,utcnow
 from .reconstruction import Branch,LegalSearcher
+from .commitment import assess_search
 
 
 class GameBoundaries:
+    def archive_identity_matches(self,headers):
+        """Archive selection needs both currently visible, confirmed identities.
+
+        Unknown names and the streamer alone are compatible with many games;
+        neither establishes which saved game is being shown.
+        """
+        names=self.lifecycle.names;raw=self.lifecycle.raw_names
+        key=lambda value:''.join(value.casefold().split())
+        return all(key(names.get(color,'')) not in ('','unknown')
+                   and key(names[color])==key(raw.get(color,''))
+                   and key(names[color])==key(headers.get(color.title(),'Unknown'))
+                   for color in ('white','black'))
+
     def _resume_initial_identity(self,obs,opening_moves=()):
         names=self.lifecycle.names
         if len(names)<2 or self.lifecycle.reset_reads:return False
+        # An opening is shared by countless games, including rematches with
+        # the same players. It cannot identify an older recording at startup.
+        if opening_moves or obs.placement()==chess.Board().board_fen():return False
         matches=[]
         for row in self.store.query("SELECT * FROM games WHERE status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC LIMIT 2"):
             try:headers=json.loads(row['headers']);state=json.loads(row['state'])
             except (ValueError,TypeError):continue
-            if any(''.join(headers.get(c.title(),'Unknown').casefold().split())!=''.join(n.casefold().split()) for c,n in names.items()):continue
-            positions=[chess.Board(state['initial_fen'])]
-            for uci in state['verified']:
-                board=positions[-1].copy();board.push_uci(uci);positions.append(board)
+            if not self.archive_identity_matches(headers):continue
+            if headers.get('Result','*')!='*' or state.get('terminal_message'):continue
+            try:
+                positions=[chess.Board(state['initial_fen'])]
+                for uci in state['verified']:
+                    board=positions[-1].copy();board.push_uci(uci);positions.append(board)
+            except (ValueError,TypeError,KeyError):continue
             compatible=[board for board in positions if board.board_fen()==obs.placement()]
             if not compatible:continue
-            # Placement alone cannot establish a saved game's side to move.
-            # A fresh, unique standard opening such as 1.e4 proves Black is
-            # next. Reject old FEN-only checkpoints initialized with White
-            # to move on that same placement.
-            if opening_moves:
-                initial=chess.Board()
-                try:
-                    for move in opening_moves:initial.push_uci(move)
-                except (ValueError,chess.IllegalMoveError):continue
-                if not any(board.turn==initial.turn for board in compatible):continue
             matches.append(row['id'])
         if len(matches)!=1:return False
         context=self.latest_context;self.recover(matches[0],persist=False);self.latest_context=context
@@ -49,9 +59,15 @@ class GameBoundaries:
 
     def lifecycle_gate(self,obs):
         with self.lock:
+            self.note_evidence(obs)
             self.last_observation=obs
             decision=self.lifecycle.evaluate(self,obs)
             if decision.action=='continue':return False
+            if decision.action=='recover':
+                self.rec.status='unresolved move gap'
+                self.last_message=decision.reason+' • PGN protected'
+                self.persist()
+                return True
             self.cancel_background_recovery();self.reset_settling()
             if decision.action=='new':
                 self.start_separate_game(obs,decision.reason);return True
@@ -98,8 +114,9 @@ class GameBoundaries:
             for frame,context in frames[1:]:
                 if frame.placement()==trial.board_fen():continue
                 result=LegalSearcher(1,2000,25,max(.8,self.settings.min_confidence)).search(trial,frame)
-                if len(result.paths)!=1:break
-                move=result.paths[0][0];mover='white' if trial.turn else 'black'
+                evidence=assess_search(trial,result,frame,max(.8,self.settings.min_confidence))
+                if not evidence.automatic or len(evidence.path)!=1:break
+                move=evidence.path[0];mover='white' if trial.turn else 'black'
                 trial.push(move);moves.append(move.uci())
                 if context.get('timestamp')==frame.timestamp and mover in context.get('clocks',{}):clocks[str(len(moves))]=context['clocks'][mover]
             else:

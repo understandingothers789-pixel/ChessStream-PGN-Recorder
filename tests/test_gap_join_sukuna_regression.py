@@ -134,7 +134,11 @@ def test_full_first_part_eval_variation_and_later_clock_survive_unique_join():
         threshold=.7; path_limit=128
     with patch('chessstream.gap_join._gap_search',
                return_value=SearchResult(paths=[bridge],exhaustive=True,shortest_proven=True)):
-        text = join_recordings(rows,Dummy())
+        # This fixture deliberately contains a repeated-piece shuttle. Even
+        # one returned shortest route needs explicit video confirmation.
+        with pytest.raises(AmbiguousGapError):
+            join_recordings(rows,Dummy())
+        text = join_recordings(rows,Dummy(),confirmed_paths={'second':tuple(m.uci() for m in bridge)})
     merged = chess.pgn.read_game(io.StringIO(text))
     assert merged is not None and not merged.errors
     assert merged.headers['Event'] == 'YouTube Chess Recording - Part 1'

@@ -67,7 +67,7 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     actions=[]
     with monkeypatch.context() as action_patch:
         action_patch.setattr(window.manager,'repair_current',lambda:actions.append('repair'))
-        action_patch.setattr(window.manager,'join_previous_recording',lambda:actions.append('join'))
+        action_patch.setattr(window.manager,'join_previous_recording',lambda **kwargs:actions.append('join'))
         window.repair_pgn_button.click();window.join_previous_button.click()
     assert actions==['repair','join']
     from PySide6.QtWidgets import QPushButton

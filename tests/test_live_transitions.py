@@ -42,15 +42,18 @@ def test_unlinked_position_setting_can_keep_rewind_protection(tmp_path):
     store.close()
 
 
-def test_weak_unchanged_b1_does_not_trap_new_opening_in_old_pgn(tmp_path):
+def test_uncertain_new_opening_waits_for_clear_fen_without_guessing_history(tmp_path):
     store,manager=manager_at_old_game(tmp_path);time=[0.];manager._clock=lambda:time[0]
     target=board_after('d4 c6 Bf4 d5 e3 e6 Nf3 f6');obs=Observation.from_board(target)
     obs.probabilities[chess.B1]=.66/12;obs.probabilities[chess.B1,2]=.34
     previous=manager.current_id
     manager.process(obs);time[0]=1.1;snapshot=manager.process(obs)
-    assert manager.current_id!=previous and manager.rec.initial_fen==chess.STARTING_FEN
-    assert any(branch.board().board_fen()==target.board_fen() for branch in manager.rec.branches)
-    assert 'b1' in snapshot['recognition_ignored_squares']
+    assert manager.current_id==previous
+    clear=Observation.from_board(target)
+    time[0]=2.;manager.process(clear)
+    time[0]=8.;manager.process(clear)
+    assert manager.current_id!=previous
+    assert manager.rec.initial_fen.split()[0]==target.board_fen() and not manager.rec.verified
     store.close()
 
 

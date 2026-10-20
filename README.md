@@ -1,5 +1,7 @@
 # ChessStream PGN Recorder
 
+**Development build 1.6.24.dev0** on [fix/non-destructive-pgn-gap-joins](https://github.com/understandingothers789-pixel/ChessStream-PGN-Recorder/tree/fix/non-destructive-pgn-gap-joins): automatic PGN writers now share evidence rules; ambiguous openings keep a visible FEN; saved joins run in background and preserve their sources. See the [handoff implementation and remaining limits](docs/HANDOFF-IMPLEMENTATION-2026-10-20.md). This branch remains under review in draft PR #1.
+
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, optionally saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
 **Version 1.6.23 lets you combine older saved PGNs while a recording continues.** Select two or more saved games that do not include the active PGN; the combined copy is saved separately and the live recorder stays on its current game. Version 1.6.22 also prevents short replay fragments from switching the active PGN back and forth. See the [release notes](docs/RELEASE-v1.6.23.md), [game lifecycle validation](docs/GAME_LIFECYCLE.md), and [user guide](docs/USER_GUIDE.md).

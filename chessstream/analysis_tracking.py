@@ -9,6 +9,7 @@ import chess.pgn
 from .domain import board_labels, utcnow
 from .pgn_tools import node_at
 from .reconstruction import LegalSearcher
+from .commitment import assess_search
 
 
 def tree_positions(game):
@@ -59,15 +60,27 @@ class AnalysisTracking:
         labels=obs.labels
         positions.sort(key=lambda entry:(entry[1]!=tuple(cursor) if cursor is not None else True,
             sum(board_labels(entry[2])!=labels),-len(entry[1])))
-        started=time.monotonic();remaining=18000
+        started=time.monotonic();remaining=18000;links=[]
+        # Once a replay cursor exists, an unseen route from another tree node
+        # cannot establish what happened after it. Exact historical positions
+        # were handled above; only extend this observed cursor automatically.
+        if cursor is not None:
+            positions=[entry for entry in positions if entry[1]==tuple(cursor)]
         for _,path,board in positions[:32]:
             ms=140-(time.monotonic()-started)*1000
-            if ms<=0 or remaining<500:break
+            if ms<=0 or remaining<500:return None
             result=LegalSearcher(6,min(5000,remaining),ms,max(.8,self.settings.min_confidence)).search(
-                board,obs,first_shortest=True)
+                board,obs)
             remaining-=result.nodes
-            if result.paths:return path,tuple(move.uci() for move in result.paths[0])
-        return None
+            decision=assess_search(board,result,obs,max(.8,self.settings.min_confidence))
+            if decision.kind in ('incomplete','ambiguous','speculative','invalid'):return None
+            if decision.automatic:links.append((path,tuple(move.uci() for move in decision.path)))
+        # Exhausting only a subset of anchors cannot certify a unique link.
+        if len(positions)>32:return None
+        if not links:return None
+        shortest=min(len(moves) for _,moves in links)
+        links=[link for link in links if len(link[1])==shortest]
+        return links[0] if len(links)==1 else None
 
     @staticmethod
     def _append_analysis(game,path,moves):

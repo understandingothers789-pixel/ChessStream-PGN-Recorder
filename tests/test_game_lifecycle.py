@@ -457,7 +457,7 @@ def test_same_names_without_clock_reset_and_large_gap_quarantines_without_splitt
         assert manager.current_id==gid
     assert len(store.games())==1
     assert manager.rec.verified==original
-    assert manager.lifecycle.summary(manager)['state']=='uncertain transition'
+    assert manager.lifecycle.summary(manager)['state']=='unresolved move gap'
     store.close()
 
 

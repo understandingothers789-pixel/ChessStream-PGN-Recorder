@@ -12,6 +12,9 @@ from time import perf_counter
 import chess
 import numpy as np
 from .domain import Observation, board_labels
+from .commitment import speculative_detour
+
+ANY_EP = object()
 
 
 @dataclass
@@ -22,6 +25,7 @@ class SearchResult:
     elapsed_ms: float = 0
     depth: int = 0
     shortest_proven: bool = False
+    stop_reason: str = ''
 
 
 def capture_path_rank(board: chess.Board, path: tuple[chess.Move, ...] | list[chess.Move]):
@@ -81,36 +85,6 @@ def select_capture_path(board: chess.Board, paths):
     return [ranked[0]]
 
 
-def speculative_detour(board: chess.Board, path) -> bool:
-    """Detect multiple unobserved moves by the same piece.
-
-    Two snapshots cannot distinguish a real queen/bishop excursion from a
-    fabricated shortest-route shuttle. Do not automatically confirm such
-    routes. Distinct one-move-per-piece gaps may still be reconstructed.
-    """
-    if len(path) < 3:
-        return False
-    state = board.copy(stack=False)
-    visited_destinations = {chess.WHITE: set(), chess.BLACK: set()}
-    for move in path:
-        color = state.turn
-        piece = state.piece_at(move.from_square)
-        if piece is None or move not in state.legal_moves:
-            return True
-        prior = visited_destinations[color]
-        if (move.from_square in prior and piece.piece_type != chess.PAWN
-                and not state.is_castling(move)):
-            return True
-        # Castling is an explicitly supported two-piece move, not evidence of
-        # an unobserved reversible shuttle; don't flag the following rook move.
-        if not state.is_castling(move):
-            prior.discard(move.from_square)
-            if piece.piece_type != chess.PAWN:
-                prior.add(move.to_square)
-        state.push(move)
-    return False
-
-
 class LegalSearcher:
     def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128):
         self.max_plies = max_plies
@@ -121,9 +95,14 @@ class LegalSearcher:
 
     def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None,
                first_shortest: bool = False, pawn_first: bool = False,
-               target_castling_rights: int | None = None) -> SearchResult:
+               target_castling_rights: int | None = None, cancelled=None,
+               target_ep_square=ANY_EP) -> SearchResult:
         result = SearchResult()
         start = perf_counter()
+        if cancelled and cancelled():
+            result.exhaustive = False
+            result.stop_reason = 'canceled'
+            return result
         target = observed.labels.tolist()
         mask = observed.probabilities.max(axis=1) >= self.threshold
         if mask.sum() < 60:
@@ -131,7 +110,9 @@ class LegalSearcher:
             return result
         if (observed.matches(board, self.threshold)
                 and (target_turn is None or board.turn == target_turn)
-                and (target_castling_rights is None or board.castling_rights == target_castling_rights)):
+                and (target_castling_rights is None or board.castling_rights == target_castling_rights)
+                and (target_ep_square is ANY_EP or
+                     (board.ep_square if board.has_legal_en_passant() else None)==target_ep_square)):
             result.paths = [()]
             result.shortest_proven = True
             return result
@@ -184,9 +165,13 @@ class LegalSearcher:
         def dfs(state: chess.Board, remaining: int):
             nonlocal abort
             result.nodes += 1
-            if result.nodes > self.node_limit or (result.nodes % 64 == 0 and (perf_counter()-start)*1000 > self.time_limit_ms):
+            if (result.nodes > self.node_limit
+                    or (result.nodes % 64 == 0 and (perf_counter()-start)*1000 > self.time_limit_ms)
+                    or (result.nodes % 64 == 0 and cancelled and cancelled())):
                 abort = True
                 result.exhaustive = False
+                result.stop_reason = ('canceled' if cancelled and cancelled() else
+                                      'node limit' if result.nodes > self.node_limit else 'time limit')
                 return False
             white,black = state.occupied_co[chess.WHITE],state.occupied_co[chess.BLACK]
             # Captured material cannot reappear; promotions preserve piece count.
@@ -205,12 +190,15 @@ class LegalSearcher:
                            (white ^ initial[6]))
                 if (mismatch == 0 and not changed & ~known
                         and (target_turn is None or state.turn == target_turn)
-                        and (target_castling_rights is None or state.castling_rights == target_castling_rights)):
+                        and (target_castling_rights is None or state.castling_rights == target_castling_rights)
+                        and (target_ep_square is ANY_EP or
+                             (state.ep_square if state.has_legal_en_passant() else None)==target_ep_square)):
                     result.paths.append(tuple(path))
                     result.shortest_proven = True
                     if first_shortest or len(result.paths) >= self.path_limit:
                         abort = True
                         result.exhaustive = False
+                        result.stop_reason = 'first match' if first_shortest else 'path limit'
                     return True
                 return False
             if mismatch.bit_count() > 4 * remaining:
@@ -269,13 +257,14 @@ class LegalSearcher:
             if not found:dead.add(key)
             return found
 
-        # Normal searches enumerate shortest alternatives; quick guesses stop at the first match.
+        # Evidence searches enumerate alternatives; classification probes may stop early.
         state = board.copy(stack=False)
         for depth in range(1, self.max_plies+1):
             if target_turn is not None and (board.turn ^ bool(depth & 1))!=target_turn:continue
             result.depth = depth
             if (perf_counter()-start)*1000 > self.time_limit_ms:
                 result.exhaustive = False
+                result.stop_reason = 'time limit'
                 break
             dfs(state, depth)
             if abort or result.paths:
@@ -319,6 +308,7 @@ class Reconstructor:
         self.status = "recording" if len(self.branches) == 1 else "awaiting side to move"
         self.incomplete = False
         self.confirmation_plies = confirmation_plies
+        self.history_unknown = bool(roots)
         # Repeated unobserved piece excursions are not proof of actual moves.
         # Retain such paths as hypotheses until explicit user confirmation.
         self.gap_requires_confirmation = False
@@ -394,7 +384,7 @@ class Reconstructor:
         return tuple(sorted(candidates)) if len(candidates)<=4 else ()
 
     def _adopt_probe(self, probe):
-        for name in ('initial_fen','board','branches','verified','history','incomplete','status','gap_requires_confirmation'):
+        for name in ('initial_fen','board','branches','verified','history','incomplete','status','gap_requires_confirmation','history_unknown'):
             setattr(self,name,getattr(probe,name))
 
     def _retry_noisy_squares(self, observed, original_update, candidates):
@@ -482,7 +472,15 @@ class Reconstructor:
                     update.search_ms += result.elapsed_ms
                 all_complete &= result.exhaustive
                 for path in result.paths:
+                    if len(branch.moves)+len(path)>min(128,max(32,self.searcher.max_plies*4)):
+                        all_complete=False
+                        break
                     survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path)))
+                    if len(survivors) > self.searcher.path_limit:
+                        all_complete = False
+                        break
+                if not all_complete:
+                    break
             if survivors or not all_complete:
                 break
         if not all_complete:
@@ -582,6 +580,7 @@ class Reconstructor:
             self.verified.append(uci)
             self.history.append(self.board.board_fen())
         self.branches = probe.branches
+        self.history_unknown |= probe.history_unknown
         self.gap_requires_confirmation = probe.gap_requires_confirmation
         self.incomplete = False
         self.status = probe.status
@@ -628,7 +627,7 @@ class Reconstructor:
         return {"initial_fen":self.initial_fen,"verified":list(self.verified),
                 "branches":[{"root_fen":b.root_fen,"moves":list(b.moves)} for b in self.branches],
                 "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies,
-                "gap_requires_confirmation":self.gap_requires_confirmation}
+                "gap_requires_confirmation":self.gap_requires_confirmation,"history_unknown":self.history_unknown}
 
     @classmethod
     def restore(cls, data: dict, searcher: LegalSearcher | None = None) -> Reconstructor:
@@ -642,4 +641,5 @@ class Reconstructor:
         r.incomplete = data.get("incomplete",False)
         r.confirmation_plies = data.get("confirmation_plies",0)
         r.gap_requires_confirmation = data.get("gap_requires_confirmation",False)
+        r.history_unknown = data.get("history_unknown",False)
         return r

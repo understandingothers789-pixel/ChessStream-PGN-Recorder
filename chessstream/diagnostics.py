@@ -28,9 +28,12 @@ def configure_logging(root):
 def export_diagnostics(store,path):
     """No screenshots, screen pixels or database file locks are included."""
     for handler in logging.getLogger().handlers:handler.flush()
-    report={'created':utcnow(),'platform':platform.platform(),'python':sys.version,
+    report={'format_version':2,'created':utcnow(),'platform':platform.platform(),'python':sys.version,
             'observations':store.query('SELECT * FROM observations ORDER BY id DESC LIMIT 5000'),
-            'audit':store.query('SELECT * FROM audit ORDER BY id DESC LIMIT 2000')}
+            'audit':store.query('SELECT * FROM audit ORDER BY id DESC LIMIT 2000'),
+            'board_trace':store.query('SELECT * FROM board_trace ORDER BY id'),
+            'board_trace_policy':{'max_transitions':10000,'repeats':'coalesced with comparison count and first/last time',
+                                  'pixels_saved':False,'observed_turn':'unknown; FENs describe reconstruction hypotheses'}}
     games=store.games()
     report['games']=[{k:g[k] for k in ['id','name','started','ended','status','headers','state','plies']} for g in games]
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED) as archive:

@@ -283,33 +283,38 @@ def extract_context(lines,board_rect,orientation):
         for side,text,r,score in candidates:
             if side!=color:continue
             if not clock and (score<.9 or not bx-bw*.1<=(r[0]+r[2])/2<=bx+bw*1.1):continue
+            rated=bool(re.search(r'(?:\(\d{2,4}\)|\s\d{2,4})\s*$',text))
             clean=re.sub(r'^(GM|IM|FM|NM|CM|WGM|WIM)\s+','',text.strip().rstrip(' :;|•'))
             clean=re.sub(r'\s*(?:\(\d{2,4}\)|\s\d{2,4})\s*$','',clean)
+            rated_identity=rated and bool(re.fullmatch(r'[\w.-]{2,40}',clean))
             # Overlay controls, URLs, and app labels are *not* player IDs.
             # False names here corrupt lifecycle identity and may split a real
             # game despite a perfectly legal board continuation.
             folded=re.sub(r'\s+',' ',clean.casefold()).strip()
-            if (folded in {'flip','copy fen','copy pgn','youtube chess recording',
+            if ((not rated_identity and folded in {'flip','copy fen','copy pgn','youtube chess recording',
                            'download','share','next','previous','play','pause',
-                           'game in progress','chessstream','copy','settings'}
+                           'game in progress','chessstream','copy','settings','board',
+                           'captured board','reconstructed board','moves','clock'})
                     or re.search(r'(?i)(?:https?://|www\.|youtube\.com|\.pgn$|\.exe$)',folded)
                     or folded.startswith(('copy fen ', 'youtube chess recording ', 'flip board '))):
                 continue
             # Reject overlay metadata even when OCR finds a nearby clock.
             if (re.fullmatch(r'(?i)v(?:ersion)?\s*\d+(?:\.\d+){1,4}', clean)
-                    or re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b', clean)):
+                    or (not rated_identity and re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b', clean))):
                 continue
 
-            if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
+            if not clock and not rated_identity and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
             # Stream headlines, browser tabs, visible PGN move lists and
             # multiword prompts regularly appear near a captured board. A
             # high OCR score cannot turn that surrounding prose into an ID.
             if (len(clean.split())>3
-                    or re.search(r'\b(?:codex|python|prompt|candidate|slowkaru|download[s]?|file explorer|open alongside|optimi[sz]e|work with)\b',clean,re.I)
+                    or (len(clean.split())>1 and not rated_identity
+                        and re.search(r'\b(?:file explorer|open alongside|work with|candidate slowkaru)\b',clean,re.I))
                     or re.search(r'\b\d+\s*\.\s*(?:\.\s*\.)?\s*[a-hKQRBNOP][\w+#=-]*',clean,re.I)
-                    or (not clock and len(clean)<3)):
+                    or (not clock and not rated_identity and len(clean)<3)):
                 continue
-            if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
+            if ((not rated_identity and clean.lower() in excluded)
+                    or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean)):continue
             if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
             x=(r[0]+r[2])/2;y=(r[1]+r[3])/2
             if bx<=cx<=bx+bw and not bx-bw*.1<=x<=bx+bw*1.1:continue

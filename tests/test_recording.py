@@ -1,5 +1,6 @@
 """Essential recording, gap, ambiguity, result and PGN export regressions."""
 import io
+import json
 import pytest
 import chess
 import chess.pgn
@@ -67,15 +68,17 @@ def test_live_fen_checkpoint_reconnects_to_preserved_game_after_window_transitio
     manager._start_from_visible(checkpoint,'simulated fullscreen board reacquisition')
     checkpoint_id=manager.current_id
     assert checkpoint_id!=original_id
+    sources={gid:store.game(gid)['pgn'] for gid in (original_id,checkpoint_id)}
     # Window/layout changes can make OCR briefly report a clock jump. A legal
     # midgame continuation should still reconnect to the preserved PGN.
     manager.clocks_recently_reset=lambda:True
     board.push_san('Ba4');board.push_san('Nf6')
     assert manager._resume_latest_game_at_position(Observation.from_board(board))
-    assert manager.current_id==original_id
+    assert manager.current_id not in sources
     assert manager.rec.verified[-2:]==['b5a4','g8f6']
     assert manager.store.game(checkpoint_id)['status'].startswith('reconnected • see ')
-    assert chess.pgn.read_game(io.StringIO(manager.store.game(original_id)['pgn'])).end().board().board_fen()==board.board_fen()
+    assert chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn'])).end().board().board_fen()==board.board_fen()
+    assert all(store.game(gid)['pgn']==pgn for gid,pgn in sources.items())
     store.close()
 
 
@@ -86,18 +89,20 @@ def test_live_fen_checkpoint_is_joined_into_main_pgn_and_becomes_active(tmp_path
     checkpoint=Observation.from_board(board)
     manager._start_from_visible(checkpoint,'simulated fullscreen reacquisition')
     checkpoint_id=manager.current_id
+    sources={gid:store.game(gid)['pgn'] for gid in (original_id,checkpoint_id)}
     for san in 'O-O Be7'.split():
         board.push_san(san);manager.process(Observation.from_board(board))
     board.push_san('Re1')
     assert manager._resume_latest_game_at_position(Observation.from_board(board))
-    assert manager.current_id==original_id
-    combined=chess.pgn.read_game(io.StringIO(store.game(original_id)['pgn']))
+    assert manager.current_id not in sources
+    combined=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
     assert not combined.errors
     assert [node.san() for node in combined.mainline()]==[
         'e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7','Re1']
     assert combined.end().board().board_fen()==board.board_fen()
-    assert 'Earlier moves are not included' not in store.game(original_id)['pgn']
-    assert 'saved moves remain unchanged' not in store.game(original_id)['pgn']
+    assert 'Earlier moves are not included' not in store.game(manager.current_id)['pgn']
+    assert 'saved moves remain unchanged' not in store.game(manager.current_id)['pgn']
+    assert all(store.game(gid)['pgn']==pgn for gid,pgn in sources.items())
     assert store.game(checkpoint_id)['status'].startswith('reconnected • see ')
     assert 'latest PGN' in manager.last_message or 'Joined the saved PGNs' in manager.last_message
     store.close()
@@ -160,7 +165,8 @@ def test_join_saved_segments_fills_qxd4_and_preserves_clocks_and_variations():
     later.variations[0].set_clock(444)
     later.add_variation(chess.Move.from_uci('g8f6')).comment='Review alternative'
     rows=[dict(id='a',started='2026-10-19T10:00:00',pgn=export_pgn(chess.STARTING_FEN,moves,{'White':'YO MAMA','Result':'*'})),
-          dict(id='b',started='2026-10-19T10:04:00',pgn=str(later))]
+          dict(id='b',started='2026-10-19T10:04:00',pgn=str(later),
+               state=json.dumps({'history_unknown':True}))]
     original=[row['pgn'] for row in rows]
     joined=chess.pgn.read_game(io.StringIO(join_recordings(rows,LegalSearcher())))
     nodes=list(joined.mainline())
