@@ -55,7 +55,7 @@ def main():
                       os.getpid(),global_lock_path)
         QMessageBox.warning(None,'ChessStream already running',
             'A ChessStream recorder is already running, possibly from another '
-            'extracted build or a different data folder.\\n\\n'
+            'extracted build or a different data folder.\n\n'
             'Close all other ChessStream instances before starting another. '
             'Running two recorders simultaneously can create separate PGNs '
             'and make analysis/replay indicators appear to flicker.')

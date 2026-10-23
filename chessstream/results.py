@@ -102,6 +102,7 @@ class LocalTextReader:
     """
     def __init__(self):
         import onnxruntime as ort
+        ort.disable_telemetry_events()
         root=Path(__file__).parent/'assets/models'
         options=ort.SessionOptions();options.intra_op_num_threads=2;options.inter_op_num_threads=1
         detector=verify_bundled_model(root/'result-text-det.onnx',root)

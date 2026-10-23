@@ -331,6 +331,12 @@ class LegalSearcher:
 class Branch:
     root_fen: str
     moves: tuple[str, ...]
+    requires_confirmation: bool | None = None
+
+    def __post_init__(self):
+        if self.requires_confirmation is None:
+            self.requires_confirmation=bool(self.moves) and speculative_detour(chess.Board(self.root_fen),
+                [chess.Move.from_uci(uci) for uci in self.moves])
 
     def board(self) -> chess.Board:
         b = chess.Board(self.root_fen)
@@ -395,7 +401,16 @@ class Reconstructor:
             return None
         old = {(b.root_fen, b.moves) for b in self.branches}
         root = self.board.fen()
-        result = [Branch(root,p) for p in candidates]
+        result=[]
+        for p in candidates:
+            prior=[branch for branch in self.branches if p[:len(branch.moves)]==branch.moves]
+            # A witnessed intermediate board separates gaps. Replaying the
+            # entire pending suffix would misclassify an observed Bg4 followed
+            # by dxe5 Bxf3 as an entirely unseen bishop excursion.
+            requires=(any(branch.requires_confirmation or speculative_detour(branch.board(),
+                [chess.Move.from_uci(uci) for uci in p[len(branch.moves):]]) for branch in prior)
+                if prior else speculative_detour(self.board,[chess.Move.from_uci(uci) for uci in p]))
+            result.append(Branch(root,p,requires))
         update.recovered = any((root,p) not in old for p in candidates) and not compatible
         # A shorter supported line also removes unverified reversible cycles.
         update.recovered |= any(len(b.moves)>len(paths[0]) for b in self.branches)
@@ -530,7 +545,8 @@ class Reconstructor:
                     if len(branch.moves)+len(path)>min(128,max(32,self.searcher.max_plies*4)):
                         all_complete=False
                         break
-                    survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path)))
+                    survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path),
+                        branch.requires_confirmation or speculative_detour(state,path)))
                     if len(survivors) > self.searcher.path_limit:
                         all_complete = False
                         break
@@ -561,10 +577,7 @@ class Reconstructor:
         # Recompute from surviving pending hypotheses on EVERY completed
         # observation. A discarded queen excursion cannot poison future
         # ordinary moves, and rejected/incomplete searches must not set flags.
-        self.gap_requires_confirmation = any(
-            speculative_detour(chess.Board(branch.root_fen),
-                               [chess.Move.from_uci(uci) for uci in branch.moves])
-            for branch in self.branches)
+        self.gap_requires_confirmation = any(branch.requires_confirmation for branch in self.branches)
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
             self.initial_fen = self.branches[0].root_fen
@@ -599,7 +612,7 @@ class Reconstructor:
             update.verified.append(uci)
         if common:
             root = self.board.fen()
-            self.branches = [Branch(root, b.moves[len(common):]) for b in self.branches]
+            self.branches = [Branch(root, b.moves[len(common):],b.requires_confirmation) for b in self.branches]
         if self.gap_requires_confirmation:
             self.status = "possible invented move detour • confirm sequence"
         elif self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
@@ -680,7 +693,8 @@ class Reconstructor:
 
     def serialize(self) -> dict:
         return {"initial_fen":self.initial_fen,"verified":list(self.verified),
-                "branches":[{"root_fen":b.root_fen,"moves":list(b.moves)} for b in self.branches],
+                "branches":[{"root_fen":b.root_fen,"moves":list(b.moves),
+                             "requires_confirmation":b.requires_confirmation} for b in self.branches],
                 "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies,
                 "gap_requires_confirmation":self.gap_requires_confirmation,"history_unknown":self.history_unknown}
 
@@ -691,10 +705,12 @@ class Reconstructor:
             r.board.push_uci(uci)
             r.history.append(r.board.board_fen())
         r.verified = list(data["verified"])
-        r.branches = [Branch(b["root_fen"], tuple(b["moves"])) for b in data["branches"]]
+        r.branches = [Branch(b["root_fen"], tuple(b["moves"]),b.get("requires_confirmation"))
+                      for b in data["branches"]]
         r.status = data.get("status", "recovered")
         r.incomplete = data.get("incomplete",False)
         r.confirmation_plies = data.get("confirmation_plies",0)
-        r.gap_requires_confirmation = data.get("gap_requires_confirmation",False)
+        r.gap_requires_confirmation = data.get("gap_requires_confirmation",False) or any(
+            branch.requires_confirmation for branch in r.branches)
         r.history_unknown = data.get("history_unknown",False)
         return r

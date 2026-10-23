@@ -12,11 +12,34 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 import urllib.request
 import zipfile
+from packaging.requirements import Requirement
+from packaging.tags import compatible_tags,cpython_tags
+from packaging.utils import parse_wheel_filename
 
 ROOT=Path(__file__).resolve().parents[1]
 VERSION='3.13.16'
+
+
+def validated_wheels(directory,requirements):
+    """Reject stale duplicate or incompatible cached wheels before extraction."""
+    supported=set(cpython_tags((3,13),platforms=['win_amd64']))
+    supported.update(compatible_tags((3,13),interpreter='cp313',platforms=['win_amd64']))
+    selected={};paths=sorted(directory.glob('*.whl'))
+    for path in paths:
+        name,version,_,tags=parse_wheel_filename(path.name)
+        if not tags & supported:raise ValueError(f'Incompatible Windows runtime wheel: {path.name}')
+        if name in selected:raise ValueError(f'Duplicate cached wheel for {name}; rebuild without --skip-download')
+        selected[name]=version
+    for line in requirements.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):continue
+        requirement=Requirement(line)
+        name=requirement.name.lower().replace('_','-')
+        if name not in selected or selected[name] not in requirement.specifier:
+            raise ValueError(f'Cached wheel does not satisfy {requirement}; rebuild without --skip-download')
+    return paths
 
 
 def main():
@@ -27,11 +50,15 @@ def main():
     cache=ROOT/'.cache';wheels=cache/'win-wheels';wheels.mkdir(parents=True,exist_ok=True)
     pure=cache/'wheels';pure.mkdir(exist_ok=True)
     if not args.skip_download:
+        # Retaining older wheels lets alphabetic extraction overwrite a new
+        # library with an old version (notably Qt 6.8 sorting after 6.12).
+        shutil.rmtree(wheels);wheels.mkdir(parents=True)
         subprocess.run([sys.executable,'-m','pip','wheel','--no-deps','chess==1.11.2','-w',str(pure)],check=True)
         subprocess.run([sys.executable,'-m','pip','download','-r',str(ROOT/'requirements.txt'),
             '--platform','win_amd64','--python-version','313','--implementation','cp','--abi','cp313',
             '--only-binary=:all:','--find-links',str(pure),'--dest',str(wheels)],check=True)
     archive=cache/f'python-{VERSION}-embed-amd64.zip'
+    inputs=validated_wheels(wheels,ROOT/'requirements.txt')
     if not archive.exists():
         urllib.request.urlretrieve(f'https://www.python.org/ftp/python/{VERSION}/{archive.name}',archive)
     package=ROOT/'build/windows-portable'
@@ -40,8 +67,7 @@ def main():
     with zipfile.ZipFile(archive) as z:z.extractall(runtime)
     site=runtime/'Lib/site-packages';site.mkdir(parents=True)
     hashes={archive.name:hashlib.sha256(archive.read_bytes()).hexdigest()}
-    for wheel in sorted(wheels.glob('*.whl')):
-        if 'linux' in wheel.name:raise ValueError('Non-Windows wheel in build input')
+    for wheel in inputs:
         with zipfile.ZipFile(wheel) as z:
             z.extractall(site)
             for entry in z.namelist():
@@ -73,7 +99,12 @@ def main():
             raise RuntimeError('Bundled text-recognition model checksum mismatch')
     if not any((site/'onnxruntime').rglob('*.pyd')):
         raise RuntimeError('Windows ONNX Runtime is missing; rebuild without --skip-download to refresh the wheel cache')
-    (package/'BUILD-MANIFEST.json').write_text(json.dumps({'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes,
+    with (ROOT/'pyproject.toml').open('rb') as metadata:app_version=tomllib.load(metadata)['project']['version']
+    try:
+        revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
+    except (OSError,subprocess.CalledProcessError):revision='unknown'
+    (package/'BUILD-MANIFEST.json').write_text(json.dumps({'application_version':app_version,'source_revision':revision,
+        'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes,
         'model':model_info,'text_models':text_models},indent=2))
     dist=ROOT/'dist';dist.mkdir(exist_ok=True)
     portable_zip=dist/'ChessStream-PGN-Recorder-Portable.zip'

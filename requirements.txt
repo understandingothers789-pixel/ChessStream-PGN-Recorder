@@ -1,9 +1,9 @@
 numpy==2.2.6
-opencv-python-headless==4.11.0.86
+opencv-python-headless==4.12.0.88
 chess==1.11.2
-PySide6-Essentials==6.8.3
+PySide6-Essentials==6.12.0
 mss==10.0.0
 platformdirs==4.3.7
 Pillow==13.0.0
 psutil==7.0.0
-onnxruntime==1.23.2
+onnxruntime==1.24.4

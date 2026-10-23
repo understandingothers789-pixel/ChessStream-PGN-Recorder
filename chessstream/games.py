@@ -628,7 +628,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 if origin.board_fen()!=board.board_fen() or origin.turn!=board.turn:continue
                 endpoint=board.copy()
                 for uci in branch.moves:endpoint.push_uci(uci)
-                if endpoint.board_fen()==branch.board().board_fen():branches.append(Branch(board.fen(),branch.moves))
+                if endpoint.board_fen()==branch.board().board_fen():branches.append(Branch(board.fen(),branch.moves,branch.requires_confirmation))
             if not branches:return False
             headers={key:value for key,value in self.headers.items() if key not in ('FEN','SetUp')}
             pgn=export_pgn(old.initial_fen,old.verified,self.headers,self.note,
@@ -645,7 +645,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 'The original application-created FEN start followed this guessed opening prefix.')
             data=old.serialize();data['initial_fen']=chess.STARTING_FEN
             data['verified']=prefix+old.verified
-            data['branches']=[{'root_fen':b.root_fen,'moves':list(b.moves)} for b in branches]
+            data['branches']=[{'root_fen':b.root_fen,'moves':list(b.moves),
+                               'requires_confirmation':b.requires_confirmation} for b in branches]
             if not old.verified and not any(b.moves for b in old.branches) and self.settings.confirm_on_reply:
                 data['verified']=prefix[:-1];before=chess.Board()
                 for uci in prefix[:-1]:before.push_uci(uci)
@@ -1083,7 +1084,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             if self.rec:
                 for branch in self.rec.branches[:8]:
                     pending.append({'root_fen':branch.root_fen,'moves':list(branch.moves[:32]),
-                        'move_count':len(branch.moves),'fen':branch.board().fen()})
+                        'move_count':len(branch.moves),'fen':branch.board().fen(),
+                        'requires_confirmation':branch.requires_confirmation})
             detail={'observed_placement':obs.placement(),'orientation':obs.orientation,
                 'square_confidence':[round(float(value),2) for value in obs.probabilities.max(axis=1)],
                 'uncertain_squares':obs.uncertain_squares(max(.8,self.settings.min_confidence)),
@@ -1737,7 +1739,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             probe=self.reconstructor(chess.Board(self.rec.initial_fen))
             for index in kept:
                 probe.board.push_uci(old[index]);probe.verified.append(old[index]);probe.history.append(probe.board.board_fen())
-            probe.branches=[Branch(probe.board.fen(),branch.moves) for branch in self.rec.branches]
+            probe.branches=[Branch(probe.board.fen(),branch.moves,branch.requires_confirmation) for branch in self.rec.branches]
+            probe.gap_requires_confirmation=any(branch.requires_confirmation for branch in probe.branches)
             mapping={index+1:new+1 for new,index in enumerate(kept)}
             def remap(values):
                 return {str(mapping[int(key)] if int(key)<=len(old) else len(kept)+int(key)-len(old)):value
@@ -1778,6 +1781,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             if signature==self._checkpoint_join_attempt:return False
             self._checkpoint_join_attempt=signature
             request={'token':self.join_request_token(),'pending':[branch.moves for branch in self.rec.branches],
+                     'pending_confirmation':[branch.requires_confirmation for branch in self.rec.branches],
                      'sources':[previous,current],'automatic':True}
             if self._saved_join_executor is None:
                 self._saved_join_executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='saved-PGN-join')
@@ -1806,6 +1810,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             if not rows:
                 self.last_message='Join previous • no compatible connection found in the two previous PGNs';return False
             request={'token':self.join_request_token(),'pending':[branch.moves for branch in self.rec.branches],
+                     'pending_confirmation':[branch.requires_confirmation for branch in self.rec.branches],
                      'sources':rows+[current]}
             cancelled=threading.Event()
             threshold=self.settings.min_confidence
@@ -1856,14 +1861,17 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self.cancel_background_recovery()
         self.combine_games(result['sources'],result['pgn'])
         branches=[]
-        for moves in request['pending']:
+        for index,moves in enumerate(request['pending']):
             board=self.rec.board.copy()
             for uci in moves:
                 move=chess.Move.from_uci(uci)
                 if move not in board.legal_moves:break
                 board.push(move)
-            else:branches.append(Branch(self.rec.board.fen(),moves))
-        if branches:self.rec.branches=branches
+            else:branches.append(Branch(self.rec.board.fen(),moves,
+                request['pending_confirmation'][index] if 'pending_confirmation' in request else None))
+        if branches:
+            self.rec.branches=branches
+            self.rec.gap_requires_confirmation=any(branch.requires_confirmation for branch in branches)
         self.last_message='Joined previous PGN • combined recording is now active; originals kept'
         self.store.audit('background saved PGN join applied',{'game_id':self.current_id,'search_ms':result.get('elapsed_ms',0)})
         self.persist();return True
