@@ -99,19 +99,19 @@ def test_recent_frames_are_bounded_deduplicated_and_useful_in_search_without_dis
     assert rec.verified[:2]==['b1c3','b8c6'] and rec.board.fen()==final.fen()
 
 
-def test_background_results_apply_only_to_unchanged_game_and_observation(tmp_path):
-    for stale in (False,True):
-        store=Store(tmp_path/str(stale));manager=GameManager(store,Settings(confirm_on_reply=False))
+def test_background_results_apply_to_original_or_certified_forward_observation(tmp_path):
+    for advanced in (False,True):
+        store=Store(tmp_path/str(advanced));manager=GameManager(store,Settings(confirm_on_reply=False))
         source=chess.Board();manager.process(Observation.from_board(source));source.push_san('e4')
         manager.process(Observation.from_board(source))
         target=source.copy();target.push_san('e5');target.push_san('Nf3')
         obs=Observation.from_board(target);manager.rec.status='unmatched position'
         assert manager.background_recovery(obs)
         manager._recovery_future.result(timeout=3)
-        if stale:target.push_san('Nc6');obs=Observation.from_board(target)
+        if advanced:target.push_san('Nc6');obs=Observation.from_board(target)
         manager.background_recovery(obs)
-        assert len(manager.rec.verified)==(1 if stale else 3)
-        if not stale:assert manager.rec.board.fen()==target.fen()
+        assert len(manager.rec.verified)==(4 if advanced else 3)
+        assert manager.rec.board.fen()==target.fen()
         manager.cancel_background_recovery();store.close()
 
 

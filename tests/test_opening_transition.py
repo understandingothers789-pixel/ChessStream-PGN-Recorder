@@ -87,5 +87,6 @@ def test_changed_players_and_reset_clocks_split_even_matching_early_placement(tm
     manager.process(Observation.from_board(opening))
     assert manager.current_id!=previous
     assert manager.headers['White']=='NewWhite' and manager.headers['Black']=='NewBlack'
-    assert manager.rec.initial_fen.split()[0]==opening.board_fen() and not manager.rec.verified
+    assert manager.rec.initial_fen==chess.STARTING_FEN and manager.rec.verified==['e2e4','a7a6']
+    assert store.game(previous)['headers']!=store.game(manager.current_id)['headers']
     store.close()

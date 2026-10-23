@@ -4,8 +4,64 @@ from time import monotonic
 import cv2
 import numpy as np
 import chess
-from .reconstruction import Reconstructor,LegalSearcher,Branch
-from .commitment import assess_search
+from .reconstruction import Reconstructor,LegalSearcher
+
+
+class PositionHistory:
+    """Stable board evidence survives pixel churn; never written as images."""
+    def __init__(self,capacity=96):self.positions=deque(maxlen=capacity)
+
+    def add(self,obs,game_id,threshold=.8):
+        if not game_id or obs.uncertain_squares(threshold):return
+        evidence=copy_observation(obs)
+        if self.positions and self.positions[-1][0]==game_id and self.positions[-1][1].placement()==obs.placement():
+            self.positions[-1]=(game_id,evidence)
+        else:self.positions.append((game_id,evidence))
+
+    def observations(self,game_id):
+        return [obs for identity,obs in self.positions if identity==game_id]
+
+
+def copy_observation(obs):
+    from .domain import Observation
+    return Observation(obs.probabilities.copy(),obs.timestamp,obs.orientation,obs.quality)
+
+
+def extend_recovery(result,target,following,threshold=.8,time_limit_ms=75,node_limit=8000):
+    """Validate intervening forward frames before applying an older result.
+
+    A rewind, repeated position, weak or inconsistent frame rejects the result.
+    Ambiguous histories remain pending. Catch-up shares one small live budget.
+    """
+    base,state=result;probe=Reconstructor.restore(state)
+    if not probe.branches or not all(target.matches(branch.board(),threshold) for branch in probe.branches):return None
+    seen={target.placement()};chain=[]
+    for obs in following:
+        if obs.orientation!=target.orientation or obs.uncertain_squares(threshold):return None
+        placement=obs.placement()
+        if placement in seen:return None
+        seen.add(placement);chain.append(obs)
+    recovered,_=_follow_positions(state,chain,2,node_limit,time_limit_ms,threshold)
+    return (base,recovered.serialize()) if recovered else None
+
+
+def _follow_positions(state,frames,max_plies,node_limit,time_limit_ms,threshold,cancelled=None):
+    """Use the normal multi-hypothesis commit policy under one total budget."""
+    probe=Reconstructor.restore(state);confirmation=probe.confirmation_plies
+    # Input positions were already stabilized by capture. This applies only
+    # to the immutable trial; restore the user's hover policy in returned data.
+    probe.confirmation_plies=0;started=monotonic();nodes=0
+    for obs in frames:
+        if cancelled and cancelled():return None,nodes
+        remaining=time_limit_ms-(monotonic()-started)*1000
+        if remaining<=0 or nodes>=node_limit or obs.uncertain_squares(max(.8,threshold)):return None,nodes
+        probe.searcher=LegalSearcher(max_plies,node_limit-nodes,remaining,threshold,path_limit=32,cancelled=cancelled)
+        update=probe.observe(obs);nodes+=update.nodes
+        if (probe.incomplete or probe.gap_requires_confirmation or not probe.branches or
+                not all(branch.board().board_fen()==obs.placement() for branch in probe.branches)):
+            return None,nodes
+    probe.confirmation_plies=confirmation
+    return probe,nodes
 
 
 class RecentFrames:
@@ -30,48 +86,23 @@ class RecentFrames:
 
 
 def recover_gap(states,observed,max_plies,node_limit,time_limit_ms,evidence=(),threshold=.7,cancelled=None):
-    """Pure worker: never reads the database or mutates the live recording."""
+    """Return proven moves or complete pending histories; never choose a tie."""
     started=monotonic();used=0
     for state in states:
         if cancelled and cancelled():return None
         remaining=time_limit_ms-(monotonic()-started)*1000
         if remaining<=0 or node_limit-used<=0:break
         probe=Reconstructor.restore(state)
-        # If the retained images contain the source, first reconstruct through
-        # their intermediate positions instead of jumping straight to the end.
+        # Try retained stable landmarks before a direct endpoint search.
         anchors=[i for i,frame in enumerate(evidence) if frame.placement()==probe.board.board_fen()]
         if anchors:
-            trial=Reconstructor.restore(state)
             chain=list(evidence[anchors[-1]+1:])+[observed]
-            complete=True
-            for frame in chain:
-                if frame.uncertain_squares(max(.8,threshold)):continue
-                remaining=time_limit_ms-(monotonic()-started)*1000
-                if remaining<=0 or node_limit-used<=0:complete=False;break
-                step=LegalSearcher(max_plies,node_limit-used,remaining,threshold,path_limit=32).search(
-                    trial.board,frame,cancelled=cancelled)
-                used+=step.nodes
-                # Do not turn a first-match search or an unfinished search
-                # into verified PGN history. Equal-length move orders can
-                # have identical endpoints; neither is uniquely observed.
-                decision=assess_search(trial.board,step,frame,threshold)
-                if not decision.automatic:
-                    complete=False;break
-                for move in decision.path:
-                    trial.board.push(move);trial.verified.append(move.uci());trial.history.append(trial.board.board_fen())
-            if complete and trial.board.board_fen()==observed.placement():
-                trial.branches=[Branch(trial.board.fen(),())]
-                return state,trial.serialize()
+            trial,nodes=_follow_positions(state,chain,max_plies,node_limit-used,remaining,threshold,cancelled)
+            used+=nodes
+            if trial:return state,trial.serialize()
         remaining=time_limit_ms-(monotonic()-started)*1000
         if remaining<=0 or node_limit-used<=0:break
-        result=LegalSearcher(max_plies,node_limit-used,remaining,threshold,path_limit=32).search(
-            probe.board,observed,cancelled=cancelled)
-        used+=result.nodes
-        decision=assess_search(probe.board,result,observed,threshold)
-        if not decision.automatic:continue
-        for move in decision.path:
-            probe.board.push(move);probe.verified.append(move.uci());probe.history.append(probe.board.board_fen())
-        if probe.board.board_fen()!=observed.placement():continue
-        probe.branches=[Branch(probe.board.fen(),())];probe.incomplete=False
-        return state,probe.serialize()
+        trial,nodes=_follow_positions(state,[observed],max_plies,node_limit-used,remaining,threshold,cancelled)
+        used+=nodes
+        if trial:return state,trial.serialize()
     return None

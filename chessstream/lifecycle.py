@@ -9,6 +9,7 @@ import time
 import chess
 
 from .reconstruction import LegalSearcher
+from .reachability import forward_material_possible
 
 
 def name_key(value):return ''.join(value.casefold().split())
@@ -213,7 +214,8 @@ class GameLifecycle:
 
     def _linked(self,manager,obs):
         key=(manager.current_id,tuple(manager.rec.verified),obs.placement())
-        cache_key=(key,tuple((manager.analysis_cursor or {}).get('path',())),hash(manager.review_pgn))
+        cache_key=(key,tuple((branch.root_fen,branch.moves) for branch in manager.rec.branches),
+                   tuple((manager.analysis_cursor or {}).get('path',())),hash(manager.review_pgn))
         if cache_key not in self._links:
             linked=False;started=time.monotonic();nodes=8000
             origins={board.fen():board for board in [manager.rec.board]+[branch.board() for branch in manager.rec.branches]}
@@ -359,16 +361,23 @@ class GameLifecycle:
                 ('same-pair-unlinked',),phase='unresolved move gap',action='recover')
         visible=chess.Board(f'{placement} w - - 0 1')
         if not any(chess.Board(f'{placement} {turn} - - 0 1').is_valid() for turn in ('w','b')):return Decision('hold','Recovery error: visible position is not a valid FEN')
+        if (not manager.terminal_message and manager.headers.get('Result','*')=='*'
+                and not manager.rewind_state and not manager.analysis_cursor
+                and forward_material_possible(manager.rec.board,visible)):
+            return self.hold(manager,obs,
+                'Possible missed moves; material and pawn progression still fit this game. Recovering the gap.',
+                ('forward-gap',),phase='unresolved move gap',action='recover')
         changed_squares=sum(manager.rec.board.piece_at(s)!=visible.piece_at(s) for s in chess.SQUARES)
         if changed_squares<manager.settings.new_game_min_changed_squares:
             reason='Position mismatch; preserving the played PGN while collecting evidence'
             warning_after=manager.settings.unresolved_fen_seconds
             if self.candidate==('small-mismatch',placement) and warning_after and manager._clock()-self.since>=warning_after:
                 reason='Persistent position mismatch; use the Game menu to choose New game, Continue or Analysis'
-            return self.hold(manager,obs,reason,('small-mismatch',placement))
+            return self.hold(manager,obs,reason,('small-mismatch',placement),phase='unresolved move gap',action='recover')
         opening=len(visible.piece_map())>=30
         delay=1. if opening and self.reset_board_seen and manager.terminal_message else manager.settings.new_game_change_seconds
-        return self.hold(manager,obs,'Possible new game: stable board cannot be linked to the current PGN',('board',placement),delay)
+        return self.hold(manager,obs,'Possible new game: stable board cannot be linked to the current PGN',
+                         ('board',placement),delay,phase='unresolved move gap',action='recover')
 
     def bind(self,manager,context=None):
         boundary=self.last_boundary;generation=self.generation+1;mode=self.mode

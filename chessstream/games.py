@@ -94,9 +94,13 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._recovery_executor=None;self._recovery_future=None;self._recovery_token=None
         self._recovery_next=0.;self._recovery_attempt=0
         self._recovery_cancel=None
+        self._recovery_context=None;self._recovery_target=None;self._recovery_tail=[]
+        self._recovery_stable_keys=set()
+        self._recovery_discontinuous=False;self._recovery_attempt_context=None;self._recovery_failed_key=None
         self._evidence_revision=0;self._evidence_key=None
         self._saved_join_executor=None;self._saved_join_future=None
         self._saved_join_request=None;self._saved_join_cancel=None
+        self._checkpoint_join_attempt=None
         self._clock=time.monotonic
         self._reset_extras()
 
@@ -143,8 +147,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 return False
             self._create(b, obs.timestamp)
             return True
-        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
-        if len(opening_moves)>1 and not self.settings.infer_unseen_opening:opening_moves=[]
+        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2)
         if (len(uncertain)<=2 and obs.confidence>=max(.80,self.settings.min_confidence)
                 and self._resume_initial_identity(obs,opening_moves)):
             return True
@@ -157,10 +160,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             self._create(chess.Board(), obs.timestamp, note=note)
             self._seed_opening(opening_moves)
             self._recognition_ignored_squares=uncertain
-            self.last_message = "Recording • guessed opening line: " + " ".join(
+            self.last_message = "Recording • uniquely recovered opening: " + " ".join(
                 self._san_line(chess.Board(), opening_moves))
             self.store.audit("opening prefix inferred", {"game_id":self.current_id,
-                "moves":opening_moves,"method":"shortest legal path; pawn moves first; move order guessed",
+                "moves":opening_moves,"method":"completed unique shortest legal path",
                 "uncertain_unchanged_squares":uncertain})
             return True
         if uncertain:
@@ -404,7 +407,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         if unused_session!=self.session_id:
             self.store.finish_session(unused_session)
         self.last_observation=obs
-        backfilled=self._backfill_opening_prefix()
+        backfilled=self._backfill_opening_prefix(
+            time_limit_ms=max(0,75-(time.monotonic()-live_join_started)*1000) if is_fen_checkpoint else None)
         self.last_message=("Joined the saved PGNs • continuing the combined game" if joined is not None else
                            "Review position • linked to latest saved PGN history" if review else
                            "Gap linked to latest PGN • shortest legal continuation • "+self.rec.status if bridged else
@@ -502,8 +506,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         threshold=max(.80,self.settings.min_confidence)
         if not obs.uncertain_squares(threshold) and obs.placement()==chess.Board().board_fen():
             return chess.Board(),None,""
-        moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
-        if len(moves)>1 and not self.settings.infer_unseen_opening:moves=[]
+        moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2)
         if moves:
             sans=self._san_line(chess.Board(),moves)
             note=self._opening_note()+' Selected line: '+' '.join(sans)+'.'
@@ -526,7 +529,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         return ('Opening prefix inferred from a completed unique shortest legal search. '
                 'Earlier frames were not recorded. Unseen repetitions cannot be established from a single position.')
 
-    def _infer_short_opening(self, obs, max_plies=14, target_turn=None):
+    def _infer_short_opening(self, obs, max_plies=14, target_turn=None, *, time_limit_ms=None):
         """Recover an opening only when a completed search establishes one order.
 
         A few unknown unchanged squares do not invalidate the whole opening.
@@ -543,15 +546,20 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         occupied=int(np.count_nonzero((labels!=0)&confident)+np.count_nonzero((expected!=0)&~confident))
         displaced=int(np.count_nonzero((expected!=0)&(labels!=expected)&confident))
         if not 30<=occupied<=32 or not 1<=displaced<=14:return []
+        if max_plies<=2 and displaced>max_plies:return []
         if np.any(obs.probabilities[np.arange(64)[~confident],expected[~confident]]<.05):return []
+        milliseconds=min(400,max(50,self.settings.search_ms))
+        nodes=min(60000,max(1000,self.settings.search_nodes))
+        if time_limit_ms is not None:
+            if time_limit_ms<=0:return []
+            milliseconds=min(milliseconds,time_limit_ms);nodes=min(nodes,8000);max_plies=min(2,max_plies)
         key=(obs.probabilities.tobytes(),max_plies,target_turn,threshold,
-             self.settings.search_nodes,self.settings.search_ms)
+             nodes,milliseconds)
         if self._opening_cache and self._opening_cache[0]==key:return list(self._opening_cache[1])
         moves=[]
         if displaced<=6:
             search=LegalSearcher(max_plies=min(6,max_plies),
-                node_limit=min(60000,max(1000,self.settings.search_nodes)),
-                time_limit_ms=min(400,max(50,self.settings.search_ms)),threshold=threshold)
+                node_limit=nodes,time_limit_ms=milliseconds,threshold=threshold)
             result=search.search(initial,obs,target_turn=target_turn,pawn_first=True)
             decision=assess_search(initial,result,obs,threshold)
             if decision.automatic:
@@ -591,20 +599,26 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
     def opening_ready(self, obs):
         with self.lock:
             if obs.placement()==chess.Board().board_fen():return False
-            if self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1):return True
+            if self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2):return True
             return (not obs.uncertain_squares(max(.8,self.settings.min_confidence))
                     and len(chess.Board(f'{obs.placement()} w - - 0 1').piece_map())>=4
                     and any(chess.Board(f'{obs.placement()} {turn} - - 0 1').is_valid() for turn in ('w','b')))
 
-    def _backfill_opening_prefix(self):
+    def _backfill_opening_prefix(self, *, time_limit_ms=None):
         """Repair an application-created early FEN segment without losing its continuation."""
-        if (not self.settings.infer_unseen_opening or not self.rec or self.rec.initial_fen==chess.STARTING_FEN or self.headers.get('Result','*')!='*'
+        if (not self.rec or self.rec.initial_fen==chess.STARTING_FEN or self.headers.get('Result','*')!='*'
                 or not any(text in self.note for text in ('Recording began midgame','visible midgame FEN'))):
             return False
+        stored=self.store.game(self.current_id)
+        if not stored or stored['status']=='imported' or self.settings.initial_fen:return False
         old=self.rec;root=chess.Board(old.initial_fen)
         turn=None if not old.verified and len({b.root_fen for b in old.branches})>1 else root.turn
-        prefix=self._infer_short_opening(Observation.from_board(root),target_turn=turn)
+        prefix=self._infer_short_opening(Observation.from_board(root),target_turn=turn,
+                                        max_plies=14 if self.settings.infer_unseen_opening else 2,
+                                        time_limit_ms=time_limit_ms)
         if not prefix:return False
+        previous={'pgn':stored['pgn'],'state':self.rec.serialize(),
+                  'clocks':dict(self.move_clocks),'inferred_moves':dict(self.inferred_moves)}
         try:
             board=chess.Board()
             for uci in prefix+old.verified:board.push_uci(uci)
@@ -621,7 +635,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                            self.review_pgn,self.move_clocks,self.inferred_moves)
             joined=join_recordings([
                 {'id':'opening-prefix','started':'','pgn':export_pgn(chess.STARTING_FEN,prefix,headers,self._opening_note())},
-                {'id':self.current_id,'started':self.started,'pgn':pgn}],self.searcher(),deep_search=False)
+                {'id':self.current_id,'started':self.started,'pgn':pgn,'status':stored['status'],
+                 'state':json.dumps({**old.serialize(),'note':self.note})}],self.searcher(),deep_search=False)
             game=chess.pgn.read_game(io.StringIO(joined))
             if game is None or game.errors:return False
             anchor=game
@@ -644,11 +659,11 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self.move_clocks={str(ply):node.clock() for ply,node in enumerate(game.mainline(),1) if node.clock() is not None}
         self.inferred_moves={str(int(ply)+len(prefix)):value for ply,value in self.inferred_moves.items()}
         for ply,uci in enumerate(prefix,1):
-            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Guessed opening prefix restored before an earlier FEN recording; captures and double pawn pushes prioritized.'}
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: unique shortest opening prefix restored before an application-created FEN.'}
         self.note=self._opening_note()+' An earlier application-created FEN start was replaced; its recorded continuation was retained.'
         self._persisted_fingerprint=None
         self.store.audit('opening prefix backfilled',{'game_id':self.current_id,'previous_initial_fen':old.initial_fen,
-            'prefix':prefix,'method':'shortest legal opening; pawn moves first; earlier order guessed'})
+            'previous_recording':previous,'prefix':prefix,'method':'completed unique shortest legal opening'})
         return True
 
     @staticmethod
@@ -675,8 +690,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._persisted_fingerprint=None
 
     def _start_from_visible(self, obs, reason, since=None):
-        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 1)
-        if len(opening_moves)>1 and not self.settings.infer_unseen_opening:opening_moves=[]
+        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2)
         board,roots,note=self._visible_roots(obs)
         previous_id=self.current_id
         if self.rec:
@@ -1042,12 +1056,21 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             if self._recovery_executor:self._recovery_executor.shutdown(wait=False,cancel_futures=True)
             self._recovery_executor=None;self._recovery_future=None;self._recovery_token=None
             self._recovery_cancel=None
+            self._recovery_context=None;self._recovery_target=None;self._recovery_tail=[]
+            self._recovery_stable_keys=set()
+            self._recovery_discontinuous=False
 
     def note_evidence(self,obs):
         """A return to A after observing B is a different observation generation."""
         key=(obs.placement(),obs.orientation)
         if key!=self._evidence_key:
             self._evidence_key=key;self._evidence_revision+=1
+            if self._recovery_future and self._recovery_target:
+                from .recovery import copy_observation
+                if (len(self._recovery_tail)>=12 or obs.orientation!=self._recovery_target.orientation
+                        or obs.uncertain_squares(max(.8,self.settings.min_confidence))):
+                    self._recovery_discontinuous=True
+                else:self._recovery_tail.append(copy_observation(obs))
 
     def trace_frame(self,obs,stable_count,snapshot):
         """Record every compared board as compact, coalesced diagnostic data.
@@ -1080,25 +1103,37 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 obs.placement(),self.lifecycle.generation,self._evidence_revision,
                 tuple(sorted(self.headers.items())),self.ended)
 
+    def recovery_context(self):
+        return (self.current_id,self.rec.initial_fen,tuple(self.rec.verified),
+                self.lifecycle.generation,self.lifecycle.mode,tuple(sorted(self.headers.items())),self.ended)
+
     def background_recovery(self,obs,evidence=()):
         """Poll/queue longer bounded work while the capture thread keeps comparing."""
         from concurrent.futures import ThreadPoolExecutor
-        from .recovery import recover_gap
+        from .recovery import recover_gap,extend_recovery,copy_observation
         with self.lock:
             if not self.rec:return False
             self.note_evidence(obs)
             if self.lifecycle_gate(obs) and self.lifecycle.phase!='unresolved move gap':return False
             token=self.recovery_token(obs)
             if self._recovery_future:
-                if self._recovery_token!=token:
+                self._recovery_stable_keys.add((obs.placement(),obs.orientation))
+                advancing=(self._recovery_context==self.recovery_context() and self._recovery_target is not None
+                           and not self._recovery_discontinuous
+                           and all((frame.placement(),frame.orientation) in self._recovery_stable_keys
+                                   for frame in self._recovery_tail))
+                if self._recovery_token!=token and not advancing:
                     self.cancel_background_recovery()
                     return False
-                if not self._recovery_future.done():return self._recovery_token==token
+                if not self._recovery_future.done():return True
                 try:result=self._recovery_future.result()
                 except Exception:
                     logging.exception('Background legal recovery failed');result=None
                 expected=self._recovery_token;self._recovery_future=None
-                if (result and expected==token and not self.premove_state and not self.rewind_state
+                if result and expected!=token:
+                    result=extend_recovery(result,self._recovery_target,self._recovery_tail,
+                                           max(.8,self.settings.min_confidence)) if advancing else None
+                if (result and not self.premove_state and not self.rewind_state
                         and not self.terminal_message and self.headers.get('Result','*')=='*' and not self.ended):
                     base,recovered=result;before=len(base['verified'])
                     previous={'pgn':self.store.game(self.current_id)['pgn'],'state':self.rec.serialize(),
@@ -1112,8 +1147,13 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                     for ply in range(before,len(self.rec.verified)):
                         self.inferred_moves[str(ply+1)]={'uci':self.rec.verified[ply],
                             'comment':'Inferred: background gap recovery matched observed placement; move order not independently verified.'}
-                    self.rec.status=self.last_message='Recording • gap recovered using buffered evidence'
-                    self.store.audit('background gap recovered',{'game_id':self.current_id,'after_ply':before,
+                    pending=any(branch.moves for branch in self.rec.branches) or len(self.rec.branches)>1
+                    self.last_message=(f'Gap linked • {len(self.rec.branches)} histories retained; shared prefix saved; choose only verified moves'
+                                       if pending else 'Recording • gap recovered using buffered evidence')
+                    if not pending:self.rec.status=self.last_message
+                    self.store.audit('background gap hypotheses retained' if pending else 'background gap recovered',{'game_id':self.current_id,'after_ply':before,
+                        'pending_histories':len(self.rec.branches) if pending else 0,
+                        'catchup_frames':len(self._recovery_tail),
                         'previous_recording':previous,
                         'moves':self.rec.verified[before:],'placement':obs.placement()})
                     self.persist();return False
@@ -1121,10 +1161,18 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 and self.headers.get('Result','*')=='*' and not self.ended
                 and not obs.uncertain_squares(max(.8,self.settings.min_confidence))
                 and self.rec.status.startswith(('unmatched','search limit','uncertain','unresolved move gap'))
-                and obs.placement() not in self.rec.history)
+                and obs.placement() not in self.rec.history
+                and not (not self.rec.incomplete and self.rec.branches
+                         and all(obs.matches(branch.board(),max(.8,self.settings.min_confidence)) for branch in self.rec.branches)))
             if not eligible or self._clock()<self._recovery_next:return False
             # Recheck premoves before a larger search can invent a waiting move.
             if self._handle_premove(obs):return False
+            context=self.recovery_context()
+            if context!=self._recovery_attempt_context:
+                self._recovery_attempt=0;self._recovery_failed_key=None;self._recovery_attempt_context=context
+            attempt_key=(context,obs.placement(),tuple(frame.placement() for frame in evidence),
+                         self.settings.search_ms,self.settings.search_nodes,self.settings.max_plies)
+            if self._recovery_attempt>=3 and attempt_key==self._recovery_failed_key:return False
             if self._recovery_executor is None:self._recovery_executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='chess-gap')
             states=[self.rec.serialize()]
             for before in range(max(0,len(self.rec.verified)-8),len(self.rec.verified)):
@@ -1132,14 +1180,19 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 probe=self.reconstructor(chess.Board(self.rec.initial_fen))
                 for uci in self.rec.verified[:before]:
                     probe.board.push_uci(uci);probe.verified.append(uci);probe.history.append(probe.board.board_fen())
+                probe.branches=[Branch(probe.board.fen(),())]
                 states.append(probe.serialize())
             self._recovery_attempt=min(self._recovery_attempt+1,3)
+            self._recovery_failed_key=attempt_key
+            self._recovery_context=context;self._recovery_target=copy_observation(obs)
+            self._recovery_tail=[];self._recovery_discontinuous=False
+            self._recovery_stable_keys={(obs.placement(),obs.orientation)}
             self._recovery_token=token;self._recovery_next=self._clock()+3
             self.store.audit('background gap queued',{'game_id':self.current_id,'buffered_observations':len(evidence),
                 'attempt':self._recovery_attempt,'placement':obs.placement(),'max_ms':min(1500,self.settings.search_ms*(1+self._recovery_attempt))})
             self._recovery_cancel=threading.Event()
             self._recovery_future=self._recovery_executor.submit(recover_gap,states,obs,
-                max(6,self.settings.max_plies),min(300000,self.settings.search_nodes*3),
+                min(10,max(self.settings.max_plies,4+2*self._recovery_attempt)),min(300000,self.settings.search_nodes*3),
                 min(1500,self.settings.search_ms*(1+self._recovery_attempt)),evidence,self.settings.min_confidence,
                 self._recovery_cancel.is_set)
             return True
@@ -1705,6 +1758,35 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 tuple((branch.root_fen,branch.moves) for branch in self.rec.branches),
                 tuple(sorted(self.headers.items())),self.lifecycle.generation,self._evidence_revision,self.ended)
 
+    def queue_checkpoint_join(self):
+        """Retry only a recorded parent in background; never scan the archive."""
+        from concurrent.futures import ThreadPoolExecutor
+        from .saved_joins import search_previous
+        with self.lock:
+            if (not self.rec or not self.checkpoint_source_id or self._saved_join_future or self._recovery_future or self.ended
+                    or self.checkpoint_source_id in self.separated_from or self.terminal_message
+                    or self.headers.get('Result','*')!='*' or self.premove_state or self.rewind_state
+                    or self.analysis_cursor or self.lifecycle.mode!='auto' or self.lifecycle.pending_restart
+                    or self.lifecycle.changed_names(self,True) or self.lifecycle.reset_reads
+                    or self.lifecycle.phase in ('uncertain transition','temporarily uncertain','between games','analysis / replay')):
+                return False
+            previous=self.store.game(self.checkpoint_source_id)
+            if not previous or previous['session_id']!=self.session_id or not previous['status'].startswith('preserved'):return False
+            self.persist();current=self.store.game(self.current_id)
+            signature=(self.current_id,previous['id'],previous['pgn'],current['pgn'],
+                       tuple((branch.root_fen,branch.moves) for branch in self.rec.branches))
+            if signature==self._checkpoint_join_attempt:return False
+            self._checkpoint_join_attempt=signature
+            request={'token':self.join_request_token(),'pending':[branch.moves for branch in self.rec.branches],
+                     'sources':[previous,current],'automatic':True}
+            if self._saved_join_executor is None:
+                self._saved_join_executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='saved-PGN-join')
+            self._saved_join_request=request;self._saved_join_cancel=threading.Event()
+            self._saved_join_future=self._saved_join_executor.submit(search_previous,[previous],current,
+                self.settings.min_confidence,self._saved_join_cancel.is_set)
+            self.store.audit('checkpoint background join queued',{'game_id':self.current_id,'parent_id':previous['id']})
+            return True
+
     def join_previous_recording(self, background=False):
         """Snapshot under lock; deep searches never hold the recorder lock."""
         from concurrent.futures import ThreadPoolExecutor
@@ -1767,7 +1849,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 self.last_message='Join previous • sources changed; result discarded';return False
         if self.lifecycle.changed_names(self,True) or self.lifecycle.pending_restart or self.lifecycle.reset_reads:return False
         if 'pgn' not in result:
-            self.last_message=result['message'];return False
+            if request.get('automatic'):
+                self.store.audit('checkpoint background join held',{'game_id':self.current_id,'reason':result['message']})
+            else:self.last_message=result['message']
+            return False
         self.cancel_background_recovery()
         self.combine_games(result['sources'],result['pgn'])
         branches=[]

@@ -174,8 +174,9 @@ class RecordingWorker(QThread):
         self.stopping=threading.Event()
         self.paused=threading.Event()
         self.commands=queue.SimpleQueue()
-        from .recovery import RecentFrames
+        from .recovery import RecentFrames,PositionHistory
         self.recent_frames=RecentFrames(12)
+        self.position_history=PositionHistory(96)
         self._processed_frames=0;self._late_capture_slots=0
 
     def layout_changed(self):
@@ -190,6 +191,11 @@ class RecordingWorker(QThread):
         """Arm preview at startup and switch to recording on a supported opening."""
         self.manager.observe_frame(obs)
         self.manager.poll_saved_join()
+        usable=(not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
+            and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games','analysis / replay'))
+        if stable_count>=2 and usable:
+            self.position_history.add(obs,self.manager.current_id,max(.8,self.manager.settings.min_confidence))
+        evidence=self.position_history.observations(self.manager.current_id)
         automatic=False
         if (self.preview_only and stable_count>=2 and self.manager.settings.auto_record_opening
                 and self.manager.opening_ready(obs)):
@@ -203,13 +209,14 @@ class RecordingWorker(QThread):
         if stable_count>=2 and not self.preview_only:
             if self.manager.lifecycle_gate(obs):
                 if self.manager.lifecycle.phase=='unresolved move gap':
-                    self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id))
+                    self.manager.background_recovery(obs,evidence)
                 snapshot=self.manager.lifecycle_snapshot(obs)
-            elif self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id)):
-                snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues'}
+            elif self.manager.background_recovery(obs,evidence):
+                snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues',
+                          'preview_fen':obs.placement()+' w - - 0 1','preview_moves':[],'preview_last_move':None}
             else:
                 snapshot=self.manager.process(obs)
-                self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id))
+                self.manager.background_recovery(obs,evidence)
         else:
             snapshot={**self.manager.snapshot(),'status':'Waiting for position to settle'}
         if self.preview_only:
@@ -218,6 +225,11 @@ class RecordingWorker(QThread):
             snapshot.update(status=status,preview_fen=obs.placement()+' w - - 0 1',preview_moves=[])
         self.recent_frames.mark(self.manager.current_id,not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
             and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games'))
+        if (stable_count>=2 and not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
+                and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games','analysis / replay')):
+            self.position_history.add(obs,self.manager.current_id,max(.8,self.manager.settings.min_confidence))
+        if stable_count>=2 and not self.preview_only:self.manager.queue_checkpoint_join()
+        snapshot['buffered_positions']=len(self.position_history.positions)
         if automatic:snapshot['recording_started_automatically']=True
         self.manager.trace_frame(obs,stable_count,snapshot)
         return snapshot

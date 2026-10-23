@@ -109,8 +109,11 @@ class GameBoundaries:
         starts=[index for index,(frame,_) in enumerate(frames) if frame.placement()==chess.Board().board_fen()]
         if starts:frames=frames[starts[-1]:]
         first=frames[0][0];board,roots=self._fen_roots(first);chosen=None
+        seed=self._infer_short_opening(first,max_plies=2)
+        if seed:board=chess.Board();roots=None
         for root in roots or [board.fen()]:
-            trial=chess.Board(root);moves=[];clocks={}
+            trial=chess.Board(root);moves=list(seed);clocks={}
+            for uci in seed:trial.push_uci(uci)
             for frame,context in frames[1:]:
                 if frame.placement()==trial.board_fen():continue
                 result=LegalSearcher(1,2000,25,max(.8,self.settings.min_confidence)).search(trial,frame)
@@ -122,7 +125,9 @@ class GameBoundaries:
             else:
                 if trial.board_fen()==obs.placement():chosen=(root,moves,clocks);break
         if chosen is None:
-            board,roots=self._fen_roots(obs);first=obs;chosen=(board.fen(),[],{})
+            board,roots=self._fen_roots(obs);first=obs;seed=self._infer_short_opening(obs,max_plies=2)
+            if seed:board=chess.Board();roots=None
+            chosen=(board.fen(),list(seed),{})
         elif chosen[1]:board=chess.Board(chosen[0]);roots=None
         self.cancel_background_recovery()
         if self.rec:
@@ -130,11 +135,14 @@ class GameBoundaries:
             self.finish('preserved • separate game confirmed')
         self.lifecycle.mode='auto'
         self._create(board,first.timestamp,roots,note=('Game boundary confirmed: '+reason+'. '+
-            ('Recording starts from the visible FEN; earlier moves were not observed. Side to move is inferred from continuation; castling and en passant history were not assumed.' if board.fen()!=chess.STARTING_FEN else 'Starting position was observed.')))
+            ('Recording starts from the visible FEN; earlier moves were not observed. Side to move is inferred from continuation; castling and en passant history were not assumed.' if board.fen()!=chess.STARTING_FEN else
+             'Opening prefix inferred uniquely from the first complete board.' if seed else 'Starting position was observed.')))
         for uci in chosen[1]:
             self.rec.board.push_uci(uci);self.rec.verified.append(uci);self.rec.history.append(self.rec.board.board_fen())
         if chosen[1]:self.rec.branches=[Branch(self.rec.board.fen(),())]
         self.move_clocks=chosen[2];self.observed_names=names
+        for ply,uci in enumerate(seed,1):
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: unique shortest opening prefix; first complete board was seen after these moves.'}
         for color,name in names.items():self.headers[color.title()]=name
         self.latest_context=incoming
         self.separated_from=list(dict.fromkeys(([previous] if previous else [])+excluded))
@@ -146,7 +154,7 @@ class GameBoundaries:
         self.persist()
         self.store.audit('game boundary confirmed',{'previous_game_id':previous,'game_id':self.current_id,
             'reason':reason,'names':names,'clocks':incoming.get('clocks',{}),'initial_fen':self.rec.initial_fen,
-            'observed_plies':len(chosen[1]),'buffered_frames':len(frames)})
+            'observed_plies':len(chosen[1])-len(seed),'inferred_opening_plies':len(seed),'buffered_frames':len(frames)})
 
     def set_game_mode(self,mode):
         with self.lock:

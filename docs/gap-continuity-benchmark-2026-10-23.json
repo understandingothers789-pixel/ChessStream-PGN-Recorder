@@ -1,0 +1,57 @@
+{
+  "repeats": 3,
+  "scope": "Local CPU search only, identical fixtures and budgets, no OCR/capture/video accuracy measurement",
+  "results": {
+    "routine_two_plies": {
+      "baseline": {
+        "mean_ms": 0.496,
+        "worst_ms": 0.651,
+        "nodes": 23,
+        "depth": 2,
+        "paths": 1
+      },
+      "travel_bound": {
+        "mean_ms": 0.418,
+        "worst_ms": 0.464,
+        "nodes": 23,
+        "depth": 2,
+        "paths": 1
+      },
+      "same_shortest_paths": true
+    },
+    "six_ply_capture_gap": {
+      "baseline": {
+        "mean_ms": 288.833,
+        "worst_ms": 307.574,
+        "nodes": 36496,
+        "depth": 6,
+        "paths": 2
+      },
+      "travel_bound": {
+        "mean_ms": 174.674,
+        "worst_ms": 176.135,
+        "nodes": 22802,
+        "depth": 6,
+        "paths": 2
+      },
+      "same_shortest_paths": true
+    },
+    "saved_middlegame_gap": {
+      "baseline": {
+        "mean_ms": 814.482,
+        "worst_ms": 846.15,
+        "nodes": 109631,
+        "depth": 5,
+        "paths": 29
+      },
+      "travel_bound": {
+        "mean_ms": 676.071,
+        "worst_ms": 680.066,
+        "nodes": 88632,
+        "depth": 5,
+        "paths": 29
+      },
+      "same_shortest_paths": true
+    }
+  }
+}

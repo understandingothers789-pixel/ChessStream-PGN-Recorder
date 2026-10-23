@@ -13,6 +13,7 @@ import chess
 import numpy as np
 from .domain import Observation, board_labels
 from .commitment import speculative_detour
+from .reachability import TravelBound
 
 ANY_EP = object()
 
@@ -86,12 +87,14 @@ def select_capture_path(board: chess.Board, paths):
 
 
 class LegalSearcher:
-    def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128):
+    def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128, *, travel_bound=True,cancelled=None):
         self.max_plies = max_plies
         self.node_limit = node_limit
         self.time_limit_ms = time_limit_ms
         self.threshold = threshold
         self.path_limit = path_limit
+        self.travel_bound = travel_bound
+        self.cancelled = cancelled
 
     def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None,
                first_shortest: bool = False, pawn_first: bool = False,
@@ -99,6 +102,7 @@ class LegalSearcher:
                target_ep_square=ANY_EP) -> SearchResult:
         result = SearchResult()
         start = perf_counter()
+        cancelled=cancelled or self.cancelled
         if cancelled and cancelled():
             result.exhaustive = False
             result.stop_reason = 'canceled'
@@ -128,6 +132,8 @@ class LegalSearcher:
             if label <= 6:wanted_white |= bit
             else:wanted_black |= bit
         min_white, min_black = wanted_white.bit_count(), wanted_black.bit_count()
+        travel=(TravelBound(chess.Board(f'{observed.placement()} w - - 0 1'))
+                if self.travel_bound and self.max_plies>=5 and mask.all() else None)
         # Pawns cannot move backward or be recreated by promotion. This cheap
         # reachability proof rejects new-game resets and unrelated openings
         # before traversing a tree of impossible continuations.
@@ -214,6 +220,8 @@ class LegalSearcher:
             key = (state.pawns,state.knights,state.bishops,state.rooks,state.queens,
                    state.kings,white,black,state.turn,state.castling_rights,state.ep_square,remaining)
             if key in dead:return False
+            if travel and remaining>=3 and not travel.possible(state,white_turns,black_turns):
+                return False
 
             def priority(move):
                 label = (move.promotion or state.piece_type_at(move.from_square)) + (0 if state.turn else 6)
@@ -328,7 +336,7 @@ class Reconstructor:
             return None
         direct = LegalSearcher(self.searcher.max_plies, self.searcher.node_limit,
                                self.searcher.time_limit_ms * .7, self.searcher.threshold,
-                               self.searcher.path_limit).search(self.board, observed)
+                               self.searcher.path_limit,cancelled=self.searcher.cancelled).search(self.board, observed)
         update.nodes += direct.nodes;update.search_ms += direct.elapsed_ms
         if not direct.exhaustive or not direct.paths:
             return None
@@ -355,7 +363,7 @@ class Reconstructor:
             # with short continuations that leave that square uncertain.
             probe=Reconstructor.restore(self.serialize(),LegalSearcher(2,
                 min(8000,self.searcher.node_limit),min(50.,self.searcher.time_limit_ms),
-                self.searcher.threshold,self.searcher.path_limit))
+                self.searcher.threshold,self.searcher.path_limit,cancelled=self.searcher.cancelled))
             short=probe._observe_exact(observed)
             if short.status=='unmatched position • recording continues':
                 retry=self._retry_noisy_squares(observed,short,candidates)
@@ -410,7 +418,7 @@ class Reconstructor:
                 remaining_ms=time_budget-(perf_counter()-started)*1000
                 if remaining_nodes<1 or remaining_ms<=0:return original_update
                 searcher=LegalSearcher(min(2,self.searcher.max_plies),remaining_nodes,
-                    remaining_ms,self.searcher.threshold,self.searcher.path_limit)
+                    remaining_ms,self.searcher.threshold,self.searcher.path_limit,cancelled=self.searcher.cancelled)
                 probe=Reconstructor.restore(state,searcher)
                 evidence=observed.with_unknown(squares)
                 retry=probe._observe_exact(evidence)
@@ -465,7 +473,8 @@ class Reconstructor:
                     if remaining_nodes<=0 or remaining_ms<=0:
                         all_complete=False
                         break
-                    searcher=LegalSearcher(depth,remaining_nodes,remaining_ms,self.searcher.threshold,self.searcher.path_limit)
+                    searcher=LegalSearcher(depth,remaining_nodes,remaining_ms,self.searcher.threshold,self.searcher.path_limit,
+                                           cancelled=self.searcher.cancelled)
                     result=searcher.search(state,observed)
                     cache[key]=result
                     update.nodes += result.nodes
