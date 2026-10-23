@@ -168,7 +168,7 @@ class LegalSearcher:
                     return 1
             return 0
 
-        def dfs(state: chess.Board, remaining: int):
+        def dfs(state: chess.Board, remaining: int, previous_capture_square=None):
             nonlocal abort
             result.nodes += 1
             if (result.nodes > self.node_limit
@@ -214,8 +214,10 @@ class LegalSearcher:
             white_turns = (remaining + int(state.turn == chess.WHITE)) // 2
             black_turns = remaining - white_turns
             white_needed=mismatch & wanted_white;black_needed=mismatch & wanted_black
-            if (white_needed.bit_count() > white_turns + (castle_target_bonus(state,chess.WHITE,white_needed) if white_turns else 0)
-                    or black_needed.bit_count() > black_turns + (castle_target_bonus(state,chess.BLACK,black_needed) if black_turns else 0)):
+            white_deficit=white_needed.bit_count()-white_turns
+            black_deficit=black_needed.bit_count()-black_turns
+            if ((white_deficit>0 and (white_deficit>1 or not white_turns or not castle_target_bonus(state,chess.WHITE,white_needed)))
+                    or (black_deficit>0 and (black_deficit>1 or not black_turns or not castle_target_bonus(state,chess.BLACK,black_needed)))):
                 return False
             key = (state.pawns,state.knights,state.bishops,state.rooks,state.queens,
                    state.kings,white,black,state.turn,state.castling_rights,state.ep_square,remaining)
@@ -223,27 +225,70 @@ class LegalSearcher:
             if travel and remaining>=3 and not travel.possible(state,white_turns,black_turns):
                 return False
 
-            def priority(move):
-                label = (move.promotion or state.piece_type_at(move.from_square)) + (0 if state.turn else 6)
-                return (4 * (target[move.to_square] == label) +
-                        2 * bool(mismatch & chess.BB_SQUARES[move.from_square]) +
-                        bool(mismatch & chess.BB_SQUARES[move.to_square]))
+            def move_order(move):
+                piece=state.piece_type_at(move.from_square)
+                label=(move.promotion or piece) + (0 if state.turn else 6)
+                capture=state.is_capture(move)
+                preference=(0 if capture and move.to_square==previous_capture_square else
+                            1 if capture else 2 if piece==chess.PAWN and abs(move.to_square-move.from_square)==16 else
+                            3 if piece==chess.PAWN else 4)
+                progress=(4 * (target[move.to_square] == label) +
+                          2 * bool(mismatch & chess.BB_SQUARES[move.from_square]) +
+                          bool(mismatch & chess.BB_SQUARES[move.to_square]))
+                return preference,-progress,abs(3.5-chess.square_file(move.to_square)),move.uci()
 
             # Apply the same preference to quick first-match searches and to
             # exhaustive tie-breaking: captures, double pawn pushes, single
             # pawn pushes, then pieces. Target progress breaks remaining ties.
-            previous_capture_square=None
-            if path:
-                last=path[-1]
-                state.pop()
-                was_capture=state.is_capture(last)
-                state.push(last)
-                if was_capture:previous_capture_square=last.to_square
-            moves=sorted(state.legal_moves,key=lambda move:(
-                guess_move_priority(state,move,previous_capture_square),
-                -priority(move),abs(3.5-chess.square_file(move.to_square)),move.uci()))
+            # Once the opponent has exactly the material required by the
+            # observation, another capture cannot possibly reach that target.
+            # Exclude it before legal generation and board allocation. En
+            # passant needs a separate check because its destination is empty.
+            captures_forbidden=(black.bit_count()==min_black if state.turn else white.bit_count()==min_white)
+            to_mask=chess.BB_ALL
+            if captures_forbidden:to_mask &= ~(black if state.turn else white)
+            if remaining == 1:
+                # An ordinary final move must leave its own piece on a known
+                # target square and vacate a mismatched origin. Filter during
+                # legal generation, before sorting or pushing doomed moves.
+                # Castling is exceptional: python-chess may encode its target
+                # as the rook origin (Chess960), and a king may stay put.
+                from_mask=mismatch | state.kings
+                final_destinations=wanted_white if state.turn else wanted_black
+                if state.castling_rights & state.occupied_co[state.turn]:
+                    rank=0 if state.turn else 7
+                    final_destinations |= state.castling_rights | chess.BB_SQUARES[chess.square(2,rank)] | chess.BB_SQUARES[chess.square(6,rank)]
+                to_mask &= final_destinations
+                def final_candidates():
+                    for move in state.generate_legal_moves(from_mask=from_mask,to_mask=to_mask):
+                        if not state.is_castling(move):
+                            # A non-castling move vacates its origin and places
+                            # exactly this piece at its destination. Captures,
+                            # en passant and underpromotions follow that rule.
+                            label=(move.promotion or state.piece_type_at(move.from_square)) + (0 if state.turn else 6)
+                            if target[move.from_square] or target[move.to_square]!=label:continue
+                        yield move
+                candidates=final_candidates()
+            else:
+                from_mask=chess.BB_ALL
+                if remaining == 2:
+                    # This is the mover's last turn, too: the opponent cannot
+                    # restore one of its pieces or fill its missing targets.
+                    # With no missing target, allow sacrifices anywhere; the
+                    # opponent's final move might capture that extra piece.
+                    from_mask=mismatch | state.kings
+                    needed=white_needed if state.turn else black_needed
+                    if needed:
+                        destinations=needed
+                        if state.castling_rights & state.occupied_co[state.turn]:
+                            rank=0 if state.turn else 7
+                            destinations |= state.castling_rights | chess.BB_SQUARES[chess.square(2,rank)] | chess.BB_SQUARES[chess.square(6,rank)]
+                        to_mask &= destinations
+                candidates=state.generate_legal_moves(from_mask=from_mask,to_mask=to_mask)
+            moves=sorted(candidates,key=move_order)
             found = False
             for move in moves:
+                if captures_forbidden and state.ep_square is not None and state.is_en_passant(move):continue
                 if remaining == 1:
                     changed = chess.BB_SQUARES[move.from_square] | chess.BB_SQUARES[move.to_square]
                     if state.is_en_passant(move):
@@ -255,9 +300,10 @@ class LegalSearcher:
                         changed |= chess.BB_SQUARES[chess.square(5 if kingside else 3, rank)]
                     if mismatch & ~changed:
                         continue
+                capture_square=move.to_square if state.is_capture(move) else None
                 state.push(move)
                 path.append(move)
-                try:found = dfs(state, remaining-1) or found
+                try:found = dfs(state, remaining-1,capture_square) or found
                 finally:path.pop();state.pop()
                 if abort:return found
             # Only cache exhausted failures. Caching successes would hide

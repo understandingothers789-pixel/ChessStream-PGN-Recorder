@@ -1,5 +1,6 @@
 """Small independent correctness checks for the bounded shortest-path search."""
 import itertools
+import random
 import chess
 from chessstream.domain import Observation
 from chessstream.reconstruction import LegalSearcher,Reconstructor,select_capture_path,speculative_detour
@@ -29,13 +30,56 @@ def test_shortest_search_matches_independent_oracle_for_moves_and_special_rules(
     cases=[(chess.STARTING_FEN,'e4 e5'),(chess.STARTING_FEN,'Nf3 Nf6'),
            ('r3k2r/ppp2ppp/2n5/3pp3/3PP3/2N5/PPP2PPP/R3K2R w KQkq - 0 10','O-O O-O-O'),
            ('7k/P7/8/8/8/8/8/7K w - - 0 1','a8=N'),
-           ('7k/8/8/3pP3/8/8/8/7K w - d6 0 1','exd6')]
+           ('7k/8/8/3pP3/8/8/8/7K w - d6 0 1','exd6'),
+           # No white target is missing before Rc2: its last move can still
+           # sacrifice a piece that disappears on the opponent's final turn.
+           ('8/8/8/8/8/2k5/R7/7K w - - 0 1','Rc2+ Kxc2'),
+           ('1r5k/P7/8/8/8/8/8/7K w - - 0 1','axb8=N Kg7')]
     for fen,line in cases:
         source=chess.Board(fen);target=play(source.copy(),line)
         result=LegalSearcher(4).search(source,Observation.from_board(target))
         assert result.exhaustive
         assert {tuple(m.uci() for m in path) for path in result.paths}==oracle(source,target)
         assert source.fen()==fen
+
+
+def test_final_move_filter_matches_unpruned_moves_with_partial_observations():
+    """Exercise every legal move, including moves hidden by low confidence."""
+    sources=[chess.Board(fen) for fen in (
+        chess.STARTING_FEN,
+        'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1',
+        'r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1',
+        '7k/8/8/3pP3/8/8/8/7K w - d6 0 1',
+        '7k/8/8/8/3Pp3/8/8/7K b - d3 0 1',
+        '1r5k/P7/8/8/8/8/8/7K w - - 0 1',
+        '7k/8/8/8/8/8/p7/1R5K b - - 0 1')]
+    randomizer=random.Random(20261023)
+    state=chess.Board()
+    for index in range(48):
+        if state.is_game_over():break
+        state.push(randomizer.choice(list(state.legal_moves)))
+        if index%8==7:sources.append(state.copy(stack=False))
+    for source in sources:
+        original=source.fen()
+        endpoints=[]
+        for move in source.legal_moves:
+            endpoint=source.copy(stack=False);endpoint.push(move)
+            endpoints.append((move,endpoint))
+        for move,target in endpoints:
+            for hidden in ((),randomizer.sample(range(64),4)):
+                observed=Observation.from_board(target)
+                if hidden:observed.probabilities[list(hidden)]=1/13
+                expected=set()
+                for candidate,endpoint in endpoints:
+                    # Low-confidence squares cannot be used as evidence that
+                    # an unseen piece changed. This is the public search rule.
+                    if observed.matches(endpoint) and all(
+                            endpoint.piece_at(square)==source.piece_at(square) for square in hidden):
+                        expected.add((candidate.uci(),))
+                result=LegalSearcher(1,time_limit_ms=1000).search(source,observed,target_turn=target.turn)
+                assert result.exhaustive
+                assert {tuple(m.uci() for m in path) for path in result.paths}==expected
+        assert source.fen()==original
 
 
 def test_equal_shortest_orders_stay_distinct_and_limits_or_hidden_squares_are_not_proof():

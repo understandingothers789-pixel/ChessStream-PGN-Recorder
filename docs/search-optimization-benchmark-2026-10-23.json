@@ -1,0 +1,61 @@
+{
+  "reference_commit": "ed253d6e2ff7c7fe4b0f808eb285a376b3a62114",
+  "repeats": 5,
+  "scope": "Interleaved local CPU search only; no capture, OCR or video benchmark",
+  "results": {
+    "routine_two_plies": {
+      "before": {
+        "mean_ms": 0.361,
+        "worst_ms": 0.495,
+        "nodes": 23,
+        "paths": 1,
+        "paths_sha256": "0309c39352f07734664765382ac8be434c13da561bbe8f9e704154b3be64a149"
+      },
+      "after": {
+        "mean_ms": 0.229,
+        "worst_ms": 0.303,
+        "nodes": 4,
+        "paths": 1,
+        "paths_sha256": "0309c39352f07734664765382ac8be434c13da561bbe8f9e704154b3be64a149"
+      },
+      "same_shortest_paths": true,
+      "time_reduction_percent": 36.6
+    },
+    "six_ply_capture_gap": {
+      "before": {
+        "mean_ms": 167.164,
+        "worst_ms": 173.764,
+        "nodes": 22802,
+        "paths": 2,
+        "paths_sha256": "84b0ca188dabd2d54565c368a32be0deeefe469c2335e12ad3b83c2a6a4ddf47"
+      },
+      "after": {
+        "mean_ms": 53.818,
+        "worst_ms": 54.807,
+        "nodes": 6566,
+        "paths": 2,
+        "paths_sha256": "84b0ca188dabd2d54565c368a32be0deeefe469c2335e12ad3b83c2a6a4ddf47"
+      },
+      "same_shortest_paths": true,
+      "time_reduction_percent": 67.8
+    },
+    "saved_middlegame_gap": {
+      "before": {
+        "mean_ms": 640.562,
+        "worst_ms": 648.132,
+        "nodes": 88632,
+        "paths": 29,
+        "paths_sha256": "57aa2c5521a9ed2c2f4de15b3df8f37ecf55e752b8a5c1293d9869cc5c213bef"
+      },
+      "after": {
+        "mean_ms": 324.985,
+        "worst_ms": 333.769,
+        "nodes": 46919,
+        "paths": 29,
+        "paths_sha256": "57aa2c5521a9ed2c2f4de15b3df8f37ecf55e752b8a5c1293d9869cc5c213bef"
+      },
+      "same_shortest_paths": true,
+      "time_reduction_percent": 49.3
+    }
+  }
+}

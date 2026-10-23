@@ -1,5 +1,6 @@
 """Compare identical exhaustive searches with/without the travel lower bound."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import statistics
@@ -33,7 +34,8 @@ def benchmark(repeats):
             outcomes['travel_bound' if optimized else 'baseline']={
                 'mean_ms':round(statistics.mean(result.elapsed_ms for result in results),3),
                 'worst_ms':round(max(result.elapsed_ms for result in results),3),
-                'nodes':results[-1].nodes,'depth':results[-1].depth,'paths':len(routes[optimized])}
+                'nodes':results[-1].nodes,'depth':results[-1].depth,'paths':len(routes[optimized]),
+                'paths_sha256':hashlib.sha256(json.dumps(sorted(routes[optimized])).encode()).hexdigest()}
         if routes[False]!=routes[True]:raise RuntimeError('Optimization changed shortest alternatives')
         outcomes['same_shortest_paths']=True;report[name]=outcomes
     return {'repeats':repeats,'scope':'Local CPU search only, identical fixtures and budgets, no OCR/capture/video accuracy measurement',
