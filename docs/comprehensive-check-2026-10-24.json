@@ -3,15 +3,16 @@
   "version": "1.6.24.dev7",
   "base_commit": "f45484c37abe64b1537c51674d2ff3277dd5fa45",
   "linux_suite": {
-    "passed": 270,
-    "seconds": 10.39,
+    "passed": 273,
+    "seconds": 10.83,
     "fresh_pinned_dependencies": true
   },
   "fixes": [
     "FEN and SetUp export headers derive exclusively from actual initial board",
     "Recording integrity check holds manager RLock",
     "Integrity recovery precedes error snapshot for simultaneous invalid frame and corrupt history",
-    "Direct manager input validates recognition data before use"
+    "Direct manager input validates recognition data before use",
+    "Library joins revalidate source content/existence and active-recording exclusion under manager lock"
   ],
   "replay": {
     "recording_policy": "Conservative opponent-response confirmation; evaluator explicitly confirms each final pending ply once. Automatic move accuracy excludes those manual final confirmations.",

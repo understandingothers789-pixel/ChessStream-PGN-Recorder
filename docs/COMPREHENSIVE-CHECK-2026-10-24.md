@@ -9,13 +9,15 @@ Development build **1.6.24-dev7**, reviewed from dev6 (`f45484c`). Main is not c
 3. **Two simultaneous faults defeated the error path.** A corrupt accepted move list plus a NaN recognition frame caused the worker to call `snapshot()` on corrupt history while reporting the bad frame. Integrity recovery now runs before any error snapshot. A combined-fault test verifies restoration and an unchanged saved PGN.
 4. **Direct processing lacked the worker's input validation.** Non-GUI callers of `GameManager.process()` now get the same structural recognition checks before lifecycle or search uses the frame. Invalid scores preserve the accepted PGN and invalidate pending recovery/audio evidence.
 
+5. **Library join validation had a timing gap.** UI source checks ran before acquiring the manager lock. Saving a combined PGN now rechecks source content and existence under that lock and refuses a non-activating library join if a source has become active. Tests cover changed, deleted and newly active sources; no combined record is written in those cases.
+
 Files changed: `chessstream/games.py`, `chessstream/capture.py`, `tests/test_pipeline_faults.py`, new `tests/test_export_setup.py`, version labels in `pyproject.toml`/`chessstream/gui.py`, and documentation. No model weights, sound fingerprints, or dependency pins changed.
 
 ## Verification
 
 | Area | Result and scope |
 |---|---|
-| Full local suite | **270 passed**, 10.39 s, in a fresh environment with the currently pinned runtime libraries. No tests deleted. |
+| Full local suite | **273 passed**, 10.83 s, in a fresh environment with the currently pinned runtime libraries. No tests deleted. |
 | Recognition/continuity corpus | **116 board positions, zero square errors; 14/14 sequences correct**. Five deliberately weakened classifier cases recovered (old exact-label baseline 0/5). This is a fixed corpus, not a general accuracy estimate. |
 | End-to-end real-image replay | Four games, **64 frames**, correct complete sequences and PGN round trips; every-other-frame runs also matched. Final pending moves were explicitly confirmed as required by the evaluator. |
 | Built-in audio | Seven published default sounds × three offsets: **21/21 controlled trials** detected one cue with reduced volume and a quiet background tone. No user learning or audio saving required. Real commentary remains unmeasured. |

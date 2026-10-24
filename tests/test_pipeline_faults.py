@@ -163,3 +163,20 @@ def test_failed_pgn_file_write_keeps_database_and_can_be_retried(tmp_path,monkey
     row=store.game(m.current_id)
     assert (store.root/'pgn'/(m.current_id+'.pgn')).read_text().strip()==row['pgn'].strip()
     store.close()
+
+
+@pytest.mark.parametrize('change',['updated','deleted','became_active'])
+def test_library_join_rechecks_sources_inside_manager_lock(tmp_path,change):
+    store,m,w,clock=setup(tmp_path);first=store.game(m.current_id)
+    m._create(chess.Board(),utcnow());second=store.game(m.current_id)
+    m._create(chess.Board(),utcnow());active=m.current_id
+    if change=='updated':
+        with store.transaction() as db:db.execute('UPDATE games SET pgn=? WHERE id=?',(first['pgn']+'\n',first['id']))
+    elif change=='deleted':
+        with store.transaction() as db:db.execute('DELETE FROM games WHERE id=?',(first['id'],))
+    else:m.recover(first['id'],persist=False)
+    before=len(store.games())
+    with pytest.raises(ValueError):m.combine_games([first,second],first['pgn'],activate=False)
+    assert len(store.games())==before
+    assert not store.query("SELECT * FROM audit WHERE action='PGNs combined'")
+    store.close()

@@ -2063,6 +2063,14 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
     def combine_games(self, rows, pgn=None, *, activate=True):
         """Save a validated combined game; optionally leave live recording active."""
         with self.lock:
+            # The library's earlier check happens before this lock is acquired.
+            # Recording may have changed a source in that interval.
+            for source in rows:
+                latest=self.store.game(source['id'])
+                if not latest or latest['pgn']!=source['pgn']:
+                    raise ValueError('A source PGN changed during the join; originals preserved. Please retry.')
+            if not activate and any(source['id']==self.current_id for source in rows):
+                raise ValueError('A selected PGN is now active; originals preserved. Select older PGNs.')
             pgn = pgn or join_recordings(rows,self.searcher())
             game=chess.pgn.read_game(io.StringIO(pgn))
             if game is None or game.errors:raise ValueError('Combined PGN is invalid.')
