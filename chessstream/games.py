@@ -102,6 +102,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._saved_join_request=None;self._saved_join_cancel=None
         self._checkpoint_join_attempt=None
         self._audio_evidence=None
+        self._integrity_key=None
         self._clock=time.monotonic
         self._reset_extras()
 
@@ -1117,6 +1118,15 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         with self.lock:
             if not self.rec:return False
             self.note_evidence(obs)
+            if (self._recovery_future or self.rec.status.startswith(('unmatched','search limit','uncertain','unresolved move gap'))):
+                # A stale, expensive recovery must yield to a clear direct
+                # successor. The normal process still applies identity,
+                # premove, rewind and unique-path commitment checks.
+                for move in self.rec.board.legal_moves:
+                    trial=self.rec.board.copy(stack=False);trial.push(move)
+                    if obs.matches(trial,max(.8,self.settings.min_confidence)):
+                        self.cancel_background_recovery()
+                        return False
             if self.lifecycle_gate(obs) and self.lifecycle.phase!='unresolved move gap':return False
             token=self.recovery_token(obs)
             if self._recovery_future:
@@ -1622,9 +1632,37 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._review_position=self._review_since=self._review_candidate=None
         self._review_recorded=None
 
+    def check_recording_integrity(self):
+        if self.rec is None:return True
+        from .integrity import replay_accepted
+        key=(self.current_id,self.rec.initial_fen,tuple(self.rec.verified),self.rec.board.fen())
+        if key==self._integrity_key:return True
+        try:replay_accepted(self.rec)
+        except (ValueError,AssertionError) as exc:
+            row=self.store.game(self.current_id)
+            if not row:raise ValueError('Recording integrity failed before a saved checkpoint exists') from exc
+            state=json.loads(row['state'])
+            restored=Reconstructor.restore(state,self.searcher())
+            replay_accepted(restored)  # Never use a checkpoint that also fails validation.
+            self.cancel_background_recovery();self.cancel_saved_join()
+            self.rec=restored;self.headers=json.loads(row['headers']);self.ended=row['ended']
+            self.note=state.get('note','');self._load_extras(state)
+            self._timed_base=state.get('timed_base');self._timed_end=state.get('timed_end',0)
+            self.result_override=state.get('result_override',False)
+            self.lifecycle.load(state.get('lifecycle',{}),self)
+            self.reset_settling();self.clear_position_recovery();self._audio_evidence=None
+            self._evidence_revision+=1;self._integrity_key=None;self._persisted_fingerprint=None
+            self.last_message=self.rec.status='Recovery • PGN consistency check restored last saved checkpoint'
+            self.store.audit('recording integrity recovery',{'game_id':self.current_id,'reason':str(exc)})
+            logging.error('Recording integrity recovery: %s',exc)
+            return False
+        self._integrity_key=key
+        return True
+
     def persist(self):
         if not self.rec:
             return
+        if not self.check_recording_integrity():return
         comment = self.note
         pending = any(b.moves for b in self.rec.branches) or len(self.rec.branches)>1 or self.rec.incomplete
         if pending:

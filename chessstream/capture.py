@@ -182,10 +182,26 @@ class RecordingWorker(QThread):
         self.audio_info={"status":"Audio cues off","count":0}
         self._audio_enabled=False
 
+    def audio_failed(self,exc):
+        logging.warning('Optional audio failed; visual recording continues: %s',exc,exc_info=True)
+        audio=self.audio;self.audio=None;self.manager._audio_evidence=None
+        if audio:
+            try:audio.stop()
+            except Exception:logging.exception('Failed to close optional audio')
+        self.audio_info={'status':'Audio unavailable; visual recording continues: '+str(exc),'count':0,'available':False}
+
+    def poll_audio(self,discard=False):
+        if not self.audio:return []
+        try:
+            events,self.audio_info=self.audio.poll(discard=discard)
+            return events
+        except Exception as exc:
+            self.audio_failed(exc);return []
+
     def layout_changed(self):
         """Invalidate geometry-dependent evidence, retaining the game identity."""
         self.manager._audio_evidence=None
-        if self.audio:self.audio.poll(discard=True)
+        if self.audio:self.poll_audio(discard=True)
         self.manager.cancel_background_recovery()
         self.manager.cancel_saved_join()
         self.manager._evidence_revision+=1
@@ -194,9 +210,19 @@ class RecordingWorker(QThread):
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
+        from .integrity import observation_error
+        error=observation_error(obs)
+        if error:
+            self.manager._audio_evidence=None;self.manager.reset_settling()
+            self.manager.cancel_background_recovery();self.manager.cancel_saved_join()
+            self.manager._evidence_revision+=1
+            return {**self.manager.snapshot(),'status':'Recognition error • '+error+'; PGN preserved',
+                    'pipeline_health':{'vision':'invalid output','pgn':'preserved'},'audio_cues':self.audio_info}
+        if not self.manager.check_recording_integrity():
+            return {**self.manager.snapshot(),'pipeline_health':{'pgn':'checkpoint restored'}}
         audio=getattr(self,'audio',None)
         if audio:
-            events,self.audio_info=audio.poll(discard=self.paused.is_set() or self.preview_only)
+            events=self.poll_audio(discard=self.paused.is_set() or self.preview_only)
             if events:
                 self.manager._audio_evidence=(self.manager.current_id,obs.placement(),events[-1]['at'])
         self.manager.observe_frame(obs)
@@ -301,15 +327,19 @@ class RecordingWorker(QThread):
                     tick=time.monotonic()
                     settings=self.manager.settings
                     if settings.audio_cues!=self._audio_enabled:
-                        if self.audio:self.audio.stop()
+                        if self.audio:
+                            try:self.audio.stop()
+                            except Exception as exc:self.audio_failed(exc)
                         self.audio=None;self._audio_enabled=settings.audio_cues
                         self.manager._audio_evidence=None
                         self.audio_info={'status':'Audio cues off','count':0}
                         if settings.audio_cues:
                             from .audio import AudioListener
-                            self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
+                            try:
+                                self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
+                            except Exception as exc:self.audio_failed(exc)
                     if self.audio and self.paused.is_set():
-                        self.audio.poll(discard=True);self.manager._audio_evidence=None
+                        self.poll_audio(discard=True);self.manager._audio_evidence=None
                     while not self.commands.empty():
                         action,value=self.commands.get()
                         try:
@@ -421,14 +451,22 @@ class RecordingWorker(QThread):
                         changed=last_pixels is None or not np.array_equal(board_image,last_pixels)
                         if changed or last_obs is None:
                             obs=recognizer.recognize(board_image)
-                            if settings.orientation=="auto":
-                                obs=choose_orientation(obs,self.manager.rec.board if self.manager.rec else None)
-                            elif settings.orientation=="black":
-                                obs=obs.flipped()
+                            from .integrity import observation_error
+                            if not observation_error(obs):
+                                if settings.orientation=="auto":
+                                    obs=choose_orientation(obs,self.manager.rec.board if self.manager.rec else None)
+                                elif settings.orientation=="black":
+                                    obs=obs.flipped()
                             last_pixels=board_image.copy();last_obs=obs
                         else:
                             from .domain import Observation
                             obs=Observation(last_obs.probabilities.copy(),orientation=last_obs.orientation,quality=last_obs.quality)
+                        from .integrity import observation_error
+                        if observation_error(obs):
+                            self.update.emit(self.process_observation(obs,0))
+                            last_pixels=None;last_obs=None;stable_key=None;stable_count=0
+                            self.stopping.wait(recognition_period(settings))
+                            continue
                         obs.timestamp=timestamp
                         self.scan_context(context_image,context_rect,obs)
                         if settings.detect_board and obs.confidence<.6 and tick-last_detect>2:
@@ -482,7 +520,7 @@ class RecordingWorker(QThread):
                             deduplicate_position=bool(obs is not None and stable_count>=2))
                         next_saved=tick+settings.interval
                     if self.audio and obs is None:
-                        _,self.audio_info=self.audio.poll(discard=True)
+                        self.poll_audio(discard=True)
                     snapshot['audio_cues']=self.audio_info
                     snapshot["buffered_frames"]=len(self.recent_frames.frames)
                     snapshot["buffered_bytes"]=sum(frame["image"].nbytes for frame in self.recent_frames.frames)
@@ -503,7 +541,9 @@ class RecordingWorker(QThread):
             logging.exception("Recording worker failed")
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
-            if self.audio:self.audio.stop()
+            if self.audio:
+                try:self.audio.stop()
+                except Exception as exc:self.audio_failed(exc)
             self.manager._audio_evidence=None
             self.manager.cancel_background_recovery()
             self.manager.cancel_saved_join()

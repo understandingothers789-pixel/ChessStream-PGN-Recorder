@@ -213,6 +213,13 @@ class GameLifecycle:
                    for index in range(len(active)-width+1))
 
     def _linked(self,manager,obs):
+        # A prior budget miss can be cached while recovery occupies the CPU.
+        # Direct successors are cheap positive evidence; recheck them before
+        # consulting that cache so one bad frame cannot block resumed play.
+        board=manager.rec.board
+        for move in board.legal_moves:
+            trial=board.copy(stack=False);trial.push(move)
+            if obs.matches(trial,max(.8,manager.settings.min_confidence)):return True
         key=(manager.current_id,tuple(manager.rec.verified),obs.placement())
         cache_key=(key,tuple((branch.root_fen,branch.moves) for branch in manager.rec.branches),
                    tuple((manager.analysis_cursor or {}).get('path',())),hash(manager.review_pgn))
