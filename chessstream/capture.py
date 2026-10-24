@@ -210,6 +210,9 @@ class RecordingWorker(QThread):
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
+        # Validate shared recording state before any error path renders it.
+        if not self.manager.check_recording_integrity():
+            return {**self.manager.snapshot(),'pipeline_health':{'pgn':'checkpoint restored'}}
         from .integrity import observation_error
         error=observation_error(obs)
         if error:
@@ -218,8 +221,6 @@ class RecordingWorker(QThread):
             self.manager._evidence_revision+=1
             return {**self.manager.snapshot(),'status':'Recognition error • '+error+'; PGN preserved',
                     'pipeline_health':{'vision':'invalid output','pgn':'preserved'},'audio_cues':self.audio_info}
-        if not self.manager.check_recording_integrity():
-            return {**self.manager.snapshot(),'pipeline_health':{'pgn':'checkpoint restored'}}
         audio=getattr(self,'audio',None)
         if audio:
             events=self.poll_audio(discard=self.paused.is_set() or self.preview_only)

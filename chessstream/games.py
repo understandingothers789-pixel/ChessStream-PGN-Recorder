@@ -32,7 +32,7 @@ def export_pgn(initial_fen: str, moves: list[str], headers: dict, comment="", re
     for key, value in headers.items():
         # PGN values cannot contain newlines or unescaped quotes. Exporter does not escape them.
         key = str(key)
-        if key.replace("_", "").isalnum():
+        if key not in ("FEN","SetUp") and key.replace("_", "").isalnum():
             game.headers[key] = str(value).replace("\n"," ").replace("\r"," ").replace('"', "'").replace("\\", "/")
     if initial.fen() != chess.STARTING_FEN:
         game.headers["SetUp"] = "1"
@@ -847,6 +847,15 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
 
     def process(self, obs: Observation) -> dict:
         with self.lock:
+            if not self.check_recording_integrity():
+                return {**self.snapshot(),'pipeline_health':{'pgn':'checkpoint restored'}}
+            from .integrity import observation_error
+            error=observation_error(obs)
+            if error:
+                self._audio_evidence=None;self.reset_settling()
+                self.cancel_background_recovery();self.cancel_saved_join();self._evidence_revision+=1
+                return {**self.snapshot(),'status':'Recognition error • '+error+'; PGN preserved',
+                        'pipeline_health':{'vision':'invalid output','pgn':'preserved'}}
             self.note_evidence(obs)
             self.poll_saved_join()
             self.last_observation = obs
@@ -1633,6 +1642,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._review_recorded=None
 
     def check_recording_integrity(self):
+        with self.lock:
+            return self._check_recording_integrity_locked()
+
+    def _check_recording_integrity_locked(self):
         if self.rec is None:return True
         from .integrity import replay_accepted
         key=(self.current_id,self.rec.initial_fen,tuple(self.rec.verified),self.rec.board.fen())
@@ -1660,6 +1673,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         return True
 
     def persist(self):
+        with self.lock:
+            return self._persist_locked()
+
+    def _persist_locked(self):
         if not self.rec:
             return
         if not self.check_recording_integrity():return

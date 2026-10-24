@@ -109,3 +109,57 @@ def test_audio_cannot_authorize_disappearing_piece_and_later_frames_recover(tmp_
     converge(w,clock,board)
     assert_saved(store,m,board)
     m.cancel_background_recovery();m.cancel_saved_join();store.close()
+
+
+def test_invalid_frame_and_corrupt_move_list_recover_together(tmp_path):
+    store,m,w,clock=setup(tmp_path)
+    before=store.game(m.current_id)['pgn']
+    m.rec.verified.append('a2a5')
+    obs=Observation.from_board(chess.Board());obs.probabilities[:]=np.nan
+    snapshot=w.process_observation(obs,2)
+    assert snapshot['pipeline_health']['pgn']=='checkpoint restored'
+    assert not m.rec.verified and store.game(m.current_id)['pgn']==before
+    store.close()
+
+
+def test_integrity_check_does_not_read_another_threads_partial_edit(tmp_path):
+    import threading
+    store,m,w,clock=setup(tmp_path);started=threading.Event();done=threading.Event();outcome=[]
+    def check():
+        started.set()
+        outcome.append(m.check_recording_integrity());done.set()
+    with m.lock:
+        original=m.rec.board.copy()
+        m.rec.board.remove_piece_at(chess.A1)
+        thread=threading.Thread(target=check);thread.start()
+        assert started.wait(1)
+        held=not done.wait(.05)
+        m.rec.board=original
+    thread.join(2)
+    assert held and outcome==[True]
+    assert not store.query("SELECT * FROM audit WHERE action='recording integrity recovery'")
+    store.close()
+
+
+def test_manager_entry_point_rejects_invalid_recognition_output(tmp_path):
+    store,m,w,clock=setup(tmp_path);before=store.game(m.current_id)['pgn']
+    obs=Observation.from_board(chess.Board());obs.probabilities[:]=np.nan
+    snapshot=m.process(obs)
+    assert 'Recognition error' in snapshot['status']
+    assert not m.rec.verified and store.game(m.current_id)['pgn']==before
+    store.close()
+
+
+def test_failed_pgn_file_write_keeps_database_and_can_be_retried(tmp_path,monkeypatch):
+    import chessstream.storage as storage
+    store,m,w,clock=setup(tmp_path);real_write=storage.atomic_text
+    m.rec.board.push_san('e4');m.rec.verified.append('e2e4')
+    def fail(*args,**kwargs):raise OSError('simulated full export disk')
+    with monkeypatch.context() as patch:
+        patch.setattr(storage,'atomic_text',fail)
+        with pytest.raises(OSError):m.persist()
+    assert_saved(store,m,m.rec.board)
+    m.persist()
+    row=store.game(m.current_id)
+    assert (store.root/'pgn'/(m.current_id+'.pgn')).read_text().strip()==row['pgn'].strip()
+    store.close()

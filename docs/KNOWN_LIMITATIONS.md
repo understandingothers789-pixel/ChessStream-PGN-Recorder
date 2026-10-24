@@ -2,7 +2,7 @@
 
 This document describes the current development branch. Automated Linux and
 Windows checks do not establish accuracy on arbitrary YouTube streams. See the
-[October 23 comprehensive check](COMPREHENSIVE-CHECK-2026-10-23.md) for the current
+[October 24 comprehensive check](COMPREHENSIVE-CHECK-2026-10-24.md) for the current
 measurements, fixes and boundaries of validation.
 
 1. **Recognition is fallible.** The bundled screenshot CNN and offline text
@@ -95,3 +95,6 @@ measurements, fixes and boundaries of validation.
 The retained browser PNG corpus is useful regression evidence, not a statistical
 study of arbitrary live streams. A passing suite does not mean all bugs or all
 security vulnerabilities have been eliminated.
+
+15. **Playback audio is optional evidence.** Built-in fingerprints cover default Chess.com and Lichess sounds, not all themes or playback speeds. Other apps on the output device and commentary can cause false/missed cues. Audio never proves an unseen move order; physical loopback acceptance remains outstanding.
+16. **Integrity checks detect contradictions.** Legal replay catches illegal accepted moves or a mismatch with the reconstructed board, and can restore a validated checkpoint. It cannot prove that a consistently misrecognized legal position actually appeared. Checks now run under the manager lock and precede invalid-frame error snapshots.
