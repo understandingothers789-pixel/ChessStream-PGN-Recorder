@@ -11,13 +11,15 @@ Development build **1.6.24-dev7**, reviewed from dev6 (`f45484c`). Main is not c
 
 5. **Library join validation had a timing gap.** UI source checks ran before acquiring the manager lock. Saving a combined PGN now rechecks source content and existence under that lock and refuses a non-activating library join if a source has become active. Tests cover changed, deleted and newly active sources; no combined record is written in those cases.
 
-Files changed: `chessstream/games.py`, `chessstream/capture.py`, `tests/test_pipeline_faults.py`, new `tests/test_export_setup.py`, version labels in `pyproject.toml`/`chessstream/gui.py`, and documentation. No model weights, sound fingerprints, or dependency pins changed.
+6. **The source launcher retained outdated dependency environments.** `Launch-Windows.cmd` only installed packages when creating `.venv`. It now runs an offline version check against the project's exact pins and refreshes the environment only when those versions or the project version differ. Failed refreshes stop startup clearly. Tests cover current Windows pins, old native libraries, and missing Windows-only audio. Windows CI also runs the check against its actual installed environment. Dependency installation can use the network during source setup/repair; current environments need no download. Portable inference remains offline and uses bundled dependencies.
+
+Files changed: `chessstream/games.py`, `chessstream/capture.py`, `tests/test_pipeline_faults.py`, new `tests/test_export_setup.py`, version labels in `pyproject.toml`/`chessstream/gui.py`, `Launch-Windows.cmd`, new `scripts/check_runtime.py`/`tests/test_source_runtime.py`, its Windows CI step, and documentation. No model weights, sound fingerprints, or dependency pins changed.
 
 ## Verification
 
 | Area | Result and scope |
 |---|---|
-| Full local suite | **273 passed**, 10.83 s, in a fresh environment with the currently pinned runtime libraries. No tests deleted. |
+| Full local suite | **276 passed**, 10.22 s, in a fresh environment with the currently pinned runtime libraries. No tests deleted. |
 | Recognition/continuity corpus | **116 board positions, zero square errors; 14/14 sequences correct**. Five deliberately weakened classifier cases recovered (old exact-label baseline 0/5). This is a fixed corpus, not a general accuracy estimate. |
 | End-to-end real-image replay | Four games, **64 frames**, correct complete sequences and PGN round trips; every-other-frame runs also matched. Final pending moves were explicitly confirmed as required by the evaluator. |
 | Built-in audio | Seven published default sounds × three offsets: **21/21 controlled trials** detected one cue with reduced volume and a quiet background tone. No user learning or audio saving required. Real commentary remains unmeasured. |

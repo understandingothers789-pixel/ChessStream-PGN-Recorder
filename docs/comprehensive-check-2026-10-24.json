@@ -3,8 +3,8 @@
   "version": "1.6.24.dev7",
   "base_commit": "f45484c37abe64b1537c51674d2ff3277dd5fa45",
   "linux_suite": {
-    "passed": 273,
-    "seconds": 10.83,
+    "passed": 276,
+    "seconds": 10.22,
     "fresh_pinned_dependencies": true
   },
   "fixes": [
@@ -12,7 +12,8 @@
     "Recording integrity check holds manager RLock",
     "Integrity recovery precedes error snapshot for simultaneous invalid frame and corrupt history",
     "Direct manager input validates recognition data before use",
-    "Library joins revalidate source content/existence and active-recording exclusion under manager lock"
+    "Library joins revalidate source content/existence and active-recording exclusion under manager lock",
+    "Source launcher detects stale or missing pinned dependencies and refreshes cached virtual environments only when required"
   ],
   "replay": {
     "recording_policy": "Conservative opponent-response confirmation; evaluator explicitly confirms each final pending ply once. Automatic move accuracy excludes those manual final confirmations.",
