@@ -101,6 +101,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._saved_join_executor=None;self._saved_join_future=None
         self._saved_join_request=None;self._saved_join_cancel=None
         self._checkpoint_join_attempt=None
+        self._audio_evidence=None
         self._clock=time.monotonic
         self._reset_extras()
 
@@ -1089,7 +1090,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             detail={'observed_placement':obs.placement(),'orientation':obs.orientation,
                 'square_confidence':[round(float(value),2) for value in obs.probabilities.max(axis=1)],
                 'uncertain_squares':obs.uncertain_squares(max(.8,self.settings.min_confidence)),
-                'stable':stable_count>=2,'accepted_fen':self.rec.board.fen() if self.rec else None,
+                'audio_cues':snapshot.get('audio_cues'),'stable':stable_count>=2,'accepted_fen':self.rec.board.fen() if self.rec else None,
                 'accepted_plies':len(self.rec.verified) if self.rec else 0,
                 'pending_hypotheses':pending,'pending_hypothesis_count':len(self.rec.branches) if self.rec else 0,
                 'incomplete':self.rec.incomplete if self.rec else False,
@@ -1378,7 +1379,14 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             self._settled_since=(self._frame_since if self._frame_placement==obs.placement() and self._frame_since is not None else now)
             self._settled_error=None
         elapsed=now-self._settled_since
-        if elapsed<.5 or self.terminal_message or self.rewind_state:return
+        cue=self._audio_evidence
+        audio_supported=bool(self.settings.audio_cues and cue
+            and cue[:2]==(self.current_id,obs.placement()) and 0<=now-cue[2]<=1.
+            and cue[2]>=self._settled_since-.65
+            and len(self.rec.branches)==1 and len(self.rec.branches[0].moves)==1
+            and not self.premove_state and self.lifecycle.phase not in
+                ('analysis / replay','uncertain transition','temporarily uncertain','between games'))
+        if (elapsed<.5 and not (audio_supported and elapsed>=.08)) or self.terminal_message or self.rewind_state:return
         if obs.matches(self.rec.board,self.settings.min_confidence):return
         if obs.placement() in self.rec.history[:-1]:return  # review is not play
         # A reply that extends the committed suffix removes its rollback privilege.
@@ -1449,8 +1457,12 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             self.rec=chosen
             for ply in range(before,len(chosen.verified)):
                 self.inferred_moves[str(ply+1)]={'uci':chosen.verified[ply],
-                    'comment':'Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified.'}
-            self.rec.status='recording • accepted after 0.5 seconds (inferred)'
+                    'comment':('Inferred: matching playback sound supported a stable, unique legal move; audio is supporting evidence.'
+                               if audio_supported else
+                               'Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified.')}
+            self._audio_evidence=None
+            self.rec.status=('recording • move supported by audio + board' if audio_supported else
+                             'recording • accepted after 0.5 seconds (inferred)')
             self.last_message=self.rec.status
             self.store.audit('settled position accepted',{'game_id':self.current_id,'after_ply':before,
                 'moves':chosen.verified[before:],'placement':obs.placement(),'elapsed':elapsed})

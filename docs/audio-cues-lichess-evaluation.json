@@ -1,0 +1,86 @@
+[
+  {
+    "sound": "Move",
+    "sha256": "bef9236737f601790b1eb30a9eefc0c00de85804d4dfc9d2b51555b5e4b82f5c",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5599999999999996,
+        "kind": "move",
+        "score": 0.964
+      }
+    ],
+    "cpu_ms_per_audio_second": 34.376
+  },
+  {
+    "sound": "Move",
+    "sha256": "bef9236737f601790b1eb30a9eefc0c00de85804d4dfc9d2b51555b5e4b82f5c",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.58,
+        "kind": "move",
+        "score": 0.963
+      }
+    ],
+    "cpu_ms_per_audio_second": 32.684
+  },
+  {
+    "sound": "Move",
+    "sha256": "bef9236737f601790b1eb30a9eefc0c00de85804d4dfc9d2b51555b5e4b82f5c",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.58,
+        "kind": "move",
+        "score": 0.963
+      }
+    ],
+    "cpu_ms_per_audio_second": 32.329
+  },
+  {
+    "sound": "Capture",
+    "sha256": "3d1352ded44d53e55d001f78bb043fe1288692fb882420ec17677997637762ed",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.54,
+        "kind": "capture",
+        "score": 1.0
+      }
+    ],
+    "cpu_ms_per_audio_second": 27.455
+  },
+  {
+    "sound": "Capture",
+    "sha256": "3d1352ded44d53e55d001f78bb043fe1288692fb882420ec17677997637762ed",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5599999999999996,
+        "kind": "capture",
+        "score": 1.0
+      }
+    ],
+    "cpu_ms_per_audio_second": 29.969
+  },
+  {
+    "sound": "Capture",
+    "sha256": "3d1352ded44d53e55d001f78bb043fe1288692fb882420ec17677997637762ed",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5599999999999996,
+        "kind": "capture",
+        "score": 1.0
+      }
+    ],
+    "cpu_ms_per_audio_second": 32.141
+  }
+]

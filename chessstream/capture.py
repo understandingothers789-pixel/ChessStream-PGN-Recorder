@@ -178,9 +178,14 @@ class RecordingWorker(QThread):
         self.recent_frames=RecentFrames(12)
         self.position_history=PositionHistory(96)
         self._processed_frames=0;self._late_capture_slots=0
+        self.audio=None
+        self.audio_info={"status":"Audio cues off","count":0}
+        self._audio_enabled=False
 
     def layout_changed(self):
         """Invalidate geometry-dependent evidence, retaining the game identity."""
+        self.manager._audio_evidence=None
+        if self.audio:self.audio.poll(discard=True)
         self.manager.cancel_background_recovery()
         self.manager.cancel_saved_join()
         self.manager._evidence_revision+=1
@@ -189,6 +194,11 @@ class RecordingWorker(QThread):
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
+        audio=getattr(self,'audio',None)
+        if audio:
+            events,self.audio_info=audio.poll(discard=self.paused.is_set() or self.preview_only)
+            if events:
+                self.manager._audio_evidence=(self.manager.current_id,obs.placement(),events[-1]['at'])
         self.manager.observe_frame(obs)
         self.manager.poll_saved_join()
         usable=(not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
@@ -229,6 +239,7 @@ class RecordingWorker(QThread):
                 and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games','analysis / replay')):
             self.position_history.add(obs,self.manager.current_id,max(.8,self.manager.settings.min_confidence))
         if stable_count>=2 and not self.preview_only:self.manager.queue_checkpoint_join()
+        snapshot['audio_cues']=getattr(self,'audio_info',{'status':'Audio cues off','count':0})
         snapshot['buffered_positions']=len(self.position_history.positions)
         if automatic:snapshot['recording_started_automatically']=True
         self.manager.trace_frame(obs,stable_count,snapshot)
@@ -289,6 +300,16 @@ class RecordingWorker(QThread):
                 while not self.stopping.is_set():
                     tick=time.monotonic()
                     settings=self.manager.settings
+                    if settings.audio_cues!=self._audio_enabled:
+                        if self.audio:self.audio.stop()
+                        self.audio=None;self._audio_enabled=settings.audio_cues
+                        self.manager._audio_evidence=None
+                        self.audio_info={'status':'Audio cues off','count':0}
+                        if settings.audio_cues:
+                            from .audio import AudioListener
+                            self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
+                    if self.audio and self.paused.is_set():
+                        self.audio.poll(discard=True);self.manager._audio_evidence=None
                     while not self.commands.empty():
                         action,value=self.commands.get()
                         try:
@@ -297,6 +318,12 @@ class RecordingWorker(QThread):
                             elif action=="record":
                                 self.preview_only=False;stable_count=0
                                 self.manager.clear_position_recovery();self.manager.reset_settling()
+                            elif action=="audio_learn":
+                                if self.audio is None and settings.audio_cues:
+                                    from .audio import AudioListener
+                                    self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
+                                    self._audio_enabled=True
+                                if self.audio:self.audio.learn(value)
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
                             elif action=='game_mode':self.manager.set_game_mode(value)
@@ -460,6 +487,9 @@ class RecordingWorker(QThread):
                             ply=snapshot.get("plies",0),deduplicate=settings.deduplicate,
                             deduplicate_position=bool(obs is not None and stable_count>=2))
                         next_saved=tick+settings.interval
+                    if self.audio and obs is None:
+                        _,self.audio_info=self.audio.poll(discard=True)
+                    snapshot['audio_cues']=self.audio_info
                     snapshot["buffered_frames"]=len(self.recent_frames.frames)
                     snapshot["buffered_bytes"]=sum(frame["image"].nbytes for frame in self.recent_frames.frames)
                     elapsed=time.monotonic()-tick
@@ -479,6 +509,8 @@ class RecordingWorker(QThread):
             logging.exception("Recording worker failed")
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
+            if self.audio:self.audio.stop()
+            self.manager._audio_evidence=None
             self.manager.cancel_background_recovery()
             self.manager.cancel_saved_join()
             try:

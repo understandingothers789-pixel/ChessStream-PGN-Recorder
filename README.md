@@ -1,6 +1,9 @@
 # ChessStream PGN Recorder
 
-**Development build 1.6.24.dev3** on [fix/non-destructive-pgn-gap-joins](https://github.com/understandingothers789-pixel/ChessStream-PGN-Recorder/tree/fix/non-destructive-pgn-gap-joins): the [comprehensive check](docs/COMPREHENSIVE-CHECK-2026-10-23.md) fixed a witnessed-capture gap that could block a recording, updated native dependencies after vendor-advisory review, and checked model output equivalence. See also the [search optimization measurements](docs/SEARCH-OPTIMIZATION-2026-10-23.md), [continuity changes](docs/GAP-CONTINUITY-2026-10-23.md) and [previous handoff implementation](docs/HANDOFF-IMPLEMENTATION-2026-10-20.md). This branch remains under review in draft PR #1; main is unchanged.
+
+Experimental playback move sounds are available in development version **1.6.24-dev4**. Enable Audio move cues on the live page and learn the current video’s sound. [Instructions and limits](docs/AUDIO-CUES.md).
+
+**Development build 1.6.24.dev4** on [fix/non-destructive-pgn-gap-joins](https://github.com/understandingothers789-pixel/ChessStream-PGN-Recorder/tree/fix/non-destructive-pgn-gap-joins): the [comprehensive check](docs/COMPREHENSIVE-CHECK-2026-10-23.md) fixed a witnessed-capture gap that could block a recording, updated native dependencies after vendor-advisory review, and checked model output equivalence. See also the [search optimization measurements](docs/SEARCH-OPTIMIZATION-2026-10-23.md), [continuity changes](docs/GAP-CONTINUITY-2026-10-23.md) and [previous handoff implementation](docs/HANDOFF-IMPLEMENTATION-2026-10-20.md). This branch remains under review in draft PR #1; main is unchanged.
 
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, optionally saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 

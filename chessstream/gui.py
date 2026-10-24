@@ -87,7 +87,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev3"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev4"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -174,10 +174,30 @@ class MainWindow(ReviewTools,QMainWindow):
             repair_actions.addWidget(action,1)
         moves_card.box.addLayout(repair_actions)
         for card in [capture_card,internal,moves_card]:splitter.addWidget(card)
-        splitter.setSizes([430,430,265]);box.addWidget(splitter,1)
+        splitter.setSizes([430,430,265])
+        audio_row=QHBoxLayout()
+        self.audio_toggle=QCheckBox('Audio move cues (experimental)');self.audio_toggle.setChecked(self.settings.audio_cues)
+        self.audio_toggle.setToolTip('Listen locally to all sound on the default Windows output device. No microphone or audio recordings. Learn a sound just before a move; keep commentary quiet during learning.')
+        self.audio_toggle.toggled.connect(self.set_audio_cues);audio_row.addWidget(self.audio_toggle)
+        self.audio_move_button=button('Learn move sound',lambda:self.learn_audio('move'));audio_row.addWidget(self.audio_move_button)
+        self.audio_capture_button=button('Learn capture sound',lambda:self.learn_audio('capture'));audio_row.addWidget(self.audio_capture_button)
+        audio_row.addStretch();box.addLayout(audio_row)
+        self.audio_status=muted('Audio cues off');self.audio_status.setWordWrap(True);box.addWidget(self.audio_status);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
         self.recovery=muted("Search uses the shortest legal gap. Unseen repetitions and identical transpositions may need review.");box.addWidget(self.recovery)
         footer=QHBoxLayout();footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
+
+    def set_audio_cues(self,enabled):
+        self.settings.audio_cues=enabled;self.settings.save(self.root/'settings.json')
+        self.audio_status.setText('Starting playback listener…' if enabled else 'Audio cues off')
+
+    def learn_audio(self,kind):
+        if not self.worker or not self.worker.isRunning():
+            self.audio_status.setText('Start the board preview or recording first, then learn a sound.');return
+        if not self.settings.audio_cues:
+            self.audio_toggle.setChecked(True)
+        self.worker.commands.put(('audio_learn',kind))
+        self.audio_status.setText('Play a move within 10 seconds. Keep other sounds quiet while learning.')
 
     def live_moves_context_menu(self,position):
         menu=QMenu(self.move_table)
@@ -307,6 +327,11 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def on_update(self,snap):
         self.snapshot=snap
+        audio=snap.get('audio_cues')
+        if audio:
+            self.audio_status.setText(f"Audio • {audio['status']} • {audio.get('count',0)} cues"+
+                (f" • {audio['device']}" if audio.get('device') else '')+
+                (f" • {audio['dropped_blocks']} interrupted blocks" if audio.get('dropped_blocks') else ''))
         lifecycle=snap.get('lifecycle',{})
         self.game_identity_button.setText('Game: '+lifecycle.get('state','waiting for a game')+' ▾')
         self.game_identity_button.setToolTip('White: '+snap.get('players',{}).get('white','Unknown')+'\nBlack: '+snap.get('players',{}).get('black','Unknown')+

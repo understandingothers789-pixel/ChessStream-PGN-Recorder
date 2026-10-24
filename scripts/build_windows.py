@@ -56,7 +56,7 @@ def main():
         subprocess.run([sys.executable,'-m','pip','wheel','--no-deps','chess==1.11.2','-w',str(pure)],check=True)
         subprocess.run([sys.executable,'-m','pip','download','-r',str(ROOT/'requirements.txt'),
             '--platform','win_amd64','--python-version','313','--implementation','cp','--abi','cp313',
-            '--only-binary=:all:','--find-links',str(pure),'--dest',str(wheels)],check=True)
+            '--only-binary=:all:','--find-links',str(pure),'--dest',str(wheels),'PyAudioWPatch==0.2.12.9'],check=True)
     archive=cache/f'python-{VERSION}-embed-amd64.zip'
     inputs=validated_wheels(wheels,ROOT/'requirements.txt')
     if not archive.exists():

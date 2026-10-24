@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chessstream-recorder"
-version = "1.6.24.dev3"
+version = "1.6.24.dev4"
 description = "Local screen-to-PGN recorder for Windows 11"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 dependencies = [
   "numpy==2.2.6", "opencv-python-headless==4.12.0.88", "chess==1.11.2",
   "PySide6-Essentials==6.12.0", "mss==10.0.0", "platformdirs==4.3.7",
-  "Pillow==13.0.0", "psutil==7.0.0", "onnxruntime==1.24.4"
+  "Pillow==13.0.0", "psutil==7.0.0", "onnxruntime==1.24.4",
+  "PyAudioWPatch==0.2.12.9; sys_platform == 'win32'"
 ]
 
 [project.optional-dependencies]
