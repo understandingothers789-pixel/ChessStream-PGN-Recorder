@@ -1,10 +1,11 @@
 """Optional, local Windows output-loopback cues. Never supplies chess moves.
 
-Only short-lived PCM is kept in RAM; calibration persists normalized frequency
-features, not playable audio. The microphone is never selected as a fallback.
+Only short-lived PCM is kept in RAM; bundled identification features cover
+publicly available default move sounds. No user calibration is required. The microphone is never selected as a fallback.
 """
 from collections import deque
 import json
+from pathlib import Path
 import logging
 import queue
 import sys
@@ -36,7 +37,7 @@ def fingerprint(samples):
 
 class CueDetector:
     """Bounded streaming template matcher, independent of the audio device."""
-    def __init__(self, path=None):
+    def __init__(self, path=None, *, presets=False):
         self.path = path
         self.templates = {}
         self.samples = np.zeros(0, np.float32)
@@ -48,7 +49,18 @@ class CueDetector:
         self.status = 'Learn a move sound to begin'
         self.level = 0.
         self.dropped = 0
-        if path and path.exists():
+        if presets:
+            data=json.loads((Path(__file__).parent/'assets/audio-presets.json').read_text())
+            expected=len(fingerprint(np.zeros(WINDOW,np.float32)))
+            for entry in data['templates']:
+                vector=np.asarray(entry['vector'],np.float32)
+                if (vector.shape!=(expected,) or not np.isfinite(vector).all()
+                        or not .99<np.linalg.norm(vector)<1.01):
+                    raise ValueError('Invalid bundled audio preset')
+                self.templates[entry['name']]=vector
+            if not self.templates:raise ValueError('Bundled audio presets missing')
+            self.status='Listening for Chess.com and Lichess default sounds'
+        elif path and path.exists():
             try:
                 if path.stat().st_size > 100000:raise ValueError('oversized audio calibration')
                 values = json.loads(path.read_text())
@@ -121,19 +133,16 @@ class CueDetector:
 class AudioListener:
     """Separate device thread; slow chess searches cannot block audio capture."""
     def __init__(self, path):
-        self.detector = CueDetector(path)
+        self.detector = CueDetector(presets=True)
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.thread = None
         self.device = ''
         self.error = ''
-        self.commands = queue.SimpleQueue()
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name='ChessStream-audio', daemon=True)
         self.thread.start()
-
-    def learn(self, name):self.commands.put(name)
 
     def poll(self, discard=False):
         with self.lock:
@@ -182,7 +191,6 @@ class AudioListener:
                     if flags or (last_at is not None and now - last_at > .15):
                         self.detector.dropped += 1;self.detector.reset_stream()
                     last_at = now
-                    while not self.commands.empty():self.detector.learn(self.commands.get(), now)
                     self.detector.feed(values, now)
         except Exception as exc:
             logging.warning('Audio cues unavailable: %s', exc, exc_info=True)

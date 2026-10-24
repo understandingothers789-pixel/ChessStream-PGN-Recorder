@@ -318,12 +318,6 @@ class RecordingWorker(QThread):
                             elif action=="record":
                                 self.preview_only=False;stable_count=0
                                 self.manager.clear_position_recovery();self.manager.reset_settling()
-                            elif action=="audio_learn":
-                                if self.audio is None and settings.audio_cues:
-                                    from .audio import AudioListener
-                                    self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
-                                    self._audio_enabled=True
-                                if self.audio:self.audio.learn(value)
                             elif action=="choose":self.manager.choose(value)
                             elif action=="new":self.manager.force_new()
                             elif action=='game_mode':self.manager.set_game_mode(value)

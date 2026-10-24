@@ -169,3 +169,24 @@ def test_very_short_click_survives_callback_alignment_and_quieter_playback(offse
     signal=np.pad(sound*.4,(RATE//2+offset,RATE//2))
     feed(d,signal,2)
     assert d.count==1
+
+
+def test_presets_are_ready_without_learning_and_ignore_old_user_calibration(tmp_path):
+    path=tmp_path/'audio-cues.json';path.write_text('old invalid calibration')
+    listener=AudioListener(path)
+    assert len(listener.detector.templates)==7
+    assert 'Listening' in listener.detector.status
+    assert listener.detector.learning is None
+    assert any('Lichess' in name for name in listener.detector.templates)
+    assert any('Chess.com' in name for name in listener.detector.templates)
+    assert path.read_text()=='old invalid calibration'
+
+
+def test_bundled_signatures_are_normalized_and_include_provenance():
+    data=json.loads((Path(__file__).parents[1]/'chessstream/assets/audio-presets.json').read_text())
+    assert len(data['templates'])==7
+    for entry in data['templates']:
+        assert len(entry['vector'])==672
+        assert np.isfinite(entry['vector']).all()
+        assert np.linalg.norm(entry['vector'])==pytest.approx(1,abs=1e-4)
+        assert entry['source'].startswith('https://') and len(entry['sha256'])==64

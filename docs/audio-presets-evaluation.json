@@ -1,0 +1,254 @@
+[
+  {
+    "sound": "Lichess Move",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5599999999999996,
+        "kind": "Lichess Move",
+        "score": 0.964
+      }
+    ]
+  },
+  {
+    "sound": "Lichess Move",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.58,
+        "kind": "Lichess Move",
+        "score": 0.963
+      }
+    ]
+  },
+  {
+    "sound": "Lichess Move",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.58,
+        "kind": "Lichess Move",
+        "score": 0.963
+      }
+    ]
+  },
+  {
+    "sound": "Lichess Capture",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.54,
+        "kind": "Lichess Capture",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Lichess Capture",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5599999999999996,
+        "kind": "Lichess Capture",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Lichess Capture",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5599999999999996,
+        "kind": "Lichess Capture",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-self",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.42,
+        "kind": "Chess.com castle",
+        "score": 0.974
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-self",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.42,
+        "kind": "Chess.com castle",
+        "score": 0.974
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-self",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.42,
+        "kind": "Chess.com castle",
+        "score": 0.958
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-opponent",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.42,
+        "kind": "Chess.com castle",
+        "score": 0.97
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-opponent",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.42,
+        "kind": "Chess.com castle",
+        "score": 0.97
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-opponent",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.42,
+        "kind": "Chess.com castle",
+        "score": 0.944
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com capture",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5,
+        "kind": "Chess.com capture",
+        "score": 0.999
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com capture",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5,
+        "kind": "Chess.com capture",
+        "score": 0.954
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com capture",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5199999999999996,
+        "kind": "Chess.com capture",
+        "score": 0.999
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com castle",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5,
+        "kind": "Chess.com castle",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com castle",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5199999999999996,
+        "kind": "Chess.com castle",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com castle",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5199999999999996,
+        "kind": "Chess.com castle",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-check",
+    "offset_ms": 0.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5,
+        "kind": "Chess.com move-check",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-check",
+    "offset_ms": 7.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5199999999999996,
+        "kind": "Chess.com move-check",
+        "score": 1.0
+      }
+    ]
+  },
+  {
+    "sound": "Chess.com move-check",
+    "offset_ms": 13.0,
+    "cues": 1,
+    "events": [
+      {
+        "at": 2.5199999999999996,
+        "kind": "Chess.com move-check",
+        "score": 1.0
+      }
+    ]
+  }
+]

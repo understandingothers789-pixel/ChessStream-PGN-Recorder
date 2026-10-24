@@ -87,7 +87,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev4"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev5"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -177,10 +177,8 @@ class MainWindow(ReviewTools,QMainWindow):
         splitter.setSizes([430,430,265])
         audio_row=QHBoxLayout()
         self.audio_toggle=QCheckBox('Audio move cues (experimental)');self.audio_toggle.setChecked(self.settings.audio_cues)
-        self.audio_toggle.setToolTip('Listen locally to all sound on the default Windows output device. No microphone or audio recordings. Learn a sound just before a move; keep commentary quiet during learning.')
+        self.audio_toggle.setToolTip('Listen locally to all sound on the default Windows output device. No microphone or audio recordings. Built-in Chess.com and Lichess default sounds; no learning required.')
         self.audio_toggle.toggled.connect(self.set_audio_cues);audio_row.addWidget(self.audio_toggle)
-        self.audio_move_button=button('Learn move sound',lambda:self.learn_audio('move'));audio_row.addWidget(self.audio_move_button)
-        self.audio_capture_button=button('Learn capture sound',lambda:self.learn_audio('capture'));audio_row.addWidget(self.audio_capture_button)
         audio_row.addStretch();box.addLayout(audio_row)
         self.audio_status=muted('Audio cues off');self.audio_status.setWordWrap(True);box.addWidget(self.audio_status);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
@@ -190,14 +188,6 @@ class MainWindow(ReviewTools,QMainWindow):
     def set_audio_cues(self,enabled):
         self.settings.audio_cues=enabled;self.settings.save(self.root/'settings.json')
         self.audio_status.setText('Starting playback listener…' if enabled else 'Audio cues off')
-
-    def learn_audio(self,kind):
-        if not self.worker or not self.worker.isRunning():
-            self.audio_status.setText('Start the board preview or recording first, then learn a sound.');return
-        if not self.settings.audio_cues:
-            self.audio_toggle.setChecked(True)
-        self.worker.commands.put(('audio_learn',kind))
-        self.audio_status.setText('Play a move within 10 seconds. Keep other sounds quiet while learning.')
 
     def live_moves_context_menu(self,position):
         menu=QMenu(self.move_table)
