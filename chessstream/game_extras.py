@@ -7,6 +7,7 @@ import chess
 import chess.pgn
 from .domain import utcnow,board_labels
 from .pgn_tools import node_at
+from .lifecycle import probable_ocr_variant
 
 
 class GameExtras:
@@ -16,11 +17,12 @@ class GameExtras:
         self.analysis_cursor=None;self._analysis_pending=None;self._analysis_retry=None
         self._held_result_key=None
         self.separated_from=[]
+        self.checkpoint_source_id=None
         self.move_clocks={};self.inferred_moves={};self.clock_evidence={};self.latest_context=None;self._clock_samples=[]
         self.observed_names={};self.pending_identity=None;self.clock_reset_seen=False
 
     def _extra_state(self):
-        return {key:getattr(self,key) for key in ['review_pgn','terminal_message','player_color','move_clocks','inferred_moves','clock_evidence','observed_names','rewind_state','premove_state','analysis_cursor','separated_from']}
+        return {key:getattr(self,key) for key in ['review_pgn','terminal_message','player_color','move_clocks','inferred_moves','clock_evidence','observed_names','rewind_state','premove_state','analysis_cursor','separated_from','checkpoint_source_id']}
 
     def _load_extras(self,state):
         self._reset_extras()
@@ -51,7 +53,7 @@ class GameExtras:
                 logging.info('Both visible clocks reset: %s',clocks)
             names=context.get('names',{})
             if not self.rec:return
-            changed=any(self.headers.get(color.title(),'Unknown')!='Unknown' and ''.join(self.headers[color.title()].casefold().split())!=''.join(name.casefold().split()) for color,name in names.items())
+            changed=any(self.headers.get(color.title(),'Unknown')!='Unknown' and ''.join(self.headers[color.title()].casefold().split())!=''.join(name.casefold().split()) and not (not self.lifecycle.reset_confirmed and probable_ocr_variant(self.headers[color.title()],name)) for color,name in names.items())
             if changed:
                 self.pending_identity=names
                 logging.info('Stable visible player identity changed: %s -> %s',self.observed_names,names)
@@ -109,6 +111,7 @@ class GameExtras:
 
     def _confirm_terminal_pending(self,obs):
         if not self.rec or len(self.rec.branches)!=1:return False
+        if self.rec.incomplete or self.rec.gap_requires_confirmation:return False
         branch=self.rec.branches[0]
         if len(branch.moves)!=1:return False
         if self.premove_state and branch.moves[-1]==self.premove_state['move']:return False
@@ -128,7 +131,7 @@ class GameExtras:
             observed=obs or self.last_observation
             if observed:
                 decision=self.lifecycle.evaluate(self,observed)
-                if decision.action in ('hold','new','return','analysis'):
+                if decision.action in ('hold','new','return','analysis','recover'):
                     self.cancel_background_recovery();self.reset_settling()
                     self.last_message='Result attribution pending • '+decision.reason
                     key=(self.current_id,message.result,message.reason,decision.reason)

@@ -1,6 +1,7 @@
 """The live vision and reconstruction pipeline can also consume a local video."""
 from pathlib import Path
 from datetime import datetime,timezone,timedelta
+import math
 import cv2
 from .domain import Settings
 from .storage import Store
@@ -9,19 +10,22 @@ from .vision import create_recognizer,BoardDetector,choose_orientation
 
 
 def replay_video(path:Path,root:Path,region=None,interval=1.0,orientation='auto'):
-    if interval<=0:raise ValueError('Screenshot interval must be positive')
+    if not math.isfinite(interval) or interval<=0:raise ValueError('Screenshot interval must be finite and positive')
     settings=Settings.load(root/'settings.json');settings.orientation=orientation
-    store=Store(root);manager=GameManager(store,settings)
-    store.run_retention(settings.retention_days)
-    recognizer=create_recognizer(settings,root/'custom-templates.npz');detector=BoardDetector()
     capture=cv2.VideoCapture(str(path))
-    if not capture.isOpened():raise ValueError(f'Cannot open video: {path}')
-    fps=capture.get(cv2.CAP_PROP_FPS)
-    if fps<=0:raise ValueError('Video does not provide a valid frame rate')
-    step=max(1,round(fps/settings.adaptive_fps));index=0;next_saved=0
-    rect=tuple(map(int,region.split(','))) if region else None
-    start=datetime.now(timezone.utc);previous=None;stable=0
+    store=None
     try:
+        if not capture.isOpened():raise ValueError(f'Cannot open video: {path}')
+        fps=capture.get(cv2.CAP_PROP_FPS)
+        if not math.isfinite(fps) or fps<=0:raise ValueError('Video does not provide a valid frame rate')
+        step=max(1,round(fps/settings.adaptive_fps));index=0;next_saved=0
+        rect=tuple(map(int,region.split(','))) if region else None
+        if rect is not None and (len(rect)!=4 or min(rect[:2])<0 or min(rect[2:])<80):
+            raise ValueError('Video region must be x,y,width,height with nonnegative coordinates and at least 80 pixels per side')
+        store=Store(root);manager=GameManager(store,settings)
+        store.run_retention(settings.retention_days)
+        recognizer=create_recognizer(settings,root/'custom-templates.npz');detector=BoardDetector()
+        start=datetime.now(timezone.utc);previous=None;stable=0
         while True:
             ok,image=capture.read()
             if not ok:break
@@ -46,4 +50,6 @@ def replay_video(path:Path,root:Path,region=None,interval=1.0,orientation='auto'
             index+=1
         manager.finish();store.finish_session(manager.session_id)
         print(f'Processed {index} video frames. {len(store.games())} games. PGNs: {root / "pgn"}')
-    finally:capture.release();store.close()
+    finally:
+        capture.release()
+        if store is not None:store.close()

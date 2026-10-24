@@ -1,5 +1,9 @@
 # Game identity, separation and verification — v1.6.23
 
+This document describes the released baseline. The 1.6.24.dev0 development branch
+adds a recoverable unresolved-gap state, shared commitment rules and background
+saved joins; see [the current handoff report](HANDOFF-IMPLEMENTATION-2026-10-20.md).
+
 ## Why boundaries were missed
 
 The old logic usually required changed names **and** a clock reset, often alongside a recognizable opening. Names were extracted only near detected clocks. A replay/history early return could run before identity handling. A six-second clock-reset flag could expire before a later board read. The capture worker also polled background legal recovery before classifying the latest context. Consequently, a legal bridge or known opening could keep the wrong game active.
@@ -33,7 +37,7 @@ Uncertain transitions retain at most 24 board distributions/context observations
 
 ## Reproducible coverage
 
-The local suite has **100 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 27 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
+The released v1.6.23 baseline had **100 passing tests**, about **7 seconds** on this execution host. `tests/test_game_lifecycle.py` contributes 27 cases, including parameterized variants; the retained suite covers real Chess.com/Lichess recognition and native OCR, reconstruction, PGN export, premoves, castling, rewind recovery, variations, storage and desktop behavior.
 
 | Requested situation | Representative checks |
 | --- | --- |

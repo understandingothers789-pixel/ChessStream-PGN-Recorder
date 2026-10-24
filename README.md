@@ -1,5 +1,12 @@
 # ChessStream PGN Recorder
 
+Development build dev7 includes the [October 24 comprehensive check and fixes](docs/COMPREHENSIVE-CHECK-2026-10-24.md), including PGN setup headers, concurrent checks and combined failures.
+
+
+Experimental playback move sounds are available in development version **1.6.24-dev7**. Enable Audio move cues on the live page. Built-in Chess.com and Lichess sound detectors require no learning. [Instructions and limits](docs/AUDIO-CUES.md).
+
+**Development build 1.6.24.dev7** on [fix/non-destructive-pgn-gap-joins](https://github.com/understandingothers789-pixel/ChessStream-PGN-Recorder/tree/fix/non-destructive-pgn-gap-joins): the [comprehensive check](docs/COMPREHENSIVE-CHECK-2026-10-23.md) fixed a witnessed-capture gap that could block a recording, updated native dependencies after vendor-advisory review, and checked model output equivalence. See also the [search optimization measurements](docs/SEARCH-OPTIMIZATION-2026-10-23.md), [continuity changes](docs/GAP-CONTINUITY-2026-10-23.md) and [previous handoff implementation](docs/HANDOFF-IMPLEMENTATION-2026-10-20.md). This branch remains under review in draft PR #1; main is unchanged.
+
 A local Python / PySide6 desktop application that reads a visible 2D chessboard from your screen, follows legal moves, optionally saves review screenshots, and exports standard PGNs. It does not need player usernames, a chess-site account, Nibbler, an engine, subscriptions, or chess/video APIs.
 
 **Version 1.6.23 lets you combine older saved PGNs while a recording continues.** Select two or more saved games that do not include the active PGN; the combined copy is saved separately and the live recorder stays on its current game. Version 1.6.22 also prevents short replay fragments from switching the active PGN back and forth. See the [release notes](docs/RELEASE-v1.6.23.md), [game lifecycle validation](docs/GAME_LIFECYCLE.md), and [user guide](docs/USER_GUIDE.md).

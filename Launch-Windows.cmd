@@ -8,8 +8,17 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
   )
+)
+".venv\Scripts\python.exe" scripts\check_runtime.py
+if errorlevel 1 (
   ".venv\Scripts\python.exe" -m pip install -e .
   if errorlevel 1 (
+    pause
+    exit /b 1
+  )
+  ".venv\Scripts\python.exe" scripts\check_runtime.py
+  if errorlevel 1 (
+    echo Runtime validation failed. See the dependency messages above.
     pause
     exit /b 1
   )

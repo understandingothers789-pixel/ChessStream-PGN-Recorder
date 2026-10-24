@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import sys
+import threading
 import chess
 import chess.pgn
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QSize, QDateTime
@@ -29,7 +30,7 @@ from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEdito
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
 from .model_security import import_custom_model, validate_custom_model
-from .gap_join import join_recordings
+from .gap_join import join_recordings, AmbiguousGapError
 
 
 def human_bytes(n):
@@ -86,14 +87,14 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.23"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev7"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
         self.navigate(0);self.install_hotkeys()
         if sys.platform=='win32':QTimer.singleShot(250,self.refresh_desktop_shortcut)
-        self.statusBar().showMessage("Ready • screenshots kept until you delete them")
+        self.statusBar().showMessage("Ready • "+("screenshot saving is on" if self.settings.save_screenshots else "screenshot saving is off"))
         # Prefer the best visible YouTube window at every launch, including
         # over a stale saved source. If none is available, retain the saved
         # source while briefly retrying in case the browser is still opening.
@@ -173,10 +174,20 @@ class MainWindow(ReviewTools,QMainWindow):
             repair_actions.addWidget(action,1)
         moves_card.box.addLayout(repair_actions)
         for card in [capture_card,internal,moves_card]:splitter.addWidget(card)
-        splitter.setSizes([430,430,265]);box.addWidget(splitter,1)
+        splitter.setSizes([430,430,265])
+        audio_row=QHBoxLayout()
+        self.audio_toggle=QCheckBox('Audio move cues (experimental)');self.audio_toggle.setChecked(self.settings.audio_cues)
+        self.audio_toggle.setToolTip('Listen locally to all sound on the default Windows output device. No microphone or audio recordings. Built-in Chess.com and Lichess default sounds; no learning required.')
+        self.audio_toggle.toggled.connect(self.set_audio_cues);audio_row.addWidget(self.audio_toggle)
+        audio_row.addStretch();box.addLayout(audio_row)
+        self.audio_status=muted('Audio cues off');self.audio_status.setWordWrap(True);box.addWidget(self.audio_status);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
         self.recovery=muted("Search uses the shortest legal gap. Unseen repetitions and identical transpositions may need review.");box.addWidget(self.recovery)
         footer=QHBoxLayout();footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
+
+    def set_audio_cues(self,enabled):
+        self.settings.audio_cues=enabled;self.settings.save(self.root/'settings.json')
+        self.audio_status.setText('Starting playback listener…' if enabled else 'Audio cues off')
 
     def live_moves_context_menu(self,position):
         menu=QMenu(self.move_table)
@@ -223,7 +234,14 @@ class MainWindow(ReviewTools,QMainWindow):
             self.recording_status.setText('Checking PGN…')
             return
         if action=='repair':self.manager.repair_current()
-        else:self.manager.join_previous_recording()
+        else:
+            self.manager.join_previous_recording(background=True)
+            def poll_join():
+                if self._closing:return
+                self.manager.poll_saved_join()
+                self.on_update(self.manager.snapshot())
+                if self.manager._saved_join_future:QTimer.singleShot(100,poll_join)
+            QTimer.singleShot(100,poll_join)
         self.on_update(self.manager.snapshot())
 
     def region_text(self):
@@ -299,9 +317,16 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def on_update(self,snap):
         self.snapshot=snap
+        audio=snap.get('audio_cues')
+        if audio:
+            self.audio_status.setText(f"Audio • {audio['status']} • {audio.get('count',0)} cues"+
+                (f" • {audio['device']}" if audio.get('device') else '')+
+                (f" • {audio['dropped_blocks']} interrupted blocks" if audio.get('dropped_blocks') else ''))
         lifecycle=snap.get('lifecycle',{})
         self.game_identity_button.setText('Game: '+lifecycle.get('state','waiting for a game')+' ▾')
         self.game_identity_button.setToolTip('White: '+snap.get('players',{}).get('white','Unknown')+'\nBlack: '+snap.get('players',{}).get('black','Unknown')+
+            '\nGame ID: '+str(snap.get('game_id') or 'waiting')+'\nAccepted plies: '+str(snap.get('plies',0))+
+            '\nPending histories: '+str(snap.get('pending_hypotheses',0))+
             '\nIdentity: '+lifecycle.get('identity','pending')+'\n'+lifecycle.get('reason','')+'\nClick to correct game detection or split a PGN.')
         if self._live_review:
             line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
@@ -314,7 +339,7 @@ class MainWindow(ReviewTools,QMainWindow):
             self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True)
         diagnostic_key=(snap.get('game_id'),snap.get('status'),tuple(snap.get('uncertain_squares',[])),snap.get('plies'))
         if diagnostic_key!=getattr(self,'_last_diagnostic',None):
-            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks','players','lifecycle']}))
+            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks','players','lifecycle','evidence_revision','pending_hypotheses','recovery_tasks','processing_ms','capture_metrics']}))
             self._last_diagnostic=diagnostic_key
         if not self.worker or not self.worker.paused.is_set() or getattr(self,'_pgn_action_pending',False):
             self._pgn_action_pending=False
@@ -574,14 +599,14 @@ class MainWindow(ReviewTools,QMainWindow):
         bar=QHBoxLayout()
         for name,fn in [("Combine selected PGNs",self.join_selected),("Export selected",self.export_selected),("Export entire session",self.export_session),("Export all",self.export_all),("Open PGN…",self.import_pgn),("Refresh",self.refresh_library)]:bar.addWidget(button(name,fn))
         bar.addStretch();box.addLayout(bar)
-        self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
+        self.game_table=QTableWidget(0,7);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result","Saved .pgn"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
         box.addWidget(self.game_table,2)
         detail=QSplitter(Qt.Horizontal);self.library_board=BoardView();detail.addWidget(self.library_board);detail.addWidget(self.make_review_tabs());detail.setSizes([350,650]);box.addWidget(detail,2)
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Review ply"));self.review_slider=QSlider(Qt.Horizontal);self.review_slider.valueChanged.connect(self.review_game);timeline.addWidget(self.review_slider,1);self.review_label=muted("0");timeline.addWidget(self.review_label);box.addLayout(timeline)
         actions=QHBoxLayout()
         for name,fn in [("Rename / edit headers",self.edit_game),("Copy PGN",self.copy_selected),("Resume recording",self.resume_game),("Screenshots",self.game_screenshots)]:actions.addWidget(button(name,fn))
-        actions.addWidget(button("Delete saved PGN files…",self.delete_saved_pgns,danger=True))
-        actions.addStretch();actions.addWidget(button("Delete game data…",self.delete_games,danger=True));box.addLayout(actions)
+        actions.addWidget(button("Remove saved .pgn copies…",self.delete_saved_pgns,danger=True))
+        actions.addStretch();actions.addWidget(button("Delete from library…",self.delete_games,danger=True));box.addLayout(actions)
         variations=QHBoxLayout()
         for label,fn in [('Add alternative line…',self.add_review_variation),('Edit comment…',self.edit_review_comment),('Remove alternative line',self.delete_review_variation)]:variations.addWidget(button(label,fn))
         variations.addWidget(muted('Select a position before an existing move; alternatives are saved in exported PGNs.'));box.addLayout(variations)
@@ -593,7 +618,7 @@ class MainWindow(ReviewTools,QMainWindow):
             duration='—'
             if g['ended']:
                 seconds=max(0,int((datetime.fromisoformat(g['ended'])-datetime.fromisoformat(g['started'])).total_seconds()));duration=f"{seconds//60}:{seconds%60:02d}"
-            values=[g['name'],local_time(g['started']),duration,str(g['plies']),g['status'],json.loads(g['headers']).get('Result','*')]
+            values=[g['name'],local_time(g['started']),duration,str(g['plies']),g['status'],json.loads(g['headers']).get('Result','*'),('Yes' if (self.store.root/'pgn'/(g['id']+'.pgn')).is_file() else 'No')]
             for col,value in enumerate(values):self.game_table.setItem(row,col,QTableWidgetItem(value))
 
     def selected_games(self):
@@ -617,7 +642,8 @@ class MainWindow(ReviewTools,QMainWindow):
         action=menu.addAction("Join selected recordings…",self.join_selected)
         action.setEnabled(len(self.selected_games())>=2)
         menu.addSeparator()
-        menu.addAction("Delete saved PGN file(s)…",self.delete_saved_pgns)
+        menu.addAction("Remove saved .pgn copies…",self.delete_saved_pgns)
+        menu.addAction("Delete game(s) from library…",self.delete_games)
         return menu
 
     def show_game(self):
@@ -673,6 +699,7 @@ class MainWindow(ReviewTools,QMainWindow):
             self.store.delete_game(g['id'])
             if g['id']==self.manager.current_id:self.manager=GameManager(self.store,self.settings)
         self.refresh_library()
+        self.statusBar().showMessage(f"Deleted {len(selected)} game(s) from the library; screenshots kept.",10000)
 
     def delete_saved_pgns(self):
         selected=self.selected_games()
@@ -688,7 +715,8 @@ class MainWindow(ReviewTools,QMainWindow):
                 QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
         try:
             deleted=self.store.delete_pgn_files([g['id'] for g in selected],self.settings.export_dir)
-            self.statusBar().showMessage(f"Deleted {len(deleted)} saved PGN file(s); game records kept",8000)
+            self.refresh_library()
+            self.statusBar().showMessage(f"Removed {len(deleted)} saved .pgn file(s). Game entries remain; choose Delete from library to remove entries.",15000)
         except Exception as e:self.error(str(e))
 
     def write_export(self,rows):
@@ -708,15 +736,79 @@ class MainWindow(ReviewTools,QMainWindow):
         capture_running=bool(self.worker and self.worker.isRunning())
         if capture_running and any(g['id']==self.manager.current_id for g in selected):
             self.error('The active PGN is still changing. Select older saved PGNs to combine while recording continues.');return
+        if getattr(self,'_library_join_cancel',None) and not self._library_join_cancel.is_set():
+            self.statusBar().showMessage('A saved-PGN join is already running',6000);return
+        self._library_join_cancel=threading.Event()
+        cancelled=self._library_join_cancel
+        original_manager=self.manager
+        original_game=self.manager.current_id
+        revision=self.manager._evidence_revision
         def saved(pgn):
-            self.manager.combine_games(selected,pgn,activate=not capture_running)
+            cancelled.set()
+            running=bool(self.worker and self.worker.isRunning())
+            for source in selected:
+                latest=self.store.game(source['id'])
+                if not latest or latest['pgn']!=source['pgn']:
+                    self.error('A source PGN changed during the join; originals preserved. Please retry.');return
+            if running and any(g['id']==self.manager.current_id for g in selected):
+                self.error('A selected PGN is now recording. Stop capture before combining it.');return
+            activate=(not running and not capture_running and self.manager is original_manager
+                      and self.manager.current_id==original_game and self.manager._evidence_revision==revision)
+            self.manager.combine_games(selected,pgn,activate=activate)
             self.refresh_library()
-            if capture_running:
+            if not activate:
                 self.statusBar().showMessage('Older PGNs combined • live recording continues unchanged',8000)
             else:
                 self.on_update(self.manager.snapshot())
                 self.navigate(0)
-        self.background(lambda:join_recordings(selected,self.manager.searcher()),saved)
+        def search(confirmed):
+            try:
+                return {'pgn':join_recordings(selected,original_manager.searcher(),confirmed,cancelled=cancelled.is_set)}
+            except AmbiguousGapError as error:
+                return {'ambiguous':error}
+            except ValueError as error:
+                return {'error':str(error)}
+
+        def result(outcome,confirmed=None):
+            if self._closing:return
+            # Older UI/test callbacks pass the completed PGN directly.
+            if isinstance(outcome,str):
+                saved(outcome)
+                return
+            if 'pgn' in outcome:
+                saved(outcome['pgn'])
+                return
+            if 'error' in outcome:
+                cancelled.set();self.error(outcome['error']);return
+            error=outcome['ambiguous']
+            if not error.source_fen or error.later_id is None or len(error.alternatives)>32:
+                cancelled.set()
+                self.error(str(error)+' Too many choices to safely display; originals kept.')
+                return
+            options=[]
+            for path in error.alternatives:
+                board=chess.Board(error.source_fen)
+                names=[]
+                for uci in path:
+                    move=chess.Move.from_uci(uci)
+                    names.append(board.san(move))
+                    board.push(move)
+                options.append(' '.join(names) or '(no missing moves)')
+            labels=[f"{i+1}. {name}" for i,name in enumerate(options)]
+            answer,ok=QInputDialog.getItem(self,'Verify unobserved chess moves',
+                'This unobserved gap needs verification. Only select a line '
+                'if you can verify its moves from the video. Cancel to preserve both PGNs.',
+                labels,0,False)
+            if not ok:
+                cancelled.set()
+                self.statusBar().showMessage('PGN join canceled • original recordings retained',8000)
+                return
+            selection=labels.index(answer)
+            overrides=dict(confirmed or {})
+            overrides[error.later_id]=error.alternatives[selection]
+            self.background(lambda:search(overrides),lambda next_result:result(next_result,overrides))
+
+        self.background(lambda:search({}),result)
     def export_all(self):self.write_export(list(reversed(self.store.games())))
     def export_session(self):
         selected=self.selected_games()
@@ -877,7 +969,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.auto_record_opening=QCheckBox('Start recording automatically when an opening move appears')
         self.auto_record_opening.setChecked(self.settings.auto_record_opening)
         capture.addRow('Automatic recording',self.auto_record_opening)
-        self.infer_unseen_opening=QCheckBox('Recover unseen opening moves as labeled guesses')
+        self.infer_unseen_opening=QCheckBox('Recover unseen opening only when its move order is unique')
         self.infer_unseen_opening.setChecked(self.settings.infer_unseen_opening)
         capture.addRow('Unseen opening',self.infer_unseen_opening)
         self.settings_interval=QDoubleSpinBox();self.settings_interval.setRange(.1,60);self.settings_interval.setValue(self.settings.interval);self.settings_interval.setSuffix(' seconds');capture.addRow('Permanent screenshot interval',self.settings_interval)
@@ -1010,6 +1102,9 @@ class MainWindow(ReviewTools,QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(guide)))
 
     def closeEvent(self,event):
+        if getattr(self,'_library_join_cancel',None):self._library_join_cancel.set()
+        self.manager.cancel_saved_join()
+        self.manager.cancel_background_recovery()
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             if not self.worker.wait(12000):

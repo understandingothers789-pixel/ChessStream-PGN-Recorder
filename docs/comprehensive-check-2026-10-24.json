@@ -1,0 +1,863 @@
+{
+  "date": "2026-10-24",
+  "version": "1.6.24.dev7",
+  "base_commit": "f45484c37abe64b1537c51674d2ff3277dd5fa45",
+  "linux_suite": {
+    "passed": 276,
+    "seconds": 10.22,
+    "fresh_pinned_dependencies": true
+  },
+  "fixes": [
+    "FEN and SetUp export headers derive exclusively from actual initial board",
+    "Recording integrity check holds manager RLock",
+    "Integrity recovery precedes error snapshot for simultaneous invalid frame and corrupt history",
+    "Direct manager input validates recognition data before use",
+    "Library joins revalidate source content/existence and active-recording exclusion under manager lock",
+    "Source launcher detects stale or missing pinned dependencies and refreshes cached virtual environments only when required"
+  ],
+  "replay": {
+    "recording_policy": "Conservative opponent-response confirmation; evaluator explicitly confirms each final pending ply once. Automatic move accuracy excludes those manual final confirmations.",
+    "environment": {
+      "os": "Linux-6.18.55-x86_64-with-glibc2.41",
+      "python": "3.12.14",
+      "cpu_count": 3,
+      "execution": "Linux cloud CPU, sequential image replay; not a Windows/YouTube live benchmark"
+    },
+    "dataset": {
+      "source": "Playwright screenshots of actual public analysis UI, not a custom renderer",
+      "captured_at": "2026-10-18T16:14:06.878987+00:00",
+      "frames": 64,
+      "games": 4,
+      "evaluated_frames_excluding_calibration": 64,
+      "scope": "Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.2.json. Not a YouTube benchmark."
+    },
+    "metrics": {
+      "square_accuracy": 1.0,
+      "evaluated_squares": 4096,
+      "exact_position_accuracy": 1.0,
+      "verified_move_accuracy": 1.0,
+      "complete_sequence_accuracy": 1.0,
+      "sequence_intervention_rate": 1.0,
+      "localization_found_rate": 1.0,
+      "one_time_setup_calibrations": 0,
+      "sequences_requiring_any_manual_confirmation_rate": 1.0,
+      "localization_followed_by_correct_recognition_rate": 1.0,
+      "wall_seconds": 5.232626600998628,
+      "process_cpu_seconds": 5.659999999999999,
+      "mean_process_cpu_percent_of_one_core": 108.16747365309438,
+      "resident_memory_mb_at_end": 146.8984375,
+      "gpu_utilization": "not measured; CPU inference only"
+    },
+    "games": [
+      {
+        "id": "lichess-fools",
+        "calibration": "none",
+        "frames": 5,
+        "square_errors": 0,
+        "exact_positions": 5,
+        "verified_plies": 4,
+        "expected_plies": 4,
+        "automatic_verified_plies": 3,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 30.632201001571957,
+        "p95_processing_ms": 52.03026140370639
+      },
+      {
+        "id": "lichess-scholar",
+        "calibration": "none",
+        "frames": 8,
+        "square_errors": 0,
+        "exact_positions": 8,
+        "verified_plies": 7,
+        "expected_plies": 7,
+        "automatic_verified_plies": 6,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 21.396956502940156,
+        "p95_processing_ms": 46.74075144976086
+      },
+      {
+        "id": "lichess-opera",
+        "calibration": "none",
+        "frames": 34,
+        "square_errors": 0,
+        "exact_positions": 34,
+        "verified_plies": 33,
+        "expected_plies": 33,
+        "automatic_verified_plies": 32,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 29.20079020473435,
+        "p95_processing_ms": 57.48071375237486
+      },
+      {
+        "id": "chesscom-ruy",
+        "calibration": "none",
+        "frames": 17,
+        "square_errors": 0,
+        "exact_positions": 17,
+        "verified_plies": 16,
+        "expected_plies": 16,
+        "automatic_verified_plies": 15,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 32.42637899957652,
+        "p95_processing_ms": 60.67495139868695
+      }
+    ],
+    "board_detection": [
+      {
+        "file": "lichess-fools-page.png",
+        "found": true,
+        "rect": [
+          354,
+          65,
+          712,
+          712
+        ],
+        "checker_score": 0.9500551065998357,
+        "ms": 262.501445999078,
+        "correct_position_after_crop": true
+      },
+      {
+        "file": "lichess-scholar-page.png",
+        "found": true,
+        "rect": [
+          354,
+          65,
+          712,
+          712
+        ],
+        "checker_score": 0.9500551065998357,
+        "ms": 217.50321999570588,
+        "correct_position_after_crop": true
+      },
+      {
+        "file": "lichess-opera-page.png",
+        "found": true,
+        "rect": [
+          354,
+          65,
+          712,
+          712
+        ],
+        "checker_score": 0.9500551065998357,
+        "ms": 322.2619149964885,
+        "correct_position_after_crop": true
+      },
+      {
+        "file": "chesscom-ruy-page.png",
+        "found": true,
+        "rect": [
+          225,
+          66,
+          824,
+          824
+        ],
+        "checker_score": 0.9238468333742982,
+        "ms": 329.44943000620697,
+        "correct_position_after_crop": true
+      }
+    ],
+    "limitations": [
+      "Small controlled suite; these values are not general stream accuracy claims.",
+      "The 16-ply Chess.com opening is a complete captured sequence, not a completed game.",
+      "PNG browser captures do not represent video compression, occlusion and animations in YouTube.",
+      "UI, desktop capture overhead and Windows GPU/CPU behavior are excluded from this benchmark."
+    ]
+  },
+  "recognition_continuity": {
+    "version": "1.6.4",
+    "environment": {
+      "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+      "python": "3.12.14",
+      "execution": "Linux cloud CPU; local images, excluding desktop capture and GUI"
+    },
+    "baseline": "Identical bundled model and legal search, with the new continuity retry disabled.",
+    "browser_captures": {
+      "unique_images_including_held_drags": 119,
+      "positions_evaluated": 116,
+      "square_classifications_evaluated": 7424,
+      "raw_model_square_errors_before": 0,
+      "raw_model_square_errors_after": 0,
+      "sequences": [
+        {
+          "id": "lichess-fools",
+          "expected_plies": 4,
+          "baseline_verified_plies": 3,
+          "updated_verified_plies": 3,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "lichess-scholar",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "lichess-opera",
+          "expected_plies": 33,
+          "baseline_verified_plies": 32,
+          "updated_verified_plies": 32,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ruy",
+          "expected_plies": 16,
+          "baseline_verified_plies": 15,
+          "updated_verified_plies": 15,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chess7",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "merida",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "maestro",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "tatiana",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean-burled.png",
+          "expected_plies": 5,
+          "baseline_verified_plies": 4,
+          "updated_verified_plies": 4,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean-arrows.png",
+          "expected_plies": 5,
+          "baseline_verified_plies": 4,
+          "updated_verified_plies": 4,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean-cursor.png",
+          "expected_plies": 5,
+          "baseline_verified_plies": 4,
+          "updated_verified_plies": 4,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "italian",
+          "expected_plies": 4,
+          "baseline_verified_plies": 3,
+          "updated_verified_plies": 3,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "bishop-drag",
+          "expected_plies": 2,
+          "baseline_verified_plies": 1,
+          "updated_verified_plies": 1,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        }
+      ]
+    },
+    "controlled_classifier_faults": {
+      "method": "Synthetic score faults, not newly captured visual errors: wrong label 0.82, existing legal label 0.16, others share 0.02.",
+      "cases": [
+        {
+          "case": "missing queen",
+          "expected": [
+            "e2e4"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        },
+        {
+          "case": "queen mistaken for knight",
+          "expected": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        },
+        {
+          "case": "queen color flip",
+          "expected": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        },
+        {
+          "case": "phantom extra knight",
+          "expected": [
+            "e2e4"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "h3"
+          ]
+        },
+        {
+          "case": "capture without queen sacrifice detour",
+          "expected": [
+            "e2e4",
+            "d7d5",
+            "e4d5"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4",
+            "d7d5",
+            "e4d5"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        }
+      ],
+      "baseline_correct": 0,
+      "updated_correct": 5
+    },
+    "performance": {
+      "model_mean_ms": 23.072465403008415,
+      "baseline_reconstruction_mean_ms": 0.689958613546406,
+      "updated_reconstruction_mean_ms": 0.824725728307385,
+      "updated_reconstruction_p95_ms": 1.0642381523211955,
+      "wall_seconds": 5.304585596000834,
+      "process_cpu_seconds": 5.16,
+      "resident_memory_mb": 114.2265625
+    },
+    "limitations": [
+      "The model weights and raw classifier accuracy did not change. These captures already have zero raw square errors; this establishes regression coverage, not an improvement percentage on real videos.",
+      "Fault-injection recovery counts describe only the specified controlled score errors.",
+      "The retry carries at most two uncertain unchanged squares, checks at most two new plies and is bounded by 50 ms and 8000 nodes.",
+      "Strong contradictions, heavy overlays, uncertain move endpoints and unseen themes may still require more evidence or manual correction.",
+      "The initial FEN is known in this reconstruction comparison. Initial detection/recognition remains covered separately by desktop tests.",
+      "Timing and memory are Linux process measurements; Windows/YouTube hardware behavior requires live acceptance."
+    ]
+  },
+  "audio": [
+    {
+      "sound": "Lichess Move",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5599999999999996,
+          "kind": "Lichess Move",
+          "score": 0.964
+        }
+      ]
+    },
+    {
+      "sound": "Lichess Move",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.58,
+          "kind": "Lichess Move",
+          "score": 0.963
+        }
+      ]
+    },
+    {
+      "sound": "Lichess Move",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.58,
+          "kind": "Lichess Move",
+          "score": 0.963
+        }
+      ]
+    },
+    {
+      "sound": "Lichess Capture",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.54,
+          "kind": "Lichess Capture",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Lichess Capture",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5599999999999996,
+          "kind": "Lichess Capture",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Lichess Capture",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5599999999999996,
+          "kind": "Lichess Capture",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-self",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.42,
+          "kind": "Chess.com castle",
+          "score": 0.974
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-self",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.42,
+          "kind": "Chess.com castle",
+          "score": 0.974
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-self",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.42,
+          "kind": "Chess.com castle",
+          "score": 0.958
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-opponent",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.42,
+          "kind": "Chess.com castle",
+          "score": 0.97
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-opponent",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.42,
+          "kind": "Chess.com castle",
+          "score": 0.97
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-opponent",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.42,
+          "kind": "Chess.com castle",
+          "score": 0.944
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com capture",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5,
+          "kind": "Chess.com capture",
+          "score": 0.999
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com capture",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5,
+          "kind": "Chess.com capture",
+          "score": 0.954
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com capture",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5199999999999996,
+          "kind": "Chess.com capture",
+          "score": 0.999
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com castle",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5,
+          "kind": "Chess.com castle",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com castle",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5199999999999996,
+          "kind": "Chess.com castle",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com castle",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5199999999999996,
+          "kind": "Chess.com castle",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-check",
+      "offset_ms": 0.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5,
+          "kind": "Chess.com move-check",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-check",
+      "offset_ms": 7.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5199999999999996,
+          "kind": "Chess.com move-check",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "sound": "Chess.com move-check",
+      "offset_ms": 13.0,
+      "cues": 1,
+      "events": [
+        {
+          "at": 2.5199999999999996,
+          "kind": "Chess.com move-check",
+          "score": 1.0
+        }
+      ]
+    }
+  ],
+  "durability": {
+    "abrupt_process_exit": "recovered",
+    "accepted_plies": 3,
+    "sqlite_integrity": "ok",
+    "pgn_roundtrip": "ok",
+    "diagnostics_zip": "ok",
+    "saved_screenshots": 0
+  },
+  "search": {
+    "reference_commit": "ed253d6e2ff7c7fe4b0f808eb285a376b3a62114",
+    "repeats": 2,
+    "scope": "Interleaved local CPU search only; no capture, OCR or video benchmark",
+    "results": {
+      "routine_two_plies": {
+        "before": {
+          "mean_ms": 0.438,
+          "worst_ms": 0.564,
+          "nodes": 23,
+          "paths": 1,
+          "paths_sha256": "0309c39352f07734664765382ac8be434c13da561bbe8f9e704154b3be64a149"
+        },
+        "after": {
+          "mean_ms": 0.166,
+          "worst_ms": 0.175,
+          "nodes": 4,
+          "paths": 1,
+          "paths_sha256": "0309c39352f07734664765382ac8be434c13da561bbe8f9e704154b3be64a149"
+        },
+        "same_shortest_paths": true,
+        "time_reduction_percent": 62.1
+      },
+      "six_ply_capture_gap": {
+        "before": {
+          "mean_ms": 282.343,
+          "worst_ms": 377.814,
+          "nodes": 22802,
+          "paths": 2,
+          "paths_sha256": "84b0ca188dabd2d54565c368a32be0deeefe469c2335e12ad3b83c2a6a4ddf47"
+        },
+        "after": {
+          "mean_ms": 91.536,
+          "worst_ms": 93.282,
+          "nodes": 6566,
+          "paths": 2,
+          "paths_sha256": "84b0ca188dabd2d54565c368a32be0deeefe469c2335e12ad3b83c2a6a4ddf47"
+        },
+        "same_shortest_paths": true,
+        "time_reduction_percent": 67.6
+      },
+      "saved_middlegame_gap": {
+        "before": {
+          "mean_ms": 934.688,
+          "worst_ms": 1174.317,
+          "nodes": 88632,
+          "paths": 29,
+          "paths_sha256": "57aa2c5521a9ed2c2f4de15b3df8f37ecf55e752b8a5c1293d9869cc5c213bef"
+        },
+        "after": {
+          "mean_ms": 510.936,
+          "worst_ms": 556.047,
+          "nodes": 46919,
+          "paths": 29,
+          "paths_sha256": "57aa2c5521a9ed2c2f4de15b3df8f37ecf55e752b8a5c1293d9869cc5c213bef"
+        },
+        "same_shortest_paths": true,
+        "time_reduction_percent": 45.3
+      }
+    }
+  },
+  "runtime_advisories": {
+    "dependencies": [
+      {
+        "name": "pyaudiowpatch",
+        "version": "0.2.12.9",
+        "vulns": []
+      },
+      {
+        "name": "pyside6-essentials",
+        "version": "6.12.0",
+        "vulns": []
+      },
+      {
+        "name": "chess",
+        "version": "1.11.2",
+        "vulns": []
+      },
+      {
+        "name": "flatbuffers",
+        "version": "25.12.19",
+        "vulns": []
+      },
+      {
+        "name": "mpmath",
+        "version": "1.3.0",
+        "vulns": []
+      },
+      {
+        "name": "mss",
+        "version": "10.0.0",
+        "vulns": []
+      },
+      {
+        "name": "numpy",
+        "version": "2.2.6",
+        "vulns": []
+      },
+      {
+        "name": "onnxruntime",
+        "version": "1.24.4",
+        "vulns": []
+      },
+      {
+        "name": "opencv-python-headless",
+        "version": "4.12.0.88",
+        "vulns": []
+      },
+      {
+        "name": "packaging",
+        "version": "26.3",
+        "vulns": []
+      },
+      {
+        "name": "pillow",
+        "version": "13.0.0",
+        "vulns": []
+      },
+      {
+        "name": "platformdirs",
+        "version": "4.3.7",
+        "vulns": []
+      },
+      {
+        "name": "protobuf",
+        "version": "7.36.2",
+        "vulns": []
+      },
+      {
+        "name": "psutil",
+        "version": "7.0.0",
+        "vulns": []
+      },
+      {
+        "name": "shiboken6",
+        "version": "6.12.0",
+        "vulns": []
+      },
+      {
+        "name": "sympy",
+        "version": "1.14.0",
+        "vulns": []
+      }
+    ],
+    "fixes": []
+  },
+  "static_analysis": {
+    "findings": 11,
+    "high": 0,
+    "review": "SQL fragments from fixed clauses with parameterized values; static PowerShell command receives JSON stdin; Windows modifier constants are not passwords."
+  },
+  "limits": [
+    "No physical Windows speakers/fullscreen/DPI or long multi-game video test",
+    "Audio trials use controlled default samples with a low background tone, not arbitrary commentary",
+    "Advisory scan does not cover every statically linked native component",
+    "Consistent legally plausible wrong recognition may evade contradictions",
+    "Observation/audit tables remain uncapped; distribution unsigned"
+  ]
+}
