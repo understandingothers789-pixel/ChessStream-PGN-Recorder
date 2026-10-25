@@ -28,8 +28,10 @@ measurements, fixes and boundaries of validation.
    held piece was dropped. Opponent replies, visible clocks and game-ending
    messages provide additional bounded evidence. A final move may still need
    confirmation, and premoves are excluded until supported.
-5. **Openings are bounded.** By default a unique first one- or two-ply prefix
-   can be inferred from the standard start. Longer unseen opening inference is
+5. **Openings are bounded.** By default up to three opening plies can be inferred from the standard start.
+   A small three-ply startup transposition can select an explicitly inferred
+   order and retain the equal alternative as a PGN variation. This exception
+   does not resolve ambiguous gaps in an ongoing game. Longer unseen opening inference is
    opt-in and still requires completed unique evidence. Actual unobserved order
    may remain unknown. Imported or explicitly configured FENs retain their
    supplied history fields; an image-derived midgame has unknown turn, castling

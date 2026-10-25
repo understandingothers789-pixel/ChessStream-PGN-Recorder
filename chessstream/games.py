@@ -149,7 +149,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 return False
             self._create(b, obs.timestamp)
             return True
-        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2)
+        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 3,allow_initial_transposition=True)
         if (len(uncertain)<=2 and obs.confidence>=max(.80,self.settings.min_confidence)
                 and self._resume_initial_identity(obs,opening_moves)):
             return True
@@ -162,10 +162,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             self._create(chess.Board(), obs.timestamp, note=note)
             self._seed_opening(opening_moves)
             self._recognition_ignored_squares=uncertain
-            self.last_message = "Recording • uniquely recovered opening: " + " ".join(
+            self.last_message = "Recording • inferred opening: " + " ".join(
                 self._san_line(chess.Board(), opening_moves))
             self.store.audit("opening prefix inferred", {"game_id":self.current_id,
-                "moves":opening_moves,"method":"completed unique shortest legal path",
+                "moves":opening_moves,"method":"completed shortest legal path; missing history inferred",
                 "uncertain_unchanged_squares":uncertain})
             return True
         if uncertain:
@@ -508,7 +508,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         threshold=max(.80,self.settings.min_confidence)
         if not obs.uncertain_squares(threshold) and obs.placement()==chess.Board().board_fen():
             return chess.Board(),None,""
-        moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2)
+        moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 3,allow_initial_transposition=True)
         if moves:
             sans=self._san_line(chess.Board(),moves)
             note=self._opening_note()+' Selected line: '+' '.join(sans)+'.'
@@ -528,17 +528,18 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
 
     @staticmethod
     def _opening_note():
-        return ('Opening prefix inferred from a completed unique shortest legal search. '
+        return ('Opening prefix inferred from a completed shortest legal search. '
                 'Earlier frames were not recorded. Unseen repetitions cannot be established from a single position.')
 
-    def _infer_short_opening(self, obs, max_plies=14, target_turn=None, *, time_limit_ms=None):
-        """Recover an opening only when a completed search establishes one order.
+    def _infer_short_opening(self, obs, max_plies=14, target_turn=None, *, time_limit_ms=None,allow_initial_transposition=False):
+        """Recover unique openings, or explicitly inferred three-ply startup orders.
 
         A few unknown unchanged squares do not invalidate the whole opening.
         The legal search still requires positive evidence for every move's
         changed squares. Sparse endgames and heavily changed roots are not
         interpreted as a handful of moves from the standard starting board.
         """
+        self._opening_alternatives=[]
         if self.settings.initial_fen:return []
         threshold=max(.80,self.settings.min_confidence)
         confident=obs.probabilities.max(axis=1)>=threshold
@@ -548,16 +549,18 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         occupied=int(np.count_nonzero((labels!=0)&confident)+np.count_nonzero((expected!=0)&~confident))
         displaced=int(np.count_nonzero((expected!=0)&(labels!=expected)&confident))
         if not 30<=occupied<=32 or not 1<=displaced<=14:return []
-        if max_plies<=2 and displaced>max_plies:return []
+        if max_plies<=3 and displaced>max_plies:return []
         if np.any(obs.probabilities[np.arange(64)[~confident],expected[~confident]]<.05):return []
         milliseconds=min(400,max(50,self.settings.search_ms))
         nodes=min(60000,max(1000,self.settings.search_nodes))
         if time_limit_ms is not None:
             if time_limit_ms<=0:return []
-            milliseconds=min(milliseconds,time_limit_ms);nodes=min(nodes,8000);max_plies=min(2,max_plies)
+            milliseconds=min(milliseconds,time_limit_ms);nodes=min(nodes,8000);max_plies=min(3,max_plies)
         key=(obs.probabilities.tobytes(),max_plies,target_turn,threshold,
-             nodes,milliseconds)
-        if self._opening_cache and self._opening_cache[0]==key:return list(self._opening_cache[1])
+             nodes,milliseconds,allow_initial_transposition)
+        if self._opening_cache and self._opening_cache[0]==key:
+            self._opening_alternatives=list(self._opening_cache[2])
+            return list(self._opening_cache[1])
         moves=[]
         if displaced<=6:
             search=LegalSearcher(max_plies=min(6,max_plies),
@@ -566,6 +569,26 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             decision=assess_search(initial,result,obs,threshold)
             if decision.automatic:
                 moves=[move.uci() for move in decision.path]
+            elif (allow_initial_transposition and decision.kind=='ambiguous'
+                    and result.exhaustive and result.shortest_proven
+                    and result.paths and all(len(path)==3 for path in result.paths)):
+                # Startup-only exception: two independent White moves and one
+                # Black move. Preserve the alternative order, not a false claim
+                # that a photograph established which White move came first.
+                paths=[]
+                for path in result.paths:
+                    trial=initial.copy();origins=set();valid=True
+                    for move in path:
+                        if (move not in trial.legal_moves or trial.is_capture(move)
+                                or move.from_square in origins or not confident[move.from_square]
+                                or not confident[move.to_square]):valid=False;break
+                        origins.add(move.to_square);trial.push(move)
+                    if not valid or trial.turn!=chess.BLACK or not obs.matches(trial,threshold):break
+                    paths.append(tuple(move.uci() for move in path))
+                else:
+                    paths=sorted(set(paths),key=lambda line:(line[0] not in ('d2d4','e2e4'),line))
+                    if paths:
+                        moves=list(paths[0]);self._opening_alternatives=paths[1:]
         if not moves and max_plies>6:
             probabilities=obs.probabilities.copy()
             probabilities[~confident]=0
@@ -589,19 +612,19 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 if any(not confident[square] for square in changed):moves=[];break
                 trial.push(move)
         if not moves:
-            self._opening_cache=(key,())
+            self._opening_cache=(key,(),())
             return []
         board=chess.Board()
         for uci in moves:
             board.push_uci(uci)
         if not obs.matches(board,threshold):return []
-        self._opening_cache=(key,tuple(moves))
+        self._opening_cache=(key,tuple(moves),tuple(self._opening_alternatives))
         return moves
 
     def opening_ready(self, obs):
         with self.lock:
             if obs.placement()==chess.Board().board_fen():return False
-            if self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2):return True
+            if self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 3,allow_initial_transposition=True):return True
             return (not obs.uncertain_squares(max(.8,self.settings.min_confidence))
                     and len(chess.Board(f'{obs.placement()} w - - 0 1').piece_map())>=4
                     and any(chess.Board(f'{obs.placement()} {turn} - - 0 1').is_valid() for turn in ('w','b')))
@@ -616,7 +639,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         old=self.rec;root=chess.Board(old.initial_fen)
         turn=None if not old.verified and len({b.root_fen for b in old.branches})>1 else root.turn
         prefix=self._infer_short_opening(Observation.from_board(root),target_turn=turn,
-                                        max_plies=14 if self.settings.infer_unseen_opening else 2,
+                                        max_plies=14 if self.settings.infer_unseen_opening else 3,allow_initial_transposition=True,
                                         time_limit_ms=time_limit_ms)
         if not prefix:return False
         previous={'pgn':stored['pgn'],'state':self.rec.serialize(),
@@ -662,8 +685,9 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self.move_clocks={str(ply):node.clock() for ply,node in enumerate(game.mainline(),1) if node.clock() is not None}
         self.inferred_moves={str(int(ply)+len(prefix)):value for ply,value in self.inferred_moves.items()}
         for ply,uci in enumerate(prefix,1):
-            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: unique shortest opening prefix restored before an application-created FEN.'}
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: shortest opening prefix restored before an application-created FEN.'}
         self.note=self._opening_note()+' An earlier application-created FEN start was replaced; its recorded continuation was retained.'
+        self._retain_opening_alternatives(prefix)
         self._persisted_fingerprint=None
         self.store.audit('opening prefix backfilled',{'game_id':self.current_id,'previous_initial_fen':old.initial_fen,
             'previous_recording':previous,'prefix':prefix,'method':'completed unique shortest legal opening'})
@@ -677,23 +701,38 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
             result.append(board.san(move));board.push(move)
         return result
 
+    def _retain_opening_alternatives(self,moves):
+        alternatives=getattr(self,'_opening_alternatives',[])
+        if not alternatives:return
+        game=chess.pgn.read_game(io.StringIO(self.review_pgn)) if self.review_pgn else None
+        if game is None:game=chess.pgn.read_game(io.StringIO(export_pgn(chess.STARTING_FEN,moves,self.headers)))
+        for line in alternatives:
+            node=game
+            for uci in line:
+                move=chess.Move.from_uci(uci)
+                node=next((child for child in node.variations if child.move==move),None) or node.add_variation(move)
+            node.comment='Alternative inferred opening order; the first observed position cannot distinguish these orders.'
+        self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+        self.note+=' Opening move order is inferred; an equal shortest alternative is retained as a PGN variation.'
+
     def _seed_opening(self, moves):
         if not self.rec or not moves:return
         pending=1 if self.settings.confirm_on_reply else 0
         confirmed=moves[:-pending] if pending else moves
         for ply,uci in enumerate(moves,1):
-            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: unique shortest legal opening prefix; earlier frames were not recorded.'}
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: shortest legal opening prefix; earlier frames were not recorded.'}
         for uci in confirmed:
             self.rec.board.push_uci(uci)
             self.rec.verified.append(uci)
             self.rec.history.append(self.rec.board.board_fen())
         self.rec.branches=[Branch(self.rec.board.fen(),tuple(moves[len(confirmed):]))]
+        self._retain_opening_alternatives(moves)
         self.rec.status=("provisional move • opening guessed; waiting for opponent response" if pending else
                          "recording • opening guessed from visible position")
         self._persisted_fingerprint=None
 
     def _start_from_visible(self, obs, reason, since=None):
-        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 2)
+        opening_moves=self._infer_short_opening(obs,max_plies=14 if self.settings.infer_unseen_opening else 3,allow_initial_transposition=True)
         board,roots,note=self._visible_roots(obs)
         previous_id=self.current_id
         if self.rec:

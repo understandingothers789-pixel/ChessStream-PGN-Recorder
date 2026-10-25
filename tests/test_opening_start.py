@@ -76,7 +76,7 @@ def test_autostart_opt_out_and_sparse_or_uncertain_move_boards_wait(tmp_path):
     store.close()
 
 
-def test_resuming_legacy_early_fen_preserves_recorded_moves_and_clock_without_guessed_prefix(tmp_path):
+def test_resuming_legacy_three_ply_fen_preserves_recorded_moves_and_clock_with_inferred_prefix(tmp_path):
     store=Store(tmp_path);settings=Settings(infer_unseen_opening=True);first=GameManager(store,settings)
     board=play('e4 c5 d3')
     first._create(chess.Board(f'{board.board_fen()} b - - 0 1'),utcnow(),
@@ -87,14 +87,14 @@ def test_resuming_legacy_early_fen_preserves_recorded_moves_and_clock_without_gu
     first.move_clocks['1']=584;first.finish()
     resumed=GameManager(store,settings);resumed.recover(game_id);snapshot=resumed.process(Observation.from_board(board))
     assert resumed.current_id==game_id and len(store.games())==1
-    assert resumed.rec.initial_fen.split()[0]==play('e4 c5 d3').board_fen()
-    assert snapshot['moves']==['Nc6'] and snapshot['pending_moves']==['c3']
+    assert resumed.rec.initial_fen==chess.STARTING_FEN
+    assert snapshot['moves']==['e4','c5','d3','Nc6'] and snapshot['pending_moves']==['c3']
     game=chess.pgn.read_game(io.StringIO(store.game(game_id)['pgn']))
-    assert 'FEN' in game.headers and game.headers['SetUp']=='1'
-    assert list(game.mainline())[0].clock()==584
+    assert 'FEN' not in game.headers and len(game.variations)==2
+    assert list(game.mainline())[3].clock()==584
     resumed.process(Observation.from_board(board))
-    assert resumed.rec.verified==['b8c6']
-    assert not store.query("SELECT * FROM audit WHERE action='opening prefix backfilled'")
+    assert resumed.rec.verified==['e2e4','c7c5','d2d3','b8c6']
+    assert store.query("SELECT * FROM audit WHERE action='opening prefix backfilled'")
     store.close()
 
 
