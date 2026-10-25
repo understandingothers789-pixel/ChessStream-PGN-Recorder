@@ -107,12 +107,12 @@ def main():
         'python':VERSION,'architecture':'Windows x86-64','inputs_sha256':hashes,
         'model':model_info,'text_models':text_models},indent=2))
     dist=ROOT/'dist';dist.mkdir(exist_ok=True)
-    portable_zip=dist/'ChessStream-PGN-Recorder-Portable.zip'
+    portable_zip=dist/'ChessStream.zip'
     portable_zip.unlink(missing_ok=True)
     with zipfile.ZipFile(portable_zip,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=3) as z:
         for path in sorted(package.rglob('*')):
             if path.is_file():
-                z.write(path,Path('ChessStream-PGN-Recorder')/path.relative_to(package))
+                z.write(path,Path('ChessStream')/path.relative_to(package))
     print('Built portable package:',portable_zip)
     if args.makensis:
         env=os.environ.copy()

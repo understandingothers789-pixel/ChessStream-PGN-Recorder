@@ -1,5 +1,7 @@
 # ChessStream PGN Recorder
 
+Short downloads: the development source is available on branch `dev`; new portable builds use `ChessStream.zip` containing a `ChessStream` folder. Extract near the drive root, such as `C:\ChessStream`, to avoid Windows path-length limits in bundled libraries.
+
 Development build dev7 includes the [October 24 comprehensive check and fixes](docs/COMPREHENSIVE-CHECK-2026-10-24.md), including PGN setup headers, concurrent checks and combined failures.
 
 
