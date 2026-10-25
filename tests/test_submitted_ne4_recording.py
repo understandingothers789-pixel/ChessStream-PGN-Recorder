@@ -45,11 +45,12 @@ def test_full_submitted_line_records_identically_with_and_without_library(tmp_pa
     m.cancel_background_recovery();m.cancel_saved_join();store.close()
 
 
-def test_premove_conflict_does_not_invent_queen_moves_and_correct_frame_resumes(tmp_path):
+def test_inconsistent_saved_prefix_does_not_invent_queen_moves_and_correct_frame_resumes(tmp_path):
     store=Store(tmp_path);m=GameManager(store,Settings())
     m.import_pgn(FIXTURE);m.recover(store.games()[0]['id'],persist=False)
     prefix=m.rec.verified[:];board=m.rec.board.copy();tick=[100.];m._clock=lambda:tick[0]
-    # Log's next view: White's Ng5 while the stored position has Black to move.
+    # User confirms Ng5 was played. This tests the conflicting *saved* prefix,
+    # not a claim that the real move was a premove.
     premove=board.copy();premove.turn=chess.WHITE;premove.push_uci('e4g5')
     for _ in range(3):
         tick[0]+=1;m.process(Observation.from_board(premove))
@@ -65,3 +66,26 @@ def test_premove_conflict_does_not_invent_queen_moves_and_correct_frame_resumes(
             tick[0]+=.6;m.process(Observation.from_board(board))
     assert m.rec.verified==prefix+['b2c1','c2d1','c8d8','e4g5']
     m.cancel_background_recovery();m.cancel_saved_join();store.close()
+
+
+def test_user_confirmed_bg7_then_neg5_records_without_waiting_moves(tmp_path):
+    # User confirmed ...Bf6-g7 then Ng5. The log placement identifies e4-g5.
+    # Derive only the local placement from the export, not its erroneous turn.
+    game=chess.pgn.read_game(io.StringIO(FIXTURE.read_text()))
+    board=game.end().board()
+    board.remove_piece_at(chess.G7);board.set_piece_at(chess.F6,chess.Piece(chess.BISHOP,chess.BLACK))
+    board.turn=chess.BLACK
+    store=Store(tmp_path);m=GameManager(store,Settings());tick=[100.];m._clock=lambda:tick[0]
+    m._create(board,Observation.from_board(board).timestamp,note='User-confirmed local position before Bg7 and Neg5; earlier exported history is disputed.')
+    gid=m.current_id
+    expected=['f6g7','e4g5','b2c1','c2d1','c8d8']
+    for uci in expected:
+        move=chess.Move.from_uci(uci);assert move in board.legal_moves;board.push(move)
+        for _ in range(2):
+            tick[0]+=.6;m.process(Observation.from_board(board))
+    assert m.rec.verified==expected and m.current_id==gid
+    assert m.rec.board.fen()==board.fen() and not m.premove_state
+    saved=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+    assert not saved.errors and [move.uci() for move in saved.mainline_moves()]==expected
+    assert not store.query("SELECT * FROM audit WHERE action='possible premove held'")
+    store.close()
