@@ -12,10 +12,24 @@ from .pgn_tools import node_at
 from .diagnostics import export_diagnostics
 
 
+class ReviewMoveTree(QTreeWidget):
+    """Use horizontal arrows to step through the displayed move rows."""
+    def keyPressEvent(self,event):
+        if event.key() in (Qt.Key_Left,Qt.Key_Right) and event.modifiers()==Qt.NoModifier:
+            current=self.currentItem()
+            target=(self.itemAbove(current) if event.key()==Qt.Key_Left else self.itemBelow(current)) if current else self.topLevelItem(0)
+            if target is not None:
+                self.setCurrentItem(target,0)
+                self.scrollToItem(target)
+            event.accept();return
+        super().keyPressEvent(event)
+
+
 class ReviewTools:
     def make_review_tabs(self):
         tabs=QTabWidget()
-        self.review_tree=QTreeWidget();self.review_tree.setHeaderLabels(['Move / variation','Comment / clock']);self.review_tree.setIndentation(12)
+        self.review_tree=ReviewMoveTree();self.review_tree.setHeaderLabels(['Move / variation','Comment / clock']);self.review_tree.setIndentation(12)
+        self.review_tree.setToolTip('Left / Up: previous row. Right / Down: next row. Includes expanded variations.')
         self.review_tree.currentItemChanged.connect(self.review_selected_node)
         self.library_pgn=QPlainTextEdit();self.library_pgn.setReadOnly(True)
         tabs.addTab(self.review_tree,'Moves & variations');tabs.addTab(self.library_pgn,'PGN text')
