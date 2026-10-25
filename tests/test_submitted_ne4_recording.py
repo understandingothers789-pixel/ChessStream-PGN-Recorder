@@ -46,7 +46,7 @@ def test_full_submitted_line_records_identically_with_and_without_library(tmp_pa
 
 
 def test_premove_conflict_does_not_invent_queen_moves_and_correct_frame_resumes(tmp_path):
-    store=Store(tmp_path);m=GameManager(store,Settings(confirm_on_reply=False))
+    store=Store(tmp_path);m=GameManager(store,Settings())
     m.import_pgn(FIXTURE);m.recover(store.games()[0]['id'],persist=False)
     prefix=m.rec.verified[:];board=m.rec.board.copy();tick=[100.];m._clock=lambda:tick[0]
     # Log's next view: White's Ng5 while the stored position has Black to move.
@@ -60,6 +60,8 @@ def test_premove_conflict_does_not_invent_queen_moves_and_correct_frame_resumes(
     # Counterfactual recovery check: if the queued knight returns to e4 and
     # Qc1+ is witnessed, accept that real move, not a fabricated queen detour.
     for san in ('Qc1+','Bd1','Rd8','Neg5'):
-        board.push_san(san);tick[0]+=1;m.process(Observation.from_board(board))
+        board.push_san(san)
+        for _ in range(2):
+            tick[0]+=.6;m.process(Observation.from_board(board))
     assert m.rec.verified==prefix+['b2c1','c2d1','c8d8','e4g5']
     m.cancel_background_recovery();m.cancel_saved_join();store.close()
