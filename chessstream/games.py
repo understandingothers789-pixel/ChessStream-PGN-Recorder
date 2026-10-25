@@ -587,7 +587,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                     if not valid or trial.turn!=chess.BLACK or not obs.matches(trial,threshold):break
                     paths.append(tuple(move.uci() for move in path))
                 else:
-                    paths=sorted(set(paths),key=lambda line:(line[0] not in ('d2d4','e2e4'),line))
+                    from .opening_popularity import rank_openings
+                    paths=rank_openings(paths)
                     if paths:
                         moves=list(paths[0]);self._opening_alternatives=paths[1:]
         if not moves and max_plies>6:
@@ -715,7 +716,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 node=next((child for child in node.variations if child.move==move),None) or node.add_variation(move)
             node.comment='Alternative inferred opening order; the first observed position cannot distinguish these orders.'
         self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
-        self.note+=' Opening move order is inferred; an equal shortest alternative is retained as a PGN variation.'
+        from .opening_popularity import preference_note
+        self.note+=' Opening move order is inferred; an equal shortest alternative is retained as a PGN variation. '+preference_note(moves)
 
     def _seed_opening(self, moves):
         if not self.rec or not moves:return
