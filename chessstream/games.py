@@ -166,6 +166,7 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                 self._san_line(chess.Board(), opening_moves))
             self.store.audit("opening prefix inferred", {"game_id":self.current_id,
                 "moves":opening_moves,"method":"completed shortest legal path; missing history inferred",
+                "alternative_orders":getattr(self,"_opening_alternatives",[]),
                 "uncertain_unchanged_squares":uncertain})
             return True
         if uncertain:
@@ -690,7 +691,8 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self._retain_opening_alternatives(prefix)
         self._persisted_fingerprint=None
         self.store.audit('opening prefix backfilled',{'game_id':self.current_id,'previous_initial_fen':old.initial_fen,
-            'previous_recording':previous,'prefix':prefix,'method':'completed unique shortest legal opening'})
+            'previous_recording':previous,'prefix':prefix,'method':'completed shortest legal opening; missing history inferred',
+            'alternative_orders':getattr(self,'_opening_alternatives',[])})
         return True
 
     @staticmethod
