@@ -138,6 +138,39 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         self.persist()
         self.store.associate_screenshots(self.session_id,self.current_id,initial_placement=board.board_fen())
 
+    def _early_start_turn(self,obs):
+        """Infer the root fields of a short opening, without choosing its move order.
+
+        An ambiguous five-ply opening still establishes Black's turn under the
+        shortest-history assumption. It is not identity evidence for an archive.
+        """
+        self._early_inferred_roots=[]
+        if self.settings.initial_fen:return None
+        threshold=max(.8,self.settings.min_confidence)
+        if obs.confidence<threshold or obs.uncertain_squares(threshold):return None
+        initial=chess.Board();labels=obs.labels;expected=board_labels(initial)
+        displaced=int(np.count_nonzero((expected!=0)&(labels!=expected)))
+        if np.count_nonzero(labels)!=32 or not 1<=displaced<=6:return None
+        key=(obs.probabilities.tobytes(),self.settings.search_nodes,self.settings.search_ms,threshold)
+        if getattr(self,'_early_turn_cache',None) and self._early_turn_cache[0]==key:
+            self._early_inferred_roots=list(self._early_turn_cache[2]);return self._early_turn_cache[1]
+        result=LegalSearcher(6,min(60000,self.settings.search_nodes),min(200,self.settings.search_ms),threshold).search(initial,obs)
+        turn=None;roots=[]
+        if result.exhaustive and result.shortest_proven and result.paths:
+            turns=set();endpoints=set()
+            for path in result.paths:
+                trial=initial.copy()
+                for move in path:trial.push(move)
+                if not obs.matches(trial,threshold):break
+                turns.add(trial.turn)
+                trial.halfmove_clock=0
+                endpoints.add(trial.fen())
+            else:
+                if len(turns)==1:turn=next(iter(turns));roots=sorted(endpoints)
+        self._early_inferred_roots=roots
+        self._early_turn_cache=(key,turn,tuple(roots))
+        return turn
+
     def _initialize(self, obs):
         # Arbitrary root FENs need all 64 squares. A bounded standard-opening
         # hypothesis can instead carry at most two unchanged squares as unknown.
@@ -175,15 +208,20 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                                  + (f" (+{len(uncertain)-8} more)" if len(uncertain)>8 else ""))
             return False
         roots = []
-        for turn in ["w", "b"]:
+        inferred_turn=self._early_start_turn(obs)
+        turn_names=['w' if inferred_turn else 'b'] if inferred_turn is not None else ['w','b']
+        for turn in turn_names:
             b = chess.Board(f"{obs.placement()} {turn} - - 0 1")
             if b.is_valid():
                 roots.append(b.fen())
+        if inferred_turn is not None:roots=list(self._early_inferred_roots)
         if not roots:
             self.last_message = "Position is not a valid chessboard • check region, orientation or calibrate"
             return False
         note = ("Recording began midgame. Earlier moves are unavailable. Side to move is inferred from later evidence. "
                 "Castling rights and en passant history were not visible; no rights were assumed. Set an exact initial FEN if needed.")
+        if inferred_turn is not None:
+            note='Recording began midgame. The visible early-opening FEN, turn, move number and castling rights were inferred from completed shortest legal histories. Their exact opening move order remains unresolved; earlier moves are not exported.'
         self._create(chess.Board(roots[0]), obs.timestamp, roots, note)
         return True
 
@@ -520,11 +558,15 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         for turn in ["w","b"]:
             board=chess.Board(f"{obs.placement()} {turn} - - 0 1")
             if board.is_valid():roots.append(board.fen())
+        inferred_turn=self._early_start_turn(obs)
+        if inferred_turn is not None:roots=list(self._early_inferred_roots)
         if not roots:
             raise ValueError("The visible pieces do not form a valid chess position")
         note=("Recording started from a visible midgame FEN. Earlier moves are not included. "
               "Side to move is inferred from the next legal continuation. Castling rights and en passant history "
               "are not visible in the image and were not assumed.")
+        if inferred_turn is not None:
+            note='Recording started from a visible midgame FEN. Early-opening turn, move number and castling rights were inferred from completed shortest histories; their earlier move order remains unresolved.'
         return chess.Board(roots[0]),roots,note
 
     @staticmethod

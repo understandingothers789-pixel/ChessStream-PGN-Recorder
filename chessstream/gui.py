@@ -87,7 +87,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev9"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev10"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -155,6 +155,10 @@ class MainWindow(ReviewTools,QMainWindow):
             action.setStyleSheet("padding:7px 4px;font-size:11px")
             pgn_actions.addWidget(action)
         moves_card.box.addLayout(pgn_actions)
+        self.follow_live_button=button('Following latest',self.return_to_live_board)
+        self.follow_live_button.setCheckable(True);self.follow_live_button.setChecked(True)
+        self.follow_live_button.setToolTip('Resume following the newest position. Clicking the latest PGN move or stepping to the end also resumes live following.')
+        moves_card.box.addWidget(self.follow_live_button)
         self.game_identity_button=button('Game: waiting ▾',self.game_controls_menu)
         self.game_identity_button.setStyleSheet('padding:6px;font-size:11px')
         moves_card.box.addWidget(self.game_identity_button)
@@ -334,6 +338,8 @@ class MainWindow(ReviewTools,QMainWindow):
             if (review['game_id']!=snap.get('game_id') or review['initial_fen']!=snap.get('initial_fen',chess.STARTING_FEN)
                     or tuple(line[:review['ply']])!=review['prefix']):self._live_review=None
         self.return_live_button.setVisible(self._live_review is not None)
+        self.follow_live_button.setChecked(self._live_review is None)
+        self.follow_live_button.setText('Following latest' if self._live_review is None else 'Follow latest')
         if snap.get('recording_started_automatically'):
             self._preview_active=False
             self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True)
@@ -429,6 +435,8 @@ class MainWindow(ReviewTools,QMainWindow):
         ply=item.data(Qt.UserRole)
         if not ply:return
         snap=self.snapshot;line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
+        if ply>=len(snap.get('moves',[])):
+            self.return_to_live_board();return
         initial=snap.get('initial_fen',chess.STARTING_FEN);board=chess.Board(initial)
         try:
             for san in line[:ply]:board.push_san(san)
@@ -441,10 +449,8 @@ class MainWindow(ReviewTools,QMainWindow):
         snap=self.snapshot
         line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
         if not line:return
-        selected=self.move_table.currentItem()
-        current=(self._live_review.get('ply') if self._live_review else
-                 selected.data(Qt.UserRole) if selected and selected.data(Qt.UserRole) else None)
-        target=max(1,min(len(line),(current if current is not None else (0 if direction>0 else len(line)+1))+direction))
+        current=self._live_review['ply'] if self._live_review else max(1,len(snap.get('moves',[])))
+        target=max(1,min(len(line),current+direction))
         initial=chess.Board(snap.get('initial_fen',chess.STARTING_FEN))
         table_index=target-1+(1 if not initial.turn else 0)
         item=self.move_table.item(table_index//2,1+table_index%2)

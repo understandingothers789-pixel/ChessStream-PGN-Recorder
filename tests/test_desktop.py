@@ -207,3 +207,33 @@ def test_library_deletion_shows_difference_between_pgn_copy_and_game_record(tmp_
     win.delete_games()
     assert win.store.game(gid) is None and all(g['id']!=gid for g in win.game_rows)
     win.close();win.deleteLater();app.processEvents()
+
+
+def test_clicking_last_move_and_follow_control_resume_live_updates(tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui,'windows',lambda:[])
+    window=gui.MainWindow(tmp_path)
+    board=chess.Board()
+    for san in ('e4','e5','Nf3'):board.push_san(san)
+    snap={'game_id':'live','initial_fen':chess.STARTING_FEN,'fen':board.fen(),
+          'moves':['e4','e5','Nf3'],'orientation':'white','status':'Recording'}
+    window.on_update(snap)
+    window.review_live_move(window.move_table.item(0,1))
+    assert window._live_review and not window.follow_live_button.isChecked()
+    window.review_live_move(window.move_table.item(1,1))
+    assert window._live_review is None and window.follow_live_button.isChecked()
+    board.push_san('Nc6');snap={**snap,'fen':board.fen(),'moves':snap['moves']+['Nc6']}
+    window.on_update(snap);assert window.live_board.fen==board.fen()
+    window.review_live_move(window.move_table.item(0,1));window.follow_live_button.click()
+    assert window._live_review is None and window.live_board.fen==board.fen()
+    window.review_live_move(window.move_table.item(1,1));window.navigate_live_move(1)
+    assert window._live_review is None
+    window.navigate_live_move(-1);assert window._live_review['ply']==3
+    window.navigate_live_move(1);assert window._live_review is None
+    preview=board.copy();preview.push_san('Bb5')
+    window.on_update({**snap,'provisional':True,'pending_moves':['Bb5'],'preview_fen':preview.fen()})
+    window.navigate_live_move(-1);assert window._live_review['ply']==3
+    window.navigate_live_move(1);assert window._live_review is None
+    window.close();window.deleteLater();app.processEvents()

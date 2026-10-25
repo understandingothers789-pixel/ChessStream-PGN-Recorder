@@ -30,6 +30,13 @@ class GameBoundaries:
         # An opening is shared by countless games, including rematches with
         # the same players. It cannot identify an older recording at startup.
         if opening_moves or obs.placement()==chess.Board().board_fen():return False
+        # Even a timed-out opening search cannot make a common opening into
+        # archive identity evidence. This conservative material/placement check
+        # prevents library contents from deciding a fresh opening's history.
+        from .domain import board_labels
+        import numpy as np
+        expected=board_labels(chess.Board());labels=obs.labels
+        if np.count_nonzero(labels)==32 and np.count_nonzero((expected!=0)&(labels!=expected))<=6:return False
         matches=[]
         for row in self.store.query("SELECT * FROM games WHERE status NOT LIKE 'reconnected%' AND status NOT LIKE 'combined source%' ORDER BY started DESC LIMIT 2"):
             try:headers=json.loads(row['headers']);state=json.loads(row['state'])
@@ -49,9 +56,10 @@ class GameBoundaries:
         if context:self.lifecycle.metadata(context,context['timestamp'],self._clock(),self.headers)
         self.last_message='Saved game recognized by players and position';return True
 
-    @staticmethod
-    def _fen_roots(obs):
+    def _fen_roots(self,obs):
         if obs.placement()==chess.Board().board_fen():return chess.Board(),None
+        if self._early_start_turn(obs) is not None:
+            roots=list(self._early_inferred_roots);return chess.Board(roots[0]),roots
         roots=[chess.Board(f'{obs.placement()} {turn} - - 0 1').fen() for turn in ('w','b')
                if chess.Board(f'{obs.placement()} {turn} - - 0 1').is_valid()]
         if not roots:raise ValueError('Wait for a clear legal board before starting a game')
@@ -135,7 +143,7 @@ class GameBoundaries:
             self.finish('preserved • separate game confirmed')
         self.lifecycle.mode='auto'
         self._create(board,first.timestamp,roots,note=('Game boundary confirmed: '+reason+'. '+
-            ('Recording starts from the visible FEN; earlier moves were not observed. Side to move is inferred from continuation; castling and en passant history were not assumed.' if board.fen()!=chess.STARTING_FEN else
+            ('Recording starts from the visible FEN; earlier moves were not observed. Turn and rights are inferred from completed short opening histories where available; otherwise they await continuation evidence.' if board.fen()!=chess.STARTING_FEN else
              'Opening prefix inferred uniquely from the first complete board.' if seed else 'Starting position was observed.')))
         for uci in chosen[1]:
             self.rec.board.push_uci(uci);self.rec.verified.append(uci);self.rec.history.append(self.rec.board.board_fen())
