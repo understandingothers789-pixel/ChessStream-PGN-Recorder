@@ -1,0 +1,92 @@
+[Event "YouTube Chess Recording"]
+[Site "YouTube"]
+[Date "2026.10.25"]
+[Round "?"]
+[White "WhitePlayer"]
+[Black "BlackPlayer"]
+[Result "*"]
+
+{ Opening prefix inferred from a completed shortest legal search. Earlier frames were not recorded. Unseen repetitions cannot be established from a single position. Unresolved observations exist; only the verified prefix is exported. }
+1. d4
+{ [%clk 0:09:55] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+1... Nf6
+{ [%clk 0:09:58] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+2. c4
+{ [%clk 0:09:52] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+2... e6
+{ [%clk 0:09:52] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+3. Bg5
+{ [%clk 0:09:48] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+3... d5
+{ [%clk 0:09:45] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+4. Nc3
+{ [%clk 0:09:44] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+4... Be7
+{ [%clk 0:09:43] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+5. Bxf6
+{ [%clk 0:09:41] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+5... Bxf6
+{ [%clk 0:09:17] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+6. e3
+{ [%clk 0:09:38] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+6... O-O
+{ [%clk 0:09:15] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+7. Nf3
+{ [%clk 0:09:36] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+7... dxc4
+{ [%clk 0:08:51] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+8. Bxc4
+{ Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded. }
+8... c5
+{ [%clk 0:08:50] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+9. O-O { [%clk 0:09:28] } 9... cxd4 { [%clk 0:08:48] } 10. Nxd4
+{ [%clk 0:09:24] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+10... Bd7
+{ [%clk 0:08:42] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+11. Qh5
+{ [%clk 0:09:02] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+11... Nc6
+{ [%clk 0:08:32] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+12. Nf3
+{ [%clk 0:08:40] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+12... Rc8
+{ [%clk 0:08:22] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+13. Rad1
+{ [%clk 0:08:24] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+13... Qe7
+{ [%clk 0:08:02] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+14. Bb5
+{ [%clk 0:08:10] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+14... Rfd8
+{ [%clk 0:07:59] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+15. Rd2
+{ [%clk 0:07:19] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+15... Be8
+{ [%clk 0:07:42] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+16. Rfd1
+{ [%clk 0:07:10] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+16... Rxd2
+{ [%clk 0:07:28] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+17. Rxd2
+{ [%clk 0:07:07] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+17... Qb4
+{ [%clk 0:07:18] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+18. Ba4
+{ Inferred: background gap recovery matched observed placement; move order not independently verified. }
+18... Qb6
+{ Inferred: background gap recovery matched observed placement; move order not independently verified. }
+19. a3
+{ [%clk 0:04:50] Inferred: background gap recovery matched observed placement; move order not independently verified. }
+19... g6
+{ Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded. }
+20. Bc2
+{ [%clk 0:04:08] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+20... Qxb2
+{ Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded. }
+21. Qh3
+{ [%clk 0:03:22] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+21... Bg7
+{ Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded. }
+22. Ne4
+{ [%clk 0:03:11] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+*
