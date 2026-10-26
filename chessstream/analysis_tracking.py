@@ -24,10 +24,10 @@ def tree_positions(game):
 
 
 class AnalysisTracking:
-    def _promote_mating_correction(self,game,node,obs):
-        """A mate may correct a short inferred tail, not an established game."""
+    def _promote_inferred_correction(self,game,node,obs):
+        """Prefer supported continuations over short, abandoned inferred tails."""
         if (self.lifecycle.mode!='auto' or self.terminal_message or self.headers.get('Result','*')!='*'
-                or not self.lifecycle.same_visible_players(self) or not node.board().is_checkmate()
+                or not self.lifecycle.same_visible_players(self)
                 or not obs.matches(node.board(),max(.8,self.settings.min_confidence))):return False
         chain=[];cursor=node
         while cursor.parent is not None:
@@ -40,17 +40,33 @@ class AnalysisTracking:
         tail=len(self.rec.verified)-common
         if not 1<=tail<=2 or not all(str(ply) in self.inferred_moves for ply in range(common+1,len(self.rec.verified)+1)):
             return False
-        self.store.audit('checkmate corrected inferred mainline',{'game_id':self.current_id,
+        mate=node.board().is_checkmate()
+        if not mate:
+            # Length alone cannot distinguish live play from analysis. Require
+            # a single abandoned guess, an opponent reply and another move,
+            # plus clocks for BOTH players below the last accepted values.
+            baseline={}
+            board=chess.Board(self.rec.initial_fen)
+            for ply,uci in enumerate(self.rec.verified,1):
+                mover='white' if board.turn else 'black'
+                if str(ply) in self.move_clocks:baseline[mover]=self.move_clocks[str(ply)]
+                board.push_uci(uci)
+            clocks=self.lifecycle.clocks
+            if (tail!=1 or len(moves)-common<3 or self.clocks_recently_reset()
+                    or not all(color in baseline and color in clocks and clocks[color]<baseline[color]
+                               for color in ('white','black'))):return False
+        reason=('observed legal checkmate' if mate else 'longer observed continuation with both clocks advancing')
+        self.store.audit('checkmate corrected inferred mainline' if mate else 'hover corrected inferred mainline' ,{'game_id':self.current_id,
             'previous_pgn':self.store.game(self.current_id)['pgn'],'after_ply':common,
             'replaced':self.rec.verified[common:],'replacement':moves[common:],
-            'reason':'same visible players; observed legal checkmate contradicts short inferred suffix'})
+            'reason':'same visible players; '+reason+' contradicts short inferred suffix'})
         displaced=game
         for _ in range(common+1):displaced=displaced.variations[0]
-        displaced.comment=(displaced.comment+' Previous inferred mainline retained as an alternative after observed checkmate correction.').strip()
+        displaced.comment=(displaced.comment+' Previous inferred mainline retained as an alternative after supported continuation correction.').strip()
         for child in chain:
             child.parent.promote_to_main(child)
             child.comment=child.comment.replace('Observed analysis variation; excluded from the played main line.',
-                'Observed continuation; promoted after checkmate corrected an inferred suffix.').replace(
+                'Observed continuation; promoted after later play corrected an inferred suffix.').replace(
                 'Observed analysis variation; inferred legal order across missing frames.',
                 'Observed continuation; inferred legal order across missing frames.')
         probe=self.reconstructor(game.board())
@@ -63,9 +79,12 @@ class AnalysisTracking:
         self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
         self.analysis_cursor=None;self.rewind_state=None;self._analysis_pending=None
         self._timed_base=None;self._timed_end=0;self.cancel_background_recovery();self.reset_settling()
-        self.headers['Result']=probe.board.result();self.ended=obs.timestamp
-        self.rec.status='complete';self.last_message='Checkmate • inferred mainline corrected; previous line kept as variation'
-        self.lifecycle.set_phase('game completed',self.last_message)
+        for ply,uci in enumerate(moves[common:],common+1):
+            self.inferred_moves[str(ply)]={'uci':uci,'comment':'Inferred: selected observed continuation after correcting an abandoned inferred move.'}
+        if mate:self.headers['Result']=probe.board.result();self.ended=obs.timestamp
+        self.rec.status='complete' if mate else 'recording'
+        self.last_message=('Checkmate' if mate else 'Live continuation')+' • inferred mainline corrected; previous line kept as variation'
+        self.lifecycle.set_phase('game completed' if mate else 'game in progress',self.last_message)
         return True
 
     def _analysis_game(self):
@@ -268,7 +287,7 @@ class AnalysisTracking:
         if link is None:return False
         path,moves=link
         if not moves:
-            if self._promote_mating_correction(game,node_at(game,path),obs):return True
+            if self._promote_inferred_correction(game,node_at(game,path),obs):return True
             if cursor is None and not any(path) and not self.terminal_message:
                 before=len(self.rec.verified)
                 self._handle_rewind(obs)
@@ -296,6 +315,6 @@ class AnalysisTracking:
             if note not in node.comment:node.comment=(node.comment+' '+note).strip()
             self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
             self.store.audit('analysis continuation recorded',{'game_id':self.current_id,'path':list(path),'moves':list(moves)})
-        if self._promote_mating_correction(game,node,obs):return True
+        if self._promote_inferred_correction(game,node,obs):return True
         self._activate_analysis_cursor(game,new_path);self._analysis_pending=None
         return True

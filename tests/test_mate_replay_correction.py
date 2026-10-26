@@ -35,7 +35,7 @@ def test_mate_only_replaces_short_inferred_suffix(tmp_path,blocked):
     if blocked=='completed':m.headers['Result']='1-0'
     if blocked=='different_players':m.lifecycle.raw_names['black']='Other'
     obs=Observation.from_board(mate.board())
-    result=m._promote_mating_correction(game,mate,obs)
+    result=m._promote_inferred_correction(game,mate,obs)
     assert result==(blocked=='none')
     if result:
         m.persist();saved=chess.pgn.read_game(io.StringIO(store.game(m.current_id)['pgn']))
