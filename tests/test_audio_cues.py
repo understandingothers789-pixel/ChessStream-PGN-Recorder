@@ -190,3 +190,41 @@ def test_bundled_signatures_are_normalized_and_include_provenance():
         assert np.isfinite(entry['vector']).all()
         assert np.linalg.norm(entry['vector'])==pytest.approx(1,abs=1e-4)
         assert entry['source'].startswith('https://') and len(entry['sha256'])==64
+
+
+def test_sound_before_animation_is_retained_once_and_expires():
+    from chessstream.audio import AudioBoardEvidence
+    evidence=AudioBoardEvidence()
+    evidence.observe('game','before',[],10.)
+    assert evidence.observe('game','before',[{'at':10.1}],10.2)[0] is None
+    assert evidence.observe('game','after',[],10.5)[0]==10.1
+    assert evidence.observe('game','next',[],10.7)[0] is None
+    evidence.observe('game','next',[{'at':11.}],11.1)
+    assert evidence.observe('game','later',[],12.2)[0] is None
+
+
+@pytest.mark.parametrize('case',['review','uncertain','new_game','reset'])
+def test_navigation_and_discontinuities_cannot_reuse_sound(case):
+    from chessstream.audio import AudioBoardEvidence
+    evidence=AudioBoardEvidence()
+    evidence.observe('game','before',[],10.)
+    evidence.observe('game','before',[{'at':10.1}],10.2)
+    if case=='review':
+        at,hint=evidence.observe('game','old',[],10.3,review=True)
+        assert at is None and 'replay' in hint
+    elif case=='uncertain':evidence.observe('game','bad',[],10.3,usable=False)
+    elif case=='reset':evidence.reset()
+    game='new' if case=='new_game' else 'game'
+    assert evidence.observe(game,'after',[],10.5)[0] is None
+
+
+def test_quiet_board_and_multiple_cues_are_hints_only():
+    from chessstream.audio import AudioBoardEvidence
+    evidence=AudioBoardEvidence();evidence.observe('game','same',[],10.)
+    at,hint=evidence.observe('game','same',[],13.)
+    assert at is None and 'thinking or paused' in hint
+    evidence.observe('game','same',[{'at':13.1},{'at':13.5}],13.6)
+    at,hint=evidence.observe('game','changed',[],13.7)
+    assert at==13.5 and 'skipped' in hint
+    assert not evidence.pending
+    assert evidence.observe('game','next',[{'at':13.5}],13.8)[0] is None

@@ -21,6 +21,40 @@ BLOCK = 320  # 20 ms
 WINDOW = 3840  # 240 ms, enough for common click/thud move sounds
 
 
+class AudioBoardEvidence:
+    """Short-lived cue/board correlation; silence and cue counts are not moves."""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.game=None;self.placement=None;self.since=None
+        self.pending=deque(maxlen=32);self.last_cue=None
+
+    def observe(self,game,placement,events,now,*,review=False,usable=True):
+        if game!=self.game:
+            self.reset();self.game=game
+        if not usable:
+            self.reset();self.game=game
+            return None,'Board uncertain; audio support withheld'
+        for event in events:
+            at=event.get('at')
+            if isinstance(at,(int,float)) and 0<=now-at<=1. and (self.last_cue is None or at>self.last_cue):
+                self.pending.append(at);self.last_cue=at
+        while self.pending and now-self.pending[0]>1.:self.pending.popleft()
+        changed=placement!=self.placement
+        if changed:self.placement=placement;self.since=now
+        if review:
+            self.pending.clear()
+            return None,'Earlier saved position / replay; sound does not add moves'
+        if changed and self.pending:
+            count=len(self.pending);at=self.pending[-1];self.pending.clear()
+            return at,('Several cues between boards; possible skipped moves' if count>1 else
+                       'Move sound aligned with changed board')
+        if self.since is not None and now-self.since>=2.:
+            return None,'Board unchanged; thinking or paused (not distinguishable from audio)'
+        return None,'Waiting for a board change to match audio'
+
+
 def fingerprint(samples):
     samples = np.asarray(samples, dtype=np.float32)
     frames = np.lib.stride_tricks.sliding_window_view(samples, 512)[::160]

@@ -180,3 +180,31 @@ def test_library_join_rechecks_sources_inside_manager_lock(tmp_path,change):
     assert len(store.games())==before
     assert not store.query("SELECT * FROM audit WHERE action='PGNs combined'")
     store.close()
+
+
+def test_worker_matches_sound_before_animation_and_clears_on_pause(tmp_path,monkeypatch):
+    store,m,w,clock=setup(tmp_path)
+    monkeypatch.setattr('chessstream.capture.time.monotonic',lambda:clock[0])
+    class Audio:
+        events=[]
+        def poll(self,discard=False):
+            events=self.events;self.events=[]
+            return ([] if discard else events),{'status':'listening','count':1}
+    audio=Audio();w.audio=audio
+    initial=chess.Board();w.process_observation(Observation.from_board(initial),2)
+    clock[0]=100.2;audio.events=[{'at':100.1}]
+    w.process_observation(Observation.from_board(initial),2)
+    assert m._audio_evidence is None
+    target=initial.copy();target.push_san('e4');clock[0]=100.5
+    # Inspect the worker's handoff without making acceptance timing part of this test.
+    seen=[];original=m.observe_frame
+    def observe(obs):
+        seen.append(m._audio_evidence);return original(obs)
+    monkeypatch.setattr(m,'observe_frame',observe)
+    snap=w.process_observation(Observation.from_board(target),2)
+    assert seen[-1]==(m.current_id,target.board_fen(),100.1)
+    assert 'aligned' in snap['audio_cues']['board_hint']
+    w.paused.set();clock[0]=100.6;audio.events=[{'at':100.55}]
+    w.process_observation(Observation.from_board(target),2)
+    assert m._audio_evidence is None and not w.audio_board.pending
+    store.close()

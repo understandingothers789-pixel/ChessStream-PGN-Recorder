@@ -87,7 +87,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev10"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev11"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -324,6 +324,7 @@ class MainWindow(ReviewTools,QMainWindow):
         audio=snap.get('audio_cues')
         if audio:
             self.audio_status.setText(f"Audio • {audio['status']} • {audio.get('count',0)} cues"+
+                (f" • {audio['board_hint']}" if audio.get('board_hint') else '')+
                 (f" • {audio['device']}" if audio.get('device') else '')+
                 (f" • {audio['dropped_blocks']} interrupted blocks" if audio.get('dropped_blocks') else ''))
         lifecycle=snap.get('lifecycle',{})

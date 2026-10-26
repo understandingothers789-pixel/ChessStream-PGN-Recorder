@@ -181,10 +181,13 @@ class RecordingWorker(QThread):
         self.audio=None
         self.audio_info={"status":"Audio cues off","count":0}
         self._audio_enabled=False
+        from .audio import AudioBoardEvidence
+        self.audio_board=AudioBoardEvidence()
 
     def audio_failed(self,exc):
         logging.warning('Optional audio failed; visual recording continues: %s',exc,exc_info=True)
         audio=self.audio;self.audio=None;self.manager._audio_evidence=None
+        self.audio_board.reset()
         if audio:
             try:audio.stop()
             except Exception:logging.exception('Failed to close optional audio')
@@ -201,6 +204,7 @@ class RecordingWorker(QThread):
     def layout_changed(self):
         """Invalidate geometry-dependent evidence, retaining the game identity."""
         self.manager._audio_evidence=None
+        self.audio_board.reset()
         if self.audio:self.poll_audio(discard=True)
         self.manager.cancel_background_recovery()
         self.manager.cancel_saved_join()
@@ -216,6 +220,7 @@ class RecordingWorker(QThread):
         from .integrity import observation_error
         error=observation_error(obs)
         if error:
+            self.audio_board.reset()
             self.manager._audio_evidence=None;self.manager.reset_settling()
             self.manager.cancel_background_recovery();self.manager.cancel_saved_join()
             self.manager._evidence_revision+=1
@@ -223,9 +228,19 @@ class RecordingWorker(QThread):
                     'pipeline_health':{'vision':'invalid output','pgn':'preserved'},'audio_cues':self.audio_info}
         audio=getattr(self,'audio',None)
         if audio:
-            events=self.poll_audio(discard=self.paused.is_set() or self.preview_only)
-            if events:
-                self.manager._audio_evidence=(self.manager.current_id,obs.placement(),events[-1]['at'])
+            discard=self.paused.is_set() or self.preview_only
+            events=self.poll_audio(discard=discard)
+            rec=self.manager.rec
+            review=bool(self.manager.rewind_state or self.manager.lifecycle.phase=='analysis / replay'
+                or (rec and obs.placement() in rec.history[:-1] and obs.placement()!=rec.board.board_fen()))
+            usable=not discard and bool(self.audio) and obs.confidence>=.8 and not obs.uncertain_squares(self.manager.settings.min_confidence)
+            at,hint=self.audio_board.observe(self.manager.current_id,obs.placement(),events,time.monotonic(),
+                review=review,usable=usable)
+            self.audio_info['board_hint']=hint
+            if at is not None:
+                self.manager._audio_evidence=(self.manager.current_id,obs.placement(),at)
+            elif review or not usable:
+                self.manager._audio_evidence=None
         self.manager.observe_frame(obs)
         self.manager.poll_saved_join()
         usable=(not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
@@ -332,6 +347,7 @@ class RecordingWorker(QThread):
                             try:self.audio.stop()
                             except Exception as exc:self.audio_failed(exc)
                         self.audio=None;self._audio_enabled=settings.audio_cues
+                        self.audio_board.reset()
                         self.manager._audio_evidence=None
                         self.audio_info={'status':'Audio cues off','count':0}
                         if settings.audio_cues:
@@ -340,6 +356,7 @@ class RecordingWorker(QThread):
                                 self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
                             except Exception as exc:self.audio_failed(exc)
                     if self.audio and self.paused.is_set():
+                        self.audio_board.reset()
                         self.poll_audio(discard=True);self.manager._audio_evidence=None
                     while not self.commands.empty():
                         action,value=self.commands.get()
@@ -521,6 +538,7 @@ class RecordingWorker(QThread):
                             deduplicate_position=bool(obs is not None and stable_count>=2))
                         next_saved=tick+settings.interval
                     if self.audio and obs is None:
+                        self.audio_board.reset();self.manager._audio_evidence=None
                         self.poll_audio(discard=True)
                     snapshot['audio_cues']=self.audio_info
                     snapshot["buffered_frames"]=len(self.recent_frames.frames)
