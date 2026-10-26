@@ -9,6 +9,7 @@ import chess.pgn
 from .domain import board_labels, utcnow
 from .pgn_tools import node_at
 from .reconstruction import LegalSearcher
+from .reconstruction import Branch
 from .commitment import assess_search
 
 
@@ -23,6 +24,50 @@ def tree_positions(game):
 
 
 class AnalysisTracking:
+    def _promote_mating_correction(self,game,node,obs):
+        """A mate may correct a short inferred tail, not an established game."""
+        if (self.lifecycle.mode!='auto' or self.terminal_message or self.headers.get('Result','*')!='*'
+                or not self.lifecycle.same_visible_players(self) or not node.board().is_checkmate()
+                or not obs.matches(node.board(),max(.8,self.settings.min_confidence))):return False
+        chain=[];cursor=node
+        while cursor.parent is not None:
+            chain.append(cursor);cursor=cursor.parent
+        chain.reverse();moves=[child.move.uci() for child in chain]
+        common=0
+        for old,new in zip(self.rec.verified,moves):
+            if old!=new:break
+            common+=1
+        tail=len(self.rec.verified)-common
+        if not 1<=tail<=2 or not all(str(ply) in self.inferred_moves for ply in range(common+1,len(self.rec.verified)+1)):
+            return False
+        self.store.audit('checkmate corrected inferred mainline',{'game_id':self.current_id,
+            'previous_pgn':self.store.game(self.current_id)['pgn'],'after_ply':common,
+            'replaced':self.rec.verified[common:],'replacement':moves[common:],
+            'reason':'same visible players; observed legal checkmate contradicts short inferred suffix'})
+        displaced=game
+        for _ in range(common+1):displaced=displaced.variations[0]
+        displaced.comment=(displaced.comment+' Previous inferred mainline retained as an alternative after observed checkmate correction.').strip()
+        for child in chain:
+            child.parent.promote_to_main(child)
+            child.comment=child.comment.replace('Observed analysis variation; excluded from the played main line.',
+                'Observed continuation; promoted after checkmate corrected an inferred suffix.').replace(
+                'Observed analysis variation; inferred legal order across missing frames.',
+                'Observed continuation; inferred legal order across missing frames.')
+        probe=self.reconstructor(game.board())
+        for uci in moves:
+            probe.board.push_uci(uci);probe.verified.append(uci);probe.history.append(probe.board.board_fen())
+        probe.branches=[Branch(probe.board.fen(),())]
+        self.rec=probe
+        self.move_clocks={key:value for key,value in self.move_clocks.items() if int(key)<=common}
+        self.inferred_moves={key:value for key,value in self.inferred_moves.items() if int(key)<=common}
+        self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+        self.analysis_cursor=None;self.rewind_state=None;self._analysis_pending=None
+        self._timed_base=None;self._timed_end=0;self.cancel_background_recovery();self.reset_settling()
+        self.headers['Result']=probe.board.result();self.ended=obs.timestamp
+        self.rec.status='complete';self.last_message='Checkmate • inferred mainline corrected; previous line kept as variation'
+        self.lifecycle.set_phase('game completed',self.last_message)
+        return True
+
     def _analysis_game(self):
         row=self.store.game(self.current_id)
         return chess.pgn.read_game(io.StringIO(row['pgn'])) if row else None
@@ -223,6 +268,7 @@ class AnalysisTracking:
         if link is None:return False
         path,moves=link
         if not moves:
+            if self._promote_mating_correction(game,node_at(game,path),obs):return True
             if cursor is None and not any(path) and not self.terminal_message:
                 before=len(self.rec.verified)
                 self._handle_rewind(obs)
@@ -250,5 +296,6 @@ class AnalysisTracking:
             if note not in node.comment:node.comment=(node.comment+' '+note).strip()
             self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
             self.store.audit('analysis continuation recorded',{'game_id':self.current_id,'path':list(path),'moves':list(moves)})
+        if self._promote_mating_correction(game,node,obs):return True
         self._activate_analysis_cursor(game,new_path);self._analysis_pending=None
         return True

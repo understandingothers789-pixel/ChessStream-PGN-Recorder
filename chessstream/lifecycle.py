@@ -273,6 +273,16 @@ class GameLifecycle:
         if raw_change:
             return self.hold(manager,obs,'Possible new game: checking a player-name change',('raw-names',tuple(sorted(raw_change.items()))))
         known=placement in manager.rec.history
+        # A seek can reset clocks and revisit the starting board just like a
+        # rematch. Prefer a matching recorded continuation for the same visible
+        # pair; names alone and the initial position are not enough.
+        if (self.reset_reads and self.same_visible_players(manager) and not current
+                and placement in manager.rec.history[3:]):
+            self.reset_reads=0;self.reset_confirmed=False;self.reset_since=None
+            self.reset_board_seen=False;self.pending_restart=False
+            self.clock_baseline=dict(self.clocks);manager.clock_reset_seen=False
+            self.set_phase('analysis / replay','Same players and recorded continuation after clock reset: replay')
+            return Decision()
         if self.reset_reads and established:
             # A static jump to historical clocks can be a video seek. A fresh
             # running clock or changed identity distinguishes the common rematch.
