@@ -24,6 +24,51 @@ def tree_positions(game):
 
 
 class AnalysisTracking:
+    def _prefer_longest_recorded_line(self,game):
+        """Recorded depth determines the main line; ties retain current order."""
+        best=None;length=len(self.rec.verified)
+        for node,path,board in tree_positions(game):
+            if node.comment.startswith('Alternative inferred opening order;'):continue
+            if len(path)>length:best=node;length=len(path)
+        if best is None:return False
+        chain=[];node=best
+        while node.parent is not None:chain.append(node);node=node.parent
+        chain.reverse();moves=[node.move.uci() for node in chain]
+        common=0
+        for old,new in zip(self.rec.verified,moves):
+            if old!=new:break
+            common+=1
+        previous=self.store.game(self.current_id)
+        self.store.audit('longest recorded line promoted',{'game_id':self.current_id,
+            'previous_pgn':previous['pgn'] if previous else None,
+            'previous_moves':list(self.rec.verified),'replacement':moves,'after_ply':common})
+        for node in chain:
+            node.parent.promote_to_main(node)
+            node.comment=node.comment.replace('Observed analysis variation; excluded from the played main line.',
+                'Observed continuation; longest recorded line selected as main line.').replace(
+                'Observed analysis variation; inferred legal order across missing frames.',
+                'Observed continuation; inferred legal order across missing frames.')
+        probe=self.reconstructor(game.board())
+        for move in moves:
+            probe.board.push_uci(move);probe.verified.append(move);probe.history.append(probe.board.board_fen())
+        probe.branches=[Branch(probe.board.fen(),())];self.rec=probe
+        self.move_clocks={str(ply):node.clock() for ply,node in enumerate(chain,1) if node.clock() is not None}
+        self.inferred_moves={key:value for key,value in self.inferred_moves.items() if int(key)<=common}
+        for ply,node in enumerate(chain[common:],common+1):
+            if 'inferred' in node.comment.casefold():self.inferred_moves[str(ply)]={'uci':node.move.uci(),'comment':node.comment}
+        self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
+        self.analysis_cursor=None;self.rewind_state=None;self._analysis_pending=None
+        self._timed_base=None;self._timed_end=0;self.cancel_background_recovery();self.reset_settling()
+        self.cancel_saved_join();self._evidence_revision+=1;self._audio_evidence=None
+        self.terminal_message=None;self.result_override=None
+        self.headers['Result']=probe.board.result(claim_draw=False)
+        complete=self.headers['Result']!='*'
+        self.ended=(self.last_observation.timestamp if self.last_observation else utcnow()) if complete else None
+        self.rec.status='complete' if complete else 'recording'
+        self.last_message='Longest recorded line selected as main line; alternatives preserved'
+        self.lifecycle.set_phase('game completed' if complete else 'game in progress',self.last_message)
+        return True
+
     def _promote_inferred_correction(self,game,node,obs):
         """Prefer supported continuations over short, abandoned inferred tails."""
         if (self.lifecycle.mode!='auto' or self.terminal_message or self.headers.get('Result','*')!='*'
@@ -154,8 +199,6 @@ class AnalysisTracking:
             if move not in node.board().legal_moves:raise ValueError('Illegal analysis continuation')
             child=next((child for child in node.variations if child.move==move),None)
             if child is None:
-                # An alternative must branch before the played endpoint.
-                if node.is_mainline() and node.is_end():raise ValueError('Analysis cannot extend played main line')
                 child=node.add_variation(move)
             path.append(node.variations.index(child));node=child
         return node,tuple(path)
@@ -252,6 +295,7 @@ class AnalysisTracking:
     def _handle_saved_analysis(self,obs):
         threshold=max(.8,self.settings.min_confidence)
         if obs.confidence<threshold or obs.uncertain_squares(threshold):return False
+        if self.rewind_state and self.rewind_state.get('early_opening'):return False
         if (self.terminal_message or self.headers.get('Result','*')!='*') and not self.settings.review_seconds:return False
         if self._analysis_boundary():
             self.analysis_cursor=None;self._analysis_pending=None
@@ -310,11 +354,13 @@ class AnalysisTracking:
         if self._clock()-self._analysis_pending[1]<.5:return True
         try:node,new_path=self._append_analysis(game,path,moves)
         except ValueError:return False
+        self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
         if not node.is_mainline():
             note='Observed analysis variation; inferred legal order across missing frames.' if len(moves)>1 else 'Observed analysis variation; excluded from the played main line.'
             if note not in node.comment:node.comment=(node.comment+' '+note).strip()
             self.review_pgn=game.accept(chess.pgn.StringExporter(headers=True,variations=True,comments=True))
             self.store.audit('analysis continuation recorded',{'game_id':self.current_id,'path':list(path),'moves':list(moves)})
+        if self._prefer_longest_recorded_line(game):return True
         if self._promote_inferred_correction(game,node,obs):return True
         self._activate_analysis_cursor(game,new_path);self._analysis_pending=None
         return True

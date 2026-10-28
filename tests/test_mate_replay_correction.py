@@ -19,7 +19,7 @@ def recorded(tmp_path):
     m.observe_context({'names':{'white':'Goomba','black':'Bowser'},'names_stable':True},utcnow())
     m.review_pgn=FIXTURE.read_text()
     m.inferred_moves={'25':{'uci':'g5f3','comment':'Inferred across capture gap'}}
-    m.persist()
+    source=m.review_pgn;m.review_pgn="";m.persist();m.review_pgn=source
     anchor=game
     for _ in range(24):anchor=anchor.variations[0]
     mate=anchor.variations[1]

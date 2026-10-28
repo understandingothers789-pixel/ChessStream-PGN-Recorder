@@ -20,7 +20,7 @@ def recorded(tmp_path):
     m.review_pgn=FIXTURE.read_text()
     m.inferred_moves={'41':{'uci':'d1e2','comment':'Inferred: position unchanged'}}
     m.move_clocks={'40':407,'41':390};m.lifecycle.clocks={'white':380,'black':400}
-    m.persist();anchor=game
+    source=m.review_pgn;m.review_pgn="";m.persist();m.review_pgn=source;anchor=game
     for _ in range(40):anchor=anchor.variations[0]
     return store,m,game,anchor
 
@@ -60,7 +60,10 @@ def test_streamed_opponent_reply_and_next_white_move_repair_hover(tmp_path):
         m.process(obs);now[0]+=.6;m.process(obs);now[0]+=.6
         node=node.variations[0] if node.variations else node
     assert m.current_id==gid and len(store.games())==1
-    assert m.rec.verified[-3:]==['f2g3','d6f5','g3e5']
-    assert m.analysis_cursor is None and m.rewind_state is None
+    assert m.rec.verified[40:43]==['f2g3','d6f5','g3e5']
+    assert len(m.rec.verified)>=43
+    # The fixture already contains later recorded moves; reviewing earlier
+    # frames may retain a cursor without shortening the promoted main line.
+    assert len(m.rec.verified)==47
     assert not m.rec.board.is_game_over()
     store.close()

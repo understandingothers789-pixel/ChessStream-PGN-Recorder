@@ -10,7 +10,8 @@ def merge_annotations(game, review_pgn='', clocks=None):
             def merge(old,new):
                 for child in old.variations:
                     target=next((n for n in new.variations if n.move==child.move),None)
-                    # Review annotations cannot silently extend the actual game.
+                    # A saved annotation snapshot must not undo a manual cut.
+                    # Newly observed extensions are committed by analysis tracking.
                     if target is None and new.is_mainline() and new.is_end():continue
                     if target is None:target=new.add_variation(child.move)
                     target.comment=child.comment;target.starting_comment=child.starting_comment;target.nags=set(child.nags)

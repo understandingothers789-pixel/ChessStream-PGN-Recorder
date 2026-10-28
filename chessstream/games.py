@@ -1765,6 +1765,10 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
         if not self.rec:
             return
         if not self.check_recording_integrity():return
+        if self.review_pgn:
+            combined=chess.pgn.read_game(io.StringIO(export_pgn(self.rec.initial_fen,self.rec.verified,
+                self.headers,self.note,self.review_pgn,self.move_clocks,self.inferred_moves)))
+            if combined and not combined.errors:self._prefer_longest_recorded_line(combined)
         comment = self.note
         pending = any(b.moves for b in self.rec.branches) or len(self.rec.branches)>1 or self.rec.incomplete
         if pending:
