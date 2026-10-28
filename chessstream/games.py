@@ -1828,7 +1828,9 @@ class GameManager(GameBoundaries,AnalysisTracking,GameExtras):
                         line.append(leaf.san(chess.Move.from_uci(uci)))
                         leaf.push_uci(uci)
                     alternatives.append(" ".join(line) or ("White to move" if leaf.turn else "Black to move"))
+            saved=self.store.game(self.current_id)
             return {"status":self.last_message,"game_id":self.current_id,"name":self.name,
+                    "recorded_pgn":saved['pgn'] if saved else '',
                     "lifecycle":self.lifecycle.summary(self),
                     "evidence_revision":self._evidence_revision,
                     "pending_hypotheses":len(self.rec.branches) if any(b.moves for b in self.rec.branches) else 0,

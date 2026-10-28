@@ -31,6 +31,8 @@ from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
 from .model_security import import_custom_model, validate_custom_model
 from .gap_join import join_recordings, AmbiguousGapError
+from .notation_view import NotationView
+from .pgn_tools import node_at
 
 
 def human_bytes(n):
@@ -87,7 +89,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev14"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev15"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -164,6 +166,11 @@ class MainWindow(ReviewTools,QMainWindow):
         moves_card.box.addWidget(self.game_identity_button)
         self.move_table=MoveTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);self.move_table.setContextMenuPolicy(Qt.CustomContextMenu);self.move_table.customContextMenuRequested.connect(self.live_moves_context_menu);self.move_table.step_move.connect(self.navigate_live_move);self.move_table.setToolTip('Click a move to review it. Use the left and right arrow keys to step through moves in order.');moves_card.box.addWidget(self.move_table,1)
         self.move_table.itemClicked.connect(self.review_live_move)
+        self.move_table.hide()
+        self.live_notation=NotationView();moves_card.box.addWidget(self.live_notation,1)
+        self.live_notation.move_selected.connect(self.review_notation_move)
+        self.live_notation.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.live_notation.customContextMenuRequested.connect(self.live_moves_context_menu)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
         self.choose_path=button("Confirm selected sequence",self.choose_sequence);self.choose_path.hide();moves_card.box.addWidget(self.choose_path)
@@ -194,14 +201,14 @@ class MainWindow(ReviewTools,QMainWindow):
         self.audio_status.setText('Starting playback listener…' if enabled else 'Audio cues off')
 
     def live_moves_context_menu(self,position):
-        menu=QMenu(self.move_table)
+        menu=QMenu(self.live_notation)
         copy=menu.addAction("Copy current PGN")
         export=menu.addAction("Export current PGN…")
         menu.addSeparator()
         fen=menu.addAction("Copy visible FEN")
         menu.addSeparator()
         manual=menu.addAction("Edit moves manually…")
-        selected=menu.exec(self.move_table.viewport().mapToGlobal(position))
+        selected=menu.exec(self.live_notation.viewport().mapToGlobal(position))
         if selected==copy:self.copy_current()
         elif selected==export:self.export_current()
         elif selected==fen:self.copy_visible_fen()
@@ -214,8 +221,8 @@ class MainWindow(ReviewTools,QMainWindow):
                           ('Undo last game switch','undo')]:
             action=menu.addAction(text,lambda checked=False,value=mode:self.run_game_control(value))
             if mode=='undo':action.setEnabled(bool(self.snapshot.get('lifecycle',{}).get('can_undo')))
-        menu.addSeparator();selected=self.move_table.currentItem()
-        ply=selected.data(Qt.UserRole) if selected else None
+        menu.addSeparator();selected_path=self.live_notation.selected
+        ply=len(selected_path) if selected_path and not any(selected_path) else None
         action=menu.addAction('Split PGN after selected move',lambda:self.run_game_control('split',ply))
         action.setEnabled(bool(ply and 0<ply<len(self.snapshot.get('moves',[]))))
         menu.exec(self.game_identity_button.mapToGlobal(self.game_identity_button.rect().bottomLeft()))
@@ -321,6 +328,14 @@ class MainWindow(ReviewTools,QMainWindow):
 
     def on_update(self,snap):
         self.snapshot=snap
+        notation_key=(snap.get('recorded_pgn',''),snap.get('initial_fen',chess.STARTING_FEN),tuple(snap.get('moves',[])))
+        if notation_key!=getattr(self,'_notation_document_key',None):
+            self._notation_document_key=notation_key
+            document=chess.pgn.read_game(io.StringIO(notation_key[0]))
+            if document is None:
+                document=chess.pgn.Game();document.setup(chess.Board(notation_key[1]));node=document
+                for san in notation_key[2]:node=node.add_main_variation(node.board().parse_san(san))
+            self._live_document=document
         audio=snap.get('audio_cues')
         if audio:
             self.audio_status.setText(f"Audio • {audio['status']} • {audio.get('count',0)} cues"+
@@ -336,8 +351,12 @@ class MainWindow(ReviewTools,QMainWindow):
         if self._live_review:
             line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
             review=self._live_review
+            if 'path' in review:
+                try:valid=node_at(self._live_document,review['path']).board().fen()==review['fen']
+                except IndexError:valid=False
+            else:valid=tuple(line[:review['ply']])==review['prefix']
             if (review['game_id']!=snap.get('game_id') or review['initial_fen']!=snap.get('initial_fen',chess.STARTING_FEN)
-                    or tuple(line[:review['ply']])!=review['prefix']):self._live_review=None
+                    or not valid):self._live_review=None
         self.return_live_button.setVisible(self._live_review is not None)
         self.follow_live_button.setChecked(self._live_review is None)
         self.follow_live_button.setText('Following latest' if self._live_review is None else 'Follow latest')
@@ -391,6 +410,8 @@ class MainWindow(ReviewTools,QMainWindow):
         pending=snap.get('pending_moves',[]) if snap.get('provisional') else []
         guessed=snap.get('guessed_plies',[])
         self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN),pending,guessed)
+        selected=tuple(self._live_review.get('path',(0,)*self._live_review['ply'])) if self._live_review else (0,)*len(moves)
+        self.live_notation.show_game(self._live_document,selected,follow=self._live_review is None,pending=pending)
         if preview_active:
             option=f" • candidate 1 of {candidates}" if candidates>1 else ""
             suffix=" • final confirmation needed" if snap.get('pending_terminal') else " • not yet in PGN"
@@ -445,6 +466,19 @@ class MainWindow(ReviewTools,QMainWindow):
         self._live_review={'game_id':snap.get('game_id'),'initial_fen':initial,'ply':ply,
             'prefix':tuple(line[:ply]),'fen':board.fen(),'last_move':board.peek().uci()}
         self.on_update(snap)
+
+    def review_notation_move(self,path):
+        path=tuple(path)
+        if path==(0,)*len(self.snapshot.get('moves',[])):
+            self.return_to_live_board();return
+        try:node=node_at(self._live_document,path)
+        except (IndexError,AttributeError):return
+        board=node.board();prefix=[];cursor=node
+        while cursor.parent is not None:prefix.append(cursor.san());cursor=cursor.parent
+        self._live_review={'game_id':self.snapshot.get('game_id'),'initial_fen':self._live_document.board().fen(),
+            'ply':len(path),'path':path,'prefix':tuple(reversed(prefix)) or ('Starting position',),
+            'fen':board.fen(),'last_move':node.move.uci() if node.move else None}
+        self.on_update(self.snapshot)
 
     def navigate_live_move(self,direction):
         snap=self.snapshot
