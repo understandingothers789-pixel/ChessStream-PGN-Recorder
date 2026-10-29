@@ -90,7 +90,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev18"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev19"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -293,7 +293,7 @@ class MainWindow(ReviewTools,QMainWindow):
                 self.recording_status.setText("●  Starting recording from the live preview")
             else:self.pause()
             return
-        if self._auto_window_enabled and not self._auto_select_youtube_window():
+        if self._auto_window_enabled and not self._auto_select_youtube_window(start_preview=False):
             # Freeze the fallback region before the user starts recording.
             self._auto_window_enabled=False;self.auto_window_timer.stop()
         if not self.region:self.draw_region();return
@@ -594,7 +594,7 @@ class MainWindow(ReviewTools,QMainWindow):
             if ok:self.region_selected(window_client(options[names.index(name)][0]))
         except Exception as e:self.error(str(e))
 
-    def _auto_select_youtube_window(self):
+    def _auto_select_youtube_window(self,*,start_preview=True):
         """Select the most chess-relevant visible YouTube browser window."""
         if not self._auto_window_enabled:
             self.auto_window_timer.stop();return bool(self.region)
@@ -612,7 +612,7 @@ class MainWindow(ReviewTools,QMainWindow):
                 self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • "+
                     ('armed to record the first opening move' if self.settings.auto_record_opening else 'click Start recording when ready'),10000)
             logging.info("Automatically selected YouTube capture window hwnd=%s title=%r",hwnd,title)
-            self.start_preview()
+            if start_preview:self.start_preview()
             return True
         return False
 

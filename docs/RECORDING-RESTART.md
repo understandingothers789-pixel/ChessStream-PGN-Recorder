@@ -48,3 +48,21 @@ exported diagnostic bundles. One previous log is retained after the current file
 exceeds 2 MB at startup. Capture is best effort: some native failures or external
 termination cannot produce Python stacks. A subprocess test exercises the open
 descriptor and diagnostic ZIP export without executing a destructive payload.
+
+## Auto-selection double launch — dev19
+
+The new log showed worker join completing, followed by automatic YouTube selection
+and duplicate audio initialization errors. Inspection identified a deterministic
+second launch route: toggle_start() calls _auto_select_youtube_window(), which
+starts a preview as a side effect. toggle_start() then overwrote that live worker
+with a recording worker. Qt could destroy a running QThread or both workers could
+initialize native audio/capture simultaneously. No chessboard is needed.
+
+Window selection now accepts start_preview=False for explicit Start, so the
+caller launches exactly one recording worker. Startup/timer selection retains
+its automatic preview behavior. The regression uses real controlled QThreads,
+a mocked YouTube window, and no board/OCR. It asserts exactly two workers across
+automatic initial preview → Stop → Start: the initial preview and one recorder.
+Earlier restart tests disabled auto-window selection and therefore missed this
+path. Audio device lookup errors in the log remain recoverable audio failures;
+this change does not claim to repair every Windows device enumeration problem.

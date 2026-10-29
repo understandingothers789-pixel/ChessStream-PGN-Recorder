@@ -97,3 +97,26 @@ def test_native_ocr_owner_is_released_inside_capture_thread(tmp_path,monkeypatch
     assert created and released==created and created[0]!=threading.get_ident()
     assert worker._text_detector is None and worker.audio is None
     store.close()
+
+
+def test_start_after_automatic_preview_stop_creates_only_one_worker(tmp_path,monkeypatch):
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    workers=[]
+    class ControlledWorker(RecordingWorker):
+        def __init__(self,*args,**kwargs):
+            super().__init__(*args,**kwargs);workers.append(self)
+        def run(self):self.stopping.wait(4)
+    monkeypatch.setattr(gui,'RecordingWorker',ControlledWorker)
+    monkeypatch.setattr(gui,'windows',lambda:[(1,'Chess speedrun - YouTube - Brave')])
+    monkeypatch.setattr(gui,'window_client',lambda hwnd:Region(0,0,500,500,window=hwnd))
+    win=gui.MainWindow(tmp_path)
+    until(app,lambda:win.worker is not None and win.worker.isRunning())
+    assert len(workers)==1 and win._preview_active
+    win.stop();until(app,lambda:win.worker is None)
+    win.toggle_start()
+    until(app,lambda:win.worker is not None and win.worker.isRunning())
+    assert len(workers)==2  # One initial preview, one restarted recorder.
+    assert not win.worker.preview_only
+    win.stop();until(app,lambda:win.worker is None)
+    win.close();win.deleteLater();app.processEvents()
