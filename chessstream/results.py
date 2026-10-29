@@ -17,10 +17,50 @@ class EndMessage:
     color_basis: str = "explicit result text"
 
 
+def _result_line_is_an_announcement(value):
+    """Reject ordinary prose, navigation and win/draw/loss lists as results.
+
+    This is purposely conservative: a false positive permanently terminates
+    the live PGN, while a missed caption merely leaves its result unknown.
+    """
+    text=re.sub(r'\s+',' ',str(value).strip().replace('–','-').replace('−','-'))
+    if not text:return False
+    if re.search(r'(?i)\b(?:wins?\s*[/|]\s*draw|draw\s*[/|]\s*loss|win\s*[/|]\s*loss|database|variation|percentage|statistics)\b',text):
+        return False
+    if re.fullmatch(r'(?i)(?:1\s*-\s*0|0\s*-\s*1|1\s*/\s*2\s*-\s*1\s*/\s*2|½\s*-\s*½|draw|drawn|stalemate|checkmate|you\s+(?:won|lost)|white\s+won|black\s+won|game\s+(?:over|ended|drawn|aborted|abandoned))\s*[!.]?',text):
+        return True
+    if len(text.split())>9:return False
+    return bool(re.fullmatch(
+        r'(?i)(?:(?:you|white|black|[A-Za-z0-9_]{3,24})\s+)?'
+        r'(?:won|lost|wins|resigned|abandoned|timeout|timed out|checkmate|stalemate|drawn|draw)'
+        r'(?:\s+(?:by|on|via|due to)\s+(?:checkmate|resignation|timeout|time|repetition|agreement|stalemate|insufficient material))?'
+        r'[!.]?',text))
+
+
+def _result_line_is_reason(value):
+    """An auxiliary overlay caption, useful only with a winner/result line."""
+    return bool(re.fullmatch(
+        r'(?i)\s*(?:by\s+)?(?:resignation|resigned|checkmate|stalemate|timeout|time\s+out|repetition|agreement|insufficient\s+material)\s*[!.]?\s*',
+        str(value)))
+
+
 def parse_end_message(lines, player_color=None, names=None):
     """Only strong end-message vocabulary can terminate a game, never arbitrary digits."""
     strong=[(re.sub(r'\b(You|White|Black|Game)(Won|Lost|Aborted|Abandoned)\b',r'\1 \2',str(text).strip().replace('–','-').replace('−','-'),flags=re.I),score) for text,score,*_ in lines if score >= .80]
-    strong=[(text,score) for text,score in strong if re.search(r'\b(won|wins|lost|draw|drawn|stalemate|checkmate|abandoned|resigned|resignation|timeout|time out|game over|game ended|aborted)\b',text,re.I) or re.fullmatch(r'\s*(?:1\s*-\s*0|0\s*-\s*1|1/2\s*-\s*1/2|½\s*-\s*½)\s*',text)]
+    main=[(text,score) for text,score in strong if _result_line_is_an_announcement(text)]
+    if not main:
+        # Some chess sites only display "by resignation" on the result
+        # overlay. Preserve this strong end condition, but never infer who
+        # won from the fragment by itself. Geometric filtering in scan()
+        # still requires the caption to be over the captured chessboard.
+        if len(strong)==1 and re.fullmatch(r'(?i)\s*by\s+resignation\s*[!.]?\s*',strong[0][0]):
+            return EndMessage('*','resignation',strong[0][0],strong[0][1],
+                              'winner color unknown; edit result in library')
+        return None
+    # Real chess sites often split "Martinfoot Won" / "by resignation"
+    # into two OCR rectangles. A reason-only caption cannot end a game.
+    reasons=[(text,score) for text,score in strong if _result_line_is_reason(text)]
+    strong=main+reasons
     good=[text for text,score in strong]
     text=" | ".join(good)
     normalized=re.sub(r"\s+"," ",text.lower().replace('½','1/2').replace('–','-').replace('−','-'))
@@ -62,6 +102,7 @@ class LocalTextReader:
     """
     def __init__(self):
         import onnxruntime as ort
+        ort.disable_telemetry_events()
         root=Path(__file__).parent/'assets/models'
         options=ort.SessionOptions();options.intra_op_num_threads=2;options.inter_op_num_threads=1
         detector=verify_bundled_model(root/'result-text-det.onnx',root)
@@ -105,7 +146,7 @@ class EndMessageDetector:
         self.reader=reader;self.clock=clock;self.last_scan=-100.;self.pending=None;self.pending_since=None
         self.last_lines=[];self._pixels=None
 
-    def scan(self,image,player_color=None,board_rect=None,names=None):
+    def scan(self,image,player_color=None,board_rect=None,names=None,orientation=None):
         now=self.clock()
         if now-self.last_scan<1:return None
         self.last_scan=now
@@ -125,11 +166,46 @@ class EndMessageDetector:
                         if len(line)<3:self.last_lines.append(line);continue
                         text,score,(a,b,c,d)=line
                         self.last_lines.append((text,score,(a+x0,b+y0,c+x0,d+y0)))
+            # Player names sit on narrow strips directly above or below the
+            # board, often at the opposite end of the clock. Read those strips
+            # at native resolution when whole-frame OCR missed a player. The
+            # result-message reader's board-only retry does not cover them.
+            if board_rect and orientation in ('white','black'):
+                found=extract_context(self.last_lines,board_rect,orientation).get('names',{})
+                bands=player_info_bands(image.shape,board_rect)
+                for side,color in (('top','black' if orientation=='white' else 'white'),
+                                   ('bottom',orientation)):
+                    if color in found:continue
+                    x0,y0,x1,y1=bands[side]
+                    if x1-x0<80 or y1-y0<18:continue
+                    for line in self.reader.read(image[y0:y1,x0:x1]):
+                        if len(line)<3:continue
+                        text,score,(a,b,c,d)=line
+                        absolute=(a+x0,b+y0,c+x0,d+y0)
+                        # Avoid duplicating a line from the whole-frame pass.
+                        if any(old[0]==text and len(old)>2
+                               and max(abs(old[2][i]-absolute[i]) for i in range(4))<12
+                               for old in self.last_lines):
+                            continue
+                        self.last_lines.append((text,score,absolute))
         relevant=self.last_lines
         if board_rect:
             x,y,w,h=board_rect
             relevant=[line for line in relevant if len(line)<3 or (x-w*.15<=(line[2][0]+line[2][2])/2<=x+w*1.45 and y-h*.05<=(line[2][1]+line[2][3])/2<=y+h*1.05)]
-        message=parse_end_message(relevant,player_color,names)
+        # Only a result visibly overlaid on the board can terminate the
+        # current game. A browser sidebar, title, chess analysis tab, or
+        # other unrelated window may say "Draw" while the clock still runs.
+        if board_rect:
+            x,y,w,h=board_rect
+            result_lines=[
+                line for line in relevant if len(line)>=3
+                and (_result_line_is_an_announcement(line[0]) or _result_line_is_reason(line[0]))
+                and (x-w*.08 <= (line[2][0]+line[2][2])/2 <= x+w*1.08)
+                and (y-h*.08 <= (line[2][1]+line[2][3])/2 <= y+h*1.08)
+            ]
+        else:
+            result_lines=[]  # Without a grounded board, don't end a PGN.
+        message=parse_end_message(result_lines,player_color,names)
         key=(message.result,message.reason,message.color_basis) if message else None
         if key is None:self.pending=None;self.pending_since=None;return None
         if key!=self.pending:
@@ -142,6 +218,24 @@ class EndMessageDetector:
 
     def invalidate_layout(self):
         self.reset();self._pixels=None;self.last_lines=[];self.last_scan=-100.
+
+
+def player_info_bands(image_shape, board_rect):
+    """Narrow native-resolution OCR regions above/below the detected board.
+
+    Avoid a whole-video OCR resize, which shrinks clock-adjacent usernames.
+    Each rectangle is (x0, y0, x1, y1) in the context image coordinates.
+    No pixels inside the playable board are required for the name search.
+    """
+    height,width=image_shape[:2]
+    bx,by,bw,bh=map(int,board_rect)
+    x0=max(0,bx-round(bw*.12))
+    x1=min(width,bx+bw+round(bw*.12))
+    margin=max(24,round(bh*.22))
+    overlap=round(bh*.025)
+    top=(x0,max(0,by-margin),x1,min(height,by+overlap))
+    bottom=(x0,max(0,by+bh-overlap),x1,min(height,by+bh+margin))
+    return {"top":top,"bottom":bottom}
 
 
 def clock_seconds(text):
@@ -190,10 +284,38 @@ def extract_context(lines,board_rect,orientation):
         for side,text,r,score in candidates:
             if side!=color:continue
             if not clock and (score<.9 or not bx-bw*.1<=(r[0]+r[2])/2<=bx+bw*1.1):continue
+            rated=bool(re.search(r'(?:\(\d{2,4}\)|\s\d{2,4})\s*$',text))
             clean=re.sub(r'^(GM|IM|FM|NM|CM|WGM|WIM)\s+','',text.strip().rstrip(' :;|•'))
             clean=re.sub(r'\s*(?:\(\d{2,4}\)|\s\d{2,4})\s*$','',clean)
-            if not clock and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
-            if clean.lower() in excluded or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean):continue
+            rated_identity=rated and bool(re.fullmatch(r'[\w.-]{2,40}',clean))
+            # Overlay controls, URLs, and app labels are *not* player IDs.
+            # False names here corrupt lifecycle identity and may split a real
+            # game despite a perfectly legal board continuation.
+            folded=re.sub(r'\s+',' ',clean.casefold()).strip()
+            if ((not rated_identity and folded in {'flip','copy fen','copy pgn','youtube chess recording',
+                           'download','share','next','previous','play','pause',
+                           'game in progress','chessstream','copy','settings','board',
+                           'captured board','reconstructed board','moves','clock'})
+                    or re.search(r'(?i)(?:https?://|www\.|youtube\.com|\.pgn$|\.exe$)',folded)
+                    or folded.startswith(('copy fen ', 'youtube chess recording ', 'flip board '))):
+                continue
+            # Reject overlay metadata even when OCR finds a nearby clock.
+            if (re.fullmatch(r'(?i)v(?:ersion)?\s*\d+(?:\.\d+){1,4}', clean)
+                    or (not rated_identity and re.search(r'(?i)\b(chess\s+speedrun|speedrun|live\s+stream|streaming|subscribe|playlist|tournament\s+coverage)\b', clean))):
+                continue
+
+            if not clock and not rated_identity and re.search(r'\b(game|analyzing|analysis|review|speedrun|subscribe|watch|playlist|minutes|min)\b',clean,re.I):continue
+            # Stream headlines, browser tabs, visible PGN move lists and
+            # multiword prompts regularly appear near a captured board. A
+            # high OCR score cannot turn that surrounding prose into an ID.
+            if (len(clean.split())>3
+                    or (len(clean.split())>1 and not rated_identity
+                        and re.search(r'\b(?:file explorer|open alongside|work with|candidate slowkaru)\b',clean,re.I))
+                    or re.search(r'\b\d+\s*\.\s*(?:\.\s*\.)?\s*[a-hKQRBNOP][\w+#=-]*',clean,re.I)
+                    or (not clock and not rated_identity and len(clean)<3)):
+                continue
+            if ((not rated_identity and clean.lower() in excluded)
+                    or not re.fullmatch(r'[\w .-]{2,40}',clean) or not any(c.isalpha() for c in clean)):continue
             if any(word in clean.lower() for word in ['won','aborted','abandoned','minutes','new game','time control','name blurred','name hidden','username hidden','name censored','definitely not ']):continue
             x=(r[0]+r[2])/2;y=(r[1]+r[3])/2
             if bx<=cx<=bx+bw and not bx-bw*.1<=x<=bx+bw*1.1:continue

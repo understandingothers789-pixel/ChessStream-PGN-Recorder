@@ -1,0 +1,100 @@
+[Event "YouTube Chess Recording"]
+[Site "YouTube"]
+[Date "2026.10.26"]
+[Round "?"]
+[White "Goomba"]
+[Black "Bowser"]
+[Result "*"]
+
+{ Opening prefix inferred from a completed shortest legal search. Earlier frames were not recorded. Unseen repetitions cannot be established from a single position. }
+1. e4
+{ Inferred: shortest legal opening prefix; earlier frames were not recorded. }
+1... c5
+{ [%clk 0:09:54] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+2. Nf3
+{ [%clk 0:09:50] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+2... d6
+{ [%clk 0:09:50] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+3. c3
+{ [%clk 0:09:49] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+3... Nf6
+{ [%clk 0:09:44] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+4. d3
+{ [%clk 0:09:47] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+4... g6 5. Be2
+{ Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded. }
+5... Bg7
+{ [%clk 0:09:23] Inferred: matching playback sound supported a stable, unique legal move; audio is supporting evidence. }
+6. Nbd2
+{ [%clk 0:09:44] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+6... O-O
+{ [%clk 0:09:20] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+7. Nf1
+{ [%clk 0:09:40] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+7... Nc6
+{ [%clk 0:09:03] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+8. Ng3
+{ [%clk 0:09:33] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+8... e5
+{ [%clk 0:08:52] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+9. h4
+{ [%clk 0:09:30] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+9... d5
+{ [%clk 0:08:12] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+10. h5
+{ [%clk 0:09:24] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+10... Be6
+{ [%clk 0:07:50] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+11. hxg6
+{ [%clk 0:09:22] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+11... hxg6
+{ [%clk 0:07:40] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+12. Ng5
+{ [%clk 0:09:16] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+12... Qd7
+{ [%clk 0:07:37] Inferred: position unchanged for at least 0.5 seconds; best-effort legal order, not independently verified. }
+13. Nf3
+{ Inferred across capture gap: shortest legal continuation; intermediate frames were not recorded. }
+( 13. Nxe6 { Observed analysis variation; excluded from the played main line. }
+13... Qxe6 { Observed analysis variation; excluded from the played main line. }
+14. Bg5 { Observed analysis variation; excluded from the played main line. }
+14... Rfd8 { Observed analysis variation; excluded from the played main line. }
+15. Qd2 { Observed analysis variation; excluded from the played main line. }
+15... dxe4 { Observed analysis variation; excluded from the played main line. }
+16. Bxf6 Qxf6
+{ Observed analysis variation; inferred legal order across missing frames. }
+17. Nxe4 Qe7
+{ Observed analysis variation; inferred legal order across missing frames. }
+18. O-O-O { Observed analysis variation; excluded from the played main line. }
+18... b5 { Observed analysis variation; excluded from the played main line. }
+19. Qe3 { Observed analysis variation; excluded from the played main line. }
+19... Rac8 { Observed analysis variation; excluded from the played main line. }
+20. Qh3 { Observed analysis variation; excluded from the played main line. }
+20... b4 { Observed analysis variation; excluded from the played main line. }
+21. Rh2 { Observed analysis variation; excluded from the played main line. }
+21... f5 { Observed analysis variation; excluded from the played main line. }
+22. Nd2 { Observed analysis variation; excluded from the played main line. }
+22... bxc3 { Observed analysis variation; excluded from the played main line. }
+23. bxc3 { Observed analysis variation; excluded from the played main line. }
+23... Na5 { Observed analysis variation; excluded from the played main line. }
+24. Rdh1 c4
+{ Observed analysis variation; inferred legal order across missing frames. }
+25. Qh7+ Kf7
+{ Observed analysis variation; inferred legal order across missing frames. }
+26. Rh6 { Observed analysis variation; excluded from the played main line. }
+26... Rc6 { Observed analysis variation; excluded from the played main line. }
+27. Bf3 { Observed analysis variation; excluded from the played main line. }
+27... e4 { Observed analysis variation; excluded from the played main line. }
+28. dxe4 Qa3+
+{ Observed analysis variation; inferred legal order across missing frames. }
+29. Kd1 Qxc3
+{ Observed analysis variation; inferred legal order across missing frames. }
+30. Ke1 { Observed analysis variation; excluded from the played main line. }
+30... Qc1+ { Observed analysis variation; excluded from the played main line. }
+31. Ke2 Rxd2+
+{ Observed analysis variation; inferred legal order across missing frames. }
+32. Ke3 Rd1+
+{ Observed analysis variation; inferred legal order across missing frames. }
+33. Ke2 Qd2#
+{ Observed analysis variation; inferred legal order across missing frames. } )
+*

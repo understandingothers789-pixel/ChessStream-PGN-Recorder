@@ -10,15 +10,33 @@ from PySide6.QtWidgets import (QTreeWidget,QTreeWidgetItem,QTabWidget,QPlainText
 from .widgets import button,muted
 from .pgn_tools import node_at
 from .diagnostics import export_diagnostics
+from .notation_view import NotationView
+
+
+class ReviewMoveTree(QTreeWidget):
+    """Use horizontal arrows to step through the displayed move rows."""
+    def keyPressEvent(self,event):
+        if event.key() in (Qt.Key_Left,Qt.Key_Right) and event.modifiers()==Qt.NoModifier:
+            current=self.currentItem()
+            target=(self.itemAbove(current) if event.key()==Qt.Key_Left else self.itemBelow(current)) if current else self.topLevelItem(0)
+            if target is not None:
+                self.setCurrentItem(target,0)
+                self.scrollToItem(target)
+            event.accept();return
+        super().keyPressEvent(event)
 
 
 class ReviewTools:
     def make_review_tabs(self):
         tabs=QTabWidget()
-        self.review_tree=QTreeWidget();self.review_tree.setHeaderLabels(['Move / variation','Comment / clock']);self.review_tree.setIndentation(12)
+        self.review_tree=ReviewMoveTree(tabs);self.review_tree.setHeaderLabels(['Move / variation','Comment / clock']);self.review_tree.setIndentation(12)
+        self.review_tree.setToolTip('Left / Up: previous row. Right / Down: next row. Includes expanded variations.')
         self.review_tree.currentItemChanged.connect(self.review_selected_node)
+        self.library_notation=NotationView()
+        self.library_notation.move_selected.connect(lambda path:self.review_tree.setCurrentItem(self.review_items.get(tuple(path))))
         self.library_pgn=QPlainTextEdit();self.library_pgn.setReadOnly(True)
-        tabs.addTab(self.review_tree,'Moves & variations');tabs.addTab(self.library_pgn,'PGN text')
+        self.review_tree.hide()
+        tabs.addTab(self.library_notation,'Moves & variations');tabs.addTab(self.library_pgn,'PGN text')
         self.review_document=None;self.review_items={}
         return tabs
 
@@ -52,6 +70,7 @@ class ReviewTools:
     def review_selected_node(self,item,previous=None):
         if item is None or self.review_document is None:return
         path=item.data(0,Qt.UserRole);node=node_at(self.review_document,path)
+        self.library_notation.show_game(self.review_document,path)
         self.library_board.show_board(node.board().fen(),node.move.uci() if node.move else None)
         self.review_label.setText(f"{len(path)} plies"+(' • variation' if not node.is_mainline() else ''))
         if node.is_mainline():

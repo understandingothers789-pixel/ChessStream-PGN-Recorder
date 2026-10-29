@@ -37,3 +37,11 @@ Playwright, CairoSVG, pytest and PyInstaller are development dependencies and ar
 ## Offline result and context text recognition
 
 `result-text-det.onnx` and `result-text-rec.onnx` are PaddleOCR PP-OCRv4 models redistributed from the `rapidocr-onnxruntime==1.4.4` wheel (RapidAI / PaddleOCR contributors), Apache-2.0. Source: https://github.com/RapidAI/RapidOCR and https://github.com/PaddlePaddle/PaddleOCR. License: `chessstream/assets/licenses/Apache-2.0.txt`. The pinned source wheel and individual model hashes are in `chessstream/assets/models/result-text.json`; `scripts/fetch_result_models.py` reproduces the exact assets. The application uses its own small horizontal-text ONNX adapter and the existing ONNX Runtime/OpenCV dependencies. It does not require RapidOCR, Tesseract, external OCR programs, network services or subscriptions at runtime.
+
+## Optional Windows playback audio
+
+PyAudioWPatch 0.2.12.9 (MIT), a PyAudio fork with Windows WASAPI loopback support: https://github.com/s0d3s/PyAudioWPatch. Its Windows wheel includes PortAudio (MIT). Wheel license notices are retained in the portable runtime. No Chess.com or Lichess audio samples are bundled.
+
+## Opening frequency statistics
+
+The small bundled count table is derived from the November 2025 Lichess Elite Database by Nikonoel (https://database.nikonoel.fr/), a filtered collection of games from the Lichess open database (https://database.lichess.org/). Original Lichess database exports are CC0. Only aggregate opening counts and source provenance are bundled; no player names or complete games are distributed. The exact archive URL and SHA-256 are recorded in `chessstream/assets/opening-popularity.json`.

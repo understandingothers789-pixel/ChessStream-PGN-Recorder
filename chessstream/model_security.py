@@ -107,7 +107,7 @@ def import_custom_model(source: str | Path, trusted_root: Path) -> Path:
     digest = hashlib.sha256()
     total = 0
     try:
-        with source_path.open("rb") as incoming, os.fdopen(fd, "wb") as outgoing:
+        with os.fdopen(fd, "wb") as outgoing, source_path.open("rb") as incoming:
             while chunk := incoming.read(1024 * 1024):
                 total += len(chunk)
                 if total > MAX_CUSTOM_ONNX_BYTES:

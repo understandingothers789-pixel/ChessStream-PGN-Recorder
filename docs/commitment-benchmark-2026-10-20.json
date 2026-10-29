@@ -1,0 +1,48 @@
+{
+  "repeats": 3,
+  "scope": "Local legal search and SQLite metadata tracing; excludes OCR, capture, and real-video acceptance",
+  "results": {
+    "unique_two_plies": {
+      "mean_ms": 0.557,
+      "worst_ms": 0.728,
+      "nodes": 23,
+      "paths": 1,
+      "exhaustive": true,
+      "classification": "unique",
+      "stop_reason": ""
+    },
+    "ambiguous_four_knights": {
+      "mean_ms": 2.087,
+      "worst_ms": 2.182,
+      "nodes": 156,
+      "paths": 4,
+      "exhaustive": true,
+      "classification": "ambiguous",
+      "stop_reason": ""
+    },
+    "live_checkpoint_budget_75ms": {
+      "mean_ms": 17.173,
+      "worst_ms": 34.331,
+      "nodes": 428,
+      "paths": 0,
+      "exhaustive": true,
+      "classification": "unresolved",
+      "stop_reason": ""
+    },
+    "background_saved_gap_budget_5000ms": {
+      "mean_ms": 887.308,
+      "worst_ms": 890.034,
+      "nodes": 98380,
+      "paths": 29,
+      "exhaustive": true,
+      "classification": "ambiguous",
+      "stop_reason": ""
+    },
+    "fen_trace_64_comparisons": {
+      "mean_ms": 0.296,
+      "worst_ms": 0.504,
+      "retained_transitions": 16,
+      "metadata_bytes": 19526
+    }
+  }
+}

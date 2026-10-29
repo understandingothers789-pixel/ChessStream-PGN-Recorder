@@ -1,4 +1,5 @@
 """Retention, PGN independence and exploitable input boundaries."""
+from pathlib import Path
 import numpy as np
 import pytest
 from chessstream.domain import Settings,Observation,utcnow
@@ -46,6 +47,38 @@ def test_models_and_image_decoding_keep_integrity_path_and_resource_boundaries(t
     with pytest.raises(ValueError):validate_bgr_image(np.zeros((80,80),np.uint8))
     huge=np.lib.stride_tricks.as_strided(np.zeros((1,1,3),np.uint8),shape=(8193,8193,3),strides=(0,0,1),writeable=False)
     with pytest.raises(ValueError):validate_bgr_image(huge)
+
+
+def test_model_import_closes_temporary_file_if_source_disappears(tmp_path,monkeypatch):
+    import chessstream.model_security as security
+    source=tmp_path/'disappeared.onnx';opened=[]
+    monkeypatch.setattr(security,'validate_custom_model',lambda _:source)
+    original=security.os.fdopen
+    def track(*args,**kwargs):
+        stream=original(*args,**kwargs);opened.append(stream);return stream
+    monkeypatch.setattr(security.os,'fdopen',track)
+    destination=tmp_path/'models'
+    with pytest.raises(FileNotFoundError):security.import_custom_model(source,destination)
+    assert opened and all(stream.closed for stream in opened)
+    assert not list(destination.iterdir())
+
+
+def test_bundled_inference_disables_telemetry_and_needs_no_python_network_calls(monkeypatch):
+    import socket
+    from unittest.mock import Mock
+    import cv2
+    import onnxruntime as ort
+    from chessstream.vision import ScreenshotRecognizer
+    from chessstream.results import LocalTextReader
+    disabled=Mock(wraps=ort.disable_telemetry_events)
+    monkeypatch.setattr(ort,'disable_telemetry_events',disabled)
+    def unexpected(*_args,**_kwargs):raise AssertionError('Inference attempted a Python network connection/service')
+    for method in ('connect','connect_ex','bind','listen'):monkeypatch.setattr(socket.socket,method,unexpected)
+    image=cv2.imread(str(Path(__file__).parent/'fixtures/results/native-bot-start.png'))
+    assert LocalTextReader().read(image)
+    board=cv2.imread(str(Path(__file__).parent/'fixtures/real/chesscom-ruy-000.png'))
+    assert ScreenshotRecognizer().recognize(board).placement()==chess.Board().board_fen()
+    assert disabled.call_count==2
 
 
 def test_selected_screenshot_ids_delete_only_images_and_keep_pgn(tmp_path):

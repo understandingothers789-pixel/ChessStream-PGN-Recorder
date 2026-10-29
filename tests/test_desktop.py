@@ -67,7 +67,7 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     actions=[]
     with monkeypatch.context() as action_patch:
         action_patch.setattr(window.manager,'repair_current',lambda:actions.append('repair'))
-        action_patch.setattr(window.manager,'join_previous_recording',lambda:actions.append('join'))
+        action_patch.setattr(window.manager,'join_previous_recording',lambda **kwargs:actions.append('join'))
         window.repair_pgn_button.click();window.join_previous_button.click()
     assert actions==['repair','join']
     from PySide6.QtWidgets import QPushButton
@@ -92,7 +92,8 @@ def test_desktop_autoselection_provisional_board_and_library_actions(tmp_path,mo
     assert '1. e4' not in window.store.game(window.manager.current_id)['pgn']
     window.manager.force_new();window.navigate(1);window.game_table.selectAll()
     actions={action.text():action for action in window.game_row_menu().actions()}
-    assert 'Delete saved PGN file(s)…' in actions
+    assert 'Remove saved .pgn copies…' in actions
+    assert 'Delete game(s) from library…' in actions
     assert actions['Join selected recordings…'].isEnabled()
     # Older saved PGNs can be combined during capture without recovering the
     # combined record into the manager that the capture worker is using.
@@ -177,4 +178,62 @@ def test_live_move_click_pins_history_until_return_to_live_or_game_change(tmp_pa
                       'moves':['e5','Nf3'],'orientation':'black','status':'Recording'})
     window.move_table.itemClicked.emit(window.move_table.item(0,2))
     assert window.live_board.fen==black.fen()
+    window.close();window.deleteLater();app.processEvents()
+
+
+def test_library_deletion_shows_difference_between_pgn_copy_and_game_record(tmp_path,monkeypatch):
+    """The old UI appeared not to delete anything because game rows remained."""
+    from PySide6.QtWidgets import QApplication,QMessageBox
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui,'windows',lambda:[])
+    monkeypatch.setattr(gui.MainWindow,'start_preview',lambda self:None)
+    win=gui.MainWindow(tmp_path)
+    win.manager.process(Observation.from_board(chess.Board()))
+    win.manager.finish()
+    gid=win.manager.current_id
+    assert gid and win.store.game(gid)
+    saved=win.store.root/'pgn'/(gid+'.pgn')
+    assert saved.is_file()
+    win.refresh_library()
+    i=next(i for i,game in enumerate(win.game_rows) if game['id']==gid)
+    assert win.game_table.item(i,6).text()=='Yes'
+    monkeypatch.setattr(gui.QMessageBox,'warning',lambda *args,**kwargs:QMessageBox.Yes)
+    monkeypatch.setattr(win,'selected_games',lambda:[win.store.game(gid)])
+    win.delete_saved_pgns()
+    assert not saved.exists() and win.store.game(gid)
+    i=next(i for i,game in enumerate(win.game_rows) if game['id']==gid)
+    assert win.game_table.item(i,6).text()=='No'
+    win.delete_games()
+    assert win.store.game(gid) is None and all(g['id']!=gid for g in win.game_rows)
+    win.close();win.deleteLater();app.processEvents()
+
+
+def test_clicking_last_move_and_follow_control_resume_live_updates(tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    import chessstream.gui as gui
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui,'windows',lambda:[])
+    window=gui.MainWindow(tmp_path)
+    board=chess.Board()
+    for san in ('e4','e5','Nf3'):board.push_san(san)
+    snap={'game_id':'live','initial_fen':chess.STARTING_FEN,'fen':board.fen(),
+          'moves':['e4','e5','Nf3'],'orientation':'white','status':'Recording'}
+    window.on_update(snap)
+    window.review_live_move(window.move_table.item(0,1))
+    assert window._live_review and not window.follow_live_button.isChecked()
+    window.review_live_move(window.move_table.item(1,1))
+    assert window._live_review is None and window.follow_live_button.isChecked()
+    board.push_san('Nc6');snap={**snap,'fen':board.fen(),'moves':snap['moves']+['Nc6']}
+    window.on_update(snap);assert window.live_board.fen==board.fen()
+    window.review_live_move(window.move_table.item(0,1));window.follow_live_button.click()
+    assert window._live_review is None and window.live_board.fen==board.fen()
+    window.review_live_move(window.move_table.item(1,1));window.navigate_live_move(1)
+    assert window._live_review is None
+    window.navigate_live_move(-1);assert window._live_review['ply']==3
+    window.navigate_live_move(1);assert window._live_review is None
+    preview=board.copy();preview.push_san('Bb5')
+    window.on_update({**snap,'provisional':True,'pending_moves':['Bb5'],'preview_fen':preview.fen()})
+    window.navigate_live_move(-1);assert window._live_review['ply']==3
+    window.navigate_live_move(1);assert window._live_review is None
     window.close();window.deleteLater();app.processEvents()

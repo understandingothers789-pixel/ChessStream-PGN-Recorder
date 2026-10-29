@@ -1,0 +1,646 @@
+{
+  "version": "1.6.24.dev3",
+  "checked": "2026-10-23",
+  "base_commit": "1e8cc441e46e9c899690be975e0f300dce03fdd6",
+  "tests": {
+    "passed": 229,
+    "local_seconds": 9.14,
+    "platform": "Linux, offscreen Qt; Windows CI separate"
+  },
+  "recognition": {
+    "images": 120,
+    "square_labels_compared": 7680,
+    "identical_piece_labels": true,
+    "max_absolute_probability_difference": 0.0,
+    "tolerance": {
+      "rtol": 0.0001,
+      "atol": 1e-05
+    },
+    "identical_ocr_context_and_results": true,
+    "ocr_cases": 4,
+    "opencv": "4.12.0"
+  },
+  "image_sequences": {
+    "recording_policy": "Conservative opponent-response confirmation; evaluator explicitly confirms each final pending ply once. Automatic move accuracy excludes those manual final confirmations.",
+    "environment": {
+      "os": "Linux-6.18.55-x86_64-with-glibc2.41",
+      "python": "3.12.14",
+      "cpu_count": 3,
+      "execution": "Linux cloud CPU, sequential image replay; not a Windows/YouTube live benchmark"
+    },
+    "dataset": {
+      "source": "Playwright screenshots of actual public analysis UI, not a custom renderer",
+      "captured_at": "2026-10-18T16:14:06.878987+00:00",
+      "frames": 64,
+      "games": 4,
+      "evaluated_frames_excluding_calibration": 64,
+      "scope": "Three complete short/classic Lichess games and one 16-ply Chess.com opening; all 64 PNG frames evaluated without calibration. Additional textured theme captures are evaluated separately in recognition-v1.2.json. Not a YouTube benchmark."
+    },
+    "metrics": {
+      "square_accuracy": 1.0,
+      "evaluated_squares": 4096,
+      "exact_position_accuracy": 1.0,
+      "verified_move_accuracy": 1.0,
+      "complete_sequence_accuracy": 1.0,
+      "sequence_intervention_rate": 1.0,
+      "localization_found_rate": 1.0,
+      "one_time_setup_calibrations": 0,
+      "sequences_requiring_any_manual_confirmation_rate": 1.0,
+      "localization_followed_by_correct_recognition_rate": 1.0,
+      "wall_seconds": 3.4748883190004562,
+      "process_cpu_seconds": 6.07,
+      "mean_process_cpu_percent_of_one_core": 174.6818729917059,
+      "resident_memory_mb_at_end": 146.265625,
+      "gpu_utilization": "not measured; CPU inference only"
+    },
+    "games": [
+      {
+        "id": "lichess-fools",
+        "calibration": "none",
+        "frames": 5,
+        "square_errors": 0,
+        "exact_positions": 5,
+        "verified_plies": 4,
+        "expected_plies": 4,
+        "automatic_verified_plies": 3,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 16.188380800122104,
+        "p95_processing_ms": 17.233324600601918
+      },
+      {
+        "id": "lichess-scholar",
+        "calibration": "none",
+        "frames": 8,
+        "square_errors": 0,
+        "exact_positions": 8,
+        "verified_plies": 7,
+        "expected_plies": 7,
+        "automatic_verified_plies": 6,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 16.097441124884426,
+        "p95_processing_ms": 17.768695200038565
+      },
+      {
+        "id": "lichess-opera",
+        "calibration": "none",
+        "frames": 34,
+        "square_errors": 0,
+        "exact_positions": 34,
+        "verified_plies": 33,
+        "expected_plies": 33,
+        "automatic_verified_plies": 32,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 17.41359623528136,
+        "p95_processing_ms": 19.425787150157703
+      },
+      {
+        "id": "chesscom-ruy",
+        "calibration": "none",
+        "frames": 17,
+        "square_errors": 0,
+        "exact_positions": 17,
+        "verified_plies": 16,
+        "expected_plies": 16,
+        "automatic_verified_plies": 15,
+        "final_confirmation_required": true,
+        "complete_sequence_correct": true,
+        "pgn_roundtrip_correct": true,
+        "two_ply_gap_sequence_correct": true,
+        "mean_processing_ms": 16.693316705801834,
+        "p95_processing_ms": 21.057763000135306
+      }
+    ],
+    "board_detection": [
+      {
+        "file": "lichess-fools-page.png",
+        "found": true,
+        "rect": [
+          354,
+          65,
+          712,
+          712
+        ],
+        "checker_score": 0.9500551065998357,
+        "ms": 212.9950540002028,
+        "correct_position_after_crop": true
+      },
+      {
+        "file": "lichess-scholar-page.png",
+        "found": true,
+        "rect": [
+          354,
+          65,
+          712,
+          712
+        ],
+        "checker_score": 0.9500551065998357,
+        "ms": 200.9754939999766,
+        "correct_position_after_crop": true
+      },
+      {
+        "file": "lichess-opera-page.png",
+        "found": true,
+        "rect": [
+          354,
+          65,
+          712,
+          712
+        ],
+        "checker_score": 0.9500551065998357,
+        "ms": 226.75026600063575,
+        "correct_position_after_crop": true
+      },
+      {
+        "file": "chesscom-ruy-page.png",
+        "found": true,
+        "rect": [
+          225,
+          66,
+          824,
+          824
+        ],
+        "checker_score": 0.9238468333742982,
+        "ms": 277.81931800018356,
+        "correct_position_after_crop": true
+      }
+    ],
+    "limitations": [
+      "Small controlled suite; these values are not general stream accuracy claims.",
+      "The 16-ply Chess.com opening is a complete captured sequence, not a completed game.",
+      "PNG browser captures do not represent video compression, occlusion and animations in YouTube.",
+      "UI, desktop capture overhead and Windows GPU/CPU behavior are excluded from this benchmark."
+    ]
+  },
+  "continuity": {
+    "version": "1.6.4",
+    "environment": {
+      "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+      "python": "3.12.14",
+      "execution": "Linux cloud CPU; local images, excluding desktop capture and GUI"
+    },
+    "baseline": "Identical bundled model and legal search, with the new continuity retry disabled.",
+    "browser_captures": {
+      "unique_images_including_held_drags": 119,
+      "positions_evaluated": 116,
+      "square_classifications_evaluated": 7424,
+      "raw_model_square_errors_before": 0,
+      "raw_model_square_errors_after": 0,
+      "sequences": [
+        {
+          "id": "lichess-fools",
+          "expected_plies": 4,
+          "baseline_verified_plies": 3,
+          "updated_verified_plies": 3,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "lichess-scholar",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "lichess-opera",
+          "expected_plies": 33,
+          "baseline_verified_plies": 32,
+          "updated_verified_plies": 32,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ruy",
+          "expected_plies": 16,
+          "baseline_verified_plies": 15,
+          "updated_verified_plies": 15,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chess7",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "merida",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "maestro",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "tatiana",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean",
+          "expected_plies": 7,
+          "baseline_verified_plies": 6,
+          "updated_verified_plies": 6,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean-burled.png",
+          "expected_plies": 5,
+          "baseline_verified_plies": 4,
+          "updated_verified_plies": 4,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean-arrows.png",
+          "expected_plies": 5,
+          "baseline_verified_plies": 4,
+          "updated_verified_plies": 4,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "chesscom-ocean-cursor.png",
+          "expected_plies": 5,
+          "baseline_verified_plies": 4,
+          "updated_verified_plies": 4,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "italian",
+          "expected_plies": 4,
+          "baseline_verified_plies": 3,
+          "updated_verified_plies": 3,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        },
+        {
+          "id": "bishop-drag",
+          "expected_plies": 2,
+          "baseline_verified_plies": 1,
+          "updated_verified_plies": 1,
+          "baseline_every_verified_prefix_correct": true,
+          "updated_every_verified_prefix_correct": true,
+          "baseline_final_candidate_matches": true,
+          "updated_final_candidate_matches": true
+        }
+      ]
+    },
+    "controlled_classifier_faults": {
+      "method": "Synthetic score faults, not newly captured visual errors: wrong label 0.82, existing legal label 0.16, others share 0.02.",
+      "cases": [
+        {
+          "case": "missing queen",
+          "expected": [
+            "e2e4"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        },
+        {
+          "case": "queen mistaken for knight",
+          "expected": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        },
+        {
+          "case": "queen color flip",
+          "expected": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4",
+            "e7e5"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        },
+        {
+          "case": "phantom extra knight",
+          "expected": [
+            "e2e4"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "h3"
+          ]
+        },
+        {
+          "case": "capture without queen sacrifice detour",
+          "expected": [
+            "e2e4",
+            "d7d5",
+            "e4d5"
+          ],
+          "baseline": [],
+          "updated": [
+            "e2e4",
+            "d7d5",
+            "e4d5"
+          ],
+          "baseline_correct": false,
+          "updated_correct": true,
+          "uncertain_squares": [
+            "d1"
+          ]
+        }
+      ],
+      "baseline_correct": 0,
+      "updated_correct": 5
+    },
+    "performance": {
+      "model_mean_ms": 11.579997554614208,
+      "baseline_reconstruction_mean_ms": 0.7444606899010563,
+      "updated_reconstruction_mean_ms": 0.6463558860605765,
+      "updated_reconstruction_p95_ms": 0.9250645497559163,
+      "wall_seconds": 3.0787479939999685,
+      "process_cpu_seconds": 6.130000000000001,
+      "resident_memory_mb": 114.08203125
+    },
+    "limitations": [
+      "The model weights and raw classifier accuracy did not change. These captures already have zero raw square errors; this establishes regression coverage, not an improvement percentage on real videos.",
+      "Fault-injection recovery counts describe only the specified controlled score errors.",
+      "The retry carries at most two uncertain unchanged squares, checks at most two new plies and is bounded by 50 ms and 8000 nodes.",
+      "Strong contradictions, heavy overlays, uncertain move endpoints and unseen themes may still require more evidence or manual correction.",
+      "The initial FEN is known in this reconstruction comparison. Initial detection/recognition remains covered separately by desktop tests.",
+      "Timing and memory are Linux process measurements; Windows/YouTube hardware behavior requires live acceptance."
+    ]
+  },
+  "randomized_search": {
+    "seed": 20261023,
+    "cases": 60,
+    "plies_per_gap": "1-3",
+    "distinct_shortest_routes_checked": 74,
+    "same_complete_paths": true,
+    "reference": "ed253d6"
+  },
+  "durability": {
+    "forced_process_exit": "committed PGN and board restored",
+    "sqlite_integrity_check": "ok",
+    "diagnostic_zip_valid": true,
+    "diagnostic_pixels_or_database_included": false,
+    "screenshot_files_saved": 0
+  },
+  "inference_timing": {
+    "scope": "Interleaved warmed local CPU inference; two runs of 60 board and six OCR samples per runtime; no desktop capture or video",
+    "results": {
+      "previous": {
+        "model_median_ms": 6.935,
+        "ocr_median_ms": 429.685
+      },
+      "updated": {
+        "model_median_ms": 7.15,
+        "ocr_median_ms": 378.433
+      }
+    }
+  },
+  "runtime_advisory_scan": {
+    "dependencies": [
+      {
+        "name": "chess",
+        "version": "1.11.2",
+        "vulns": []
+      },
+      {
+        "name": "flatbuffers",
+        "version": "25.12.19",
+        "vulns": []
+      },
+      {
+        "name": "mpmath",
+        "version": "1.3.0",
+        "vulns": []
+      },
+      {
+        "name": "mss",
+        "version": "10.0.0",
+        "vulns": []
+      },
+      {
+        "name": "numpy",
+        "version": "2.2.6",
+        "vulns": []
+      },
+      {
+        "name": "onnxruntime",
+        "version": "1.24.4",
+        "vulns": []
+      },
+      {
+        "name": "opencv-python-headless",
+        "version": "4.12.0.88",
+        "vulns": []
+      },
+      {
+        "name": "packaging",
+        "version": "26.3",
+        "vulns": []
+      },
+      {
+        "name": "pillow",
+        "version": "13.0.0",
+        "vulns": []
+      },
+      {
+        "name": "platformdirs",
+        "version": "4.3.7",
+        "vulns": []
+      },
+      {
+        "name": "protobuf",
+        "version": "7.36.2",
+        "vulns": []
+      },
+      {
+        "name": "psutil",
+        "version": "7.0.0",
+        "vulns": []
+      },
+      {
+        "name": "pyside6-essentials",
+        "version": "6.12.0",
+        "vulns": []
+      },
+      {
+        "name": "shiboken6",
+        "version": "6.12.0",
+        "vulns": []
+      },
+      {
+        "name": "sympy",
+        "version": "1.14.0",
+        "vulns": []
+      }
+    ],
+    "fixes": []
+  },
+  "cve_records": {
+    "CVE-2024-0917": {
+      "state": "PUBLISHED",
+      "affected": [
+        {
+          "vendor": "paddlepaddle",
+          "product": "paddlepaddle/paddle",
+          "versions": [
+            {
+              "version": "unspecified",
+              "status": "affected",
+              "versionType": "custom",
+              "lessThanOrEqual": "latest"
+            }
+          ]
+        }
+      ],
+      "descriptions": [
+        {
+          "lang": "en",
+          "value": "remote code execution in paddlepaddle/paddle 2.6.0"
+        }
+      ]
+    },
+    "CVE-2026-108961": {
+      "state": "PUBLISHED",
+      "affected": [
+        {
+          "vendor": "PaddlePaddle",
+          "product": "PaddleX",
+          "versions": [
+            {
+              "version": "3.7.0",
+              "status": "affected"
+            },
+            {
+              "version": "3.7.1",
+              "status": "affected"
+            },
+            {
+              "version": "3.7.2",
+              "status": "affected"
+            }
+          ],
+          "cpes": [
+            "cpe:2.3:a:paddlepaddle:paddlex:*:*:*:*:*:*:*:*"
+          ],
+          "modules": [
+            "Preprocessor"
+          ]
+        }
+      ],
+      "descriptions": [
+        {
+          "lang": "en",
+          "value": "A flaw has been found in PaddlePaddle PaddleX up to 3.7.2. Affected by this vulnerability is the function NormalizeImage.__init__ of the file paddlex/inference/models/text_detection/processors.py of the component Preprocessor. This manipulation of the argument scale causes code injection. It is possible to initiate the attack remotely. The pull request to fix this issue awaits acceptance."
+        }
+      ]
+    }
+  },
+  "dependency_updates": {
+    "opencv-python-headless": {
+      "before": "4.11.0.86",
+      "after": "4.12.0.88"
+    },
+    "onnxruntime": {
+      "before": "1.23.2",
+      "after": "1.24.4"
+    },
+    "PySide6-Essentials": {
+      "before": "6.8.3",
+      "after": "6.12.0"
+    },
+    "shiboken6": {
+      "before": "6.8.3",
+      "after": "6.12.0"
+    }
+  },
+  "security_review": {
+    "pre_update_scanner_packages": 17,
+    "post_update_scanner_packages": 15,
+    "native_vendor_review_required_despite_clean_scanner": true,
+    "sources": [
+      "https://securitylab.github.com/advisories/GHSL-2025-057_OpenCV/",
+      "https://github.com/microsoft/onnxruntime/pull/26776",
+      "https://wiki.qt.io/List_of_known_vulnerabilities_in_Qt_products",
+      "https://www.qt.io/blog/security-advisory-cve-2026-101201"
+    ],
+    "untrusted_exploit_payloads_run": false
+  }
+}

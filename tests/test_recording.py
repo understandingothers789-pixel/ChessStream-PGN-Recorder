@@ -1,12 +1,14 @@
 """Essential recording, gap, ambiguity, result and PGN export regressions."""
 import io
+import json
+import pytest
 import chess
 import chess.pgn
 from chessstream.domain import Settings,Observation
 from chessstream.storage import Store
 from chessstream.games import GameManager,export_pgn
 from chessstream.reconstruction import LegalSearcher
-from chessstream.gap_join import join_recordings
+from chessstream.gap_join import join_recordings,AmbiguousGapError
 from chessstream.capture import should_save_screenshot
 
 PREFIX='e4 e6 d4 d5 e5 c5 Bb5+ Bd7 a4 cxd4'
@@ -66,15 +68,17 @@ def test_live_fen_checkpoint_reconnects_to_preserved_game_after_window_transitio
     manager._start_from_visible(checkpoint,'simulated fullscreen board reacquisition')
     checkpoint_id=manager.current_id
     assert checkpoint_id!=original_id
+    sources={gid:store.game(gid)['pgn'] for gid in (original_id,checkpoint_id)}
     # Window/layout changes can make OCR briefly report a clock jump. A legal
     # midgame continuation should still reconnect to the preserved PGN.
     manager.clocks_recently_reset=lambda:True
     board.push_san('Ba4');board.push_san('Nf6')
     assert manager._resume_latest_game_at_position(Observation.from_board(board))
-    assert manager.current_id==original_id
+    assert manager.current_id not in sources
     assert manager.rec.verified[-2:]==['b5a4','g8f6']
     assert manager.store.game(checkpoint_id)['status'].startswith('reconnected • see ')
-    assert chess.pgn.read_game(io.StringIO(manager.store.game(original_id)['pgn'])).end().board().board_fen()==board.board_fen()
+    assert chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn'])).end().board().board_fen()==board.board_fen()
+    assert all(store.game(gid)['pgn']==pgn for gid,pgn in sources.items())
     store.close()
 
 
@@ -85,18 +89,20 @@ def test_live_fen_checkpoint_is_joined_into_main_pgn_and_becomes_active(tmp_path
     checkpoint=Observation.from_board(board)
     manager._start_from_visible(checkpoint,'simulated fullscreen reacquisition')
     checkpoint_id=manager.current_id
+    sources={gid:store.game(gid)['pgn'] for gid in (original_id,checkpoint_id)}
     for san in 'O-O Be7'.split():
         board.push_san(san);manager.process(Observation.from_board(board))
     board.push_san('Re1')
     assert manager._resume_latest_game_at_position(Observation.from_board(board))
-    assert manager.current_id==original_id
-    combined=chess.pgn.read_game(io.StringIO(store.game(original_id)['pgn']))
+    assert manager.current_id not in sources
+    combined=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
     assert not combined.errors
     assert [node.san() for node in combined.mainline()]==[
         'e4','e5','Nf3','Nc6','Bb5','a6','Ba4','Nf6','O-O','Be7','Re1']
     assert combined.end().board().board_fen()==board.board_fen()
-    assert 'Earlier moves are not included' not in store.game(original_id)['pgn']
-    assert 'saved moves remain unchanged' not in store.game(original_id)['pgn']
+    assert 'Earlier moves are not included' not in store.game(manager.current_id)['pgn']
+    assert 'saved moves remain unchanged' not in store.game(manager.current_id)['pgn']
+    assert all(store.game(gid)['pgn']==pgn for gid,pgn in sources.items())
     assert store.game(checkpoint_id)['status'].startswith('reconnected • see ')
     assert 'latest PGN' in manager.last_message or 'Joined the saved PGNs' in manager.last_message
     store.close()
@@ -115,22 +121,23 @@ def test_screenshot_images_are_opt_in_but_memory_capture_is_unaffected():
     assert should_save_screenshot(settings,False,True,True,obs,2)
 
 
-def test_resumed_equal_shortest_lines_choose_one_deterministically(tmp_path):
+def test_resumed_equal_shortest_lines_are_preserved_not_arbitrarily_selected(tmp_path):
     store=Store(tmp_path);first,board=record(store,Settings(),'');first.finish()
     for san in 'Nf3 Nf6 Nc3 Nc6'.split():board.push_san(san)
     resumed=GameManager(store,Settings());resumed.recover(first.current_id)
     assert resumed._resume_latest_game_at_position(Observation.from_board(board))
     resumed.process(Observation.from_board(board))
     assert resumed.current_id==first.current_id and len(store.games())==1
-    assert len(resumed.rec.branches)==1
-    assert resumed.rec.branches[0].board().board_fen()==board.board_fen()
-    assert 'Equal shortest legal paths reached this position' in store.game(first.current_id)['pgn']
+    assert len(resumed.rec.branches)>1
+    assert all(b.board().board_fen()==board.board_fen() for b in resumed.rec.branches)
+    # The screenshot is insufficient to establish the four move order.
+    assert 'Equal shortest legal paths reached this position' not in store.game(first.current_id)['pgn']
     target=chess.pgn.Game();target.setup(board)
     rows=[dict(id='a',started='2026-10-19T10:00:00',pgn=export_pgn(chess.STARTING_FEN,[],{'Result':'*'})),
           dict(id='b',started='2026-10-19T10:04:00',pgn=str(target))]
-    joined=chess.pgn.read_game(io.StringIO(join_recordings(rows,LegalSearcher())))
-    assert not joined.errors and joined.end().board().board_fen()==board.board_fen()
-    assert len(list(joined.mainline_moves()))==4
+    with pytest.raises(AmbiguousGapError) as error:
+        join_recordings(rows,LegalSearcher())
+    assert len(error.value.alternatives)>1
     store.close()
 
 
@@ -158,7 +165,8 @@ def test_join_saved_segments_fills_qxd4_and_preserves_clocks_and_variations():
     later.variations[0].set_clock(444)
     later.add_variation(chess.Move.from_uci('g8f6')).comment='Review alternative'
     rows=[dict(id='a',started='2026-10-19T10:00:00',pgn=export_pgn(chess.STARTING_FEN,moves,{'White':'YO MAMA','Result':'*'})),
-          dict(id='b',started='2026-10-19T10:04:00',pgn=str(later))]
+          dict(id='b',started='2026-10-19T10:04:00',pgn=str(later),
+               state=json.dumps({'history_unknown':True}))]
     original=[row['pgn'] for row in rows]
     joined=chess.pgn.read_game(io.StringIO(join_recordings(rows,LegalSearcher())))
     nodes=list(joined.mainline())
@@ -271,26 +279,25 @@ def test_half_second_settling_exports_without_reply_and_revises_latest_guess(tmp
     store.close()
 
 
-def test_settled_gap_uses_first_legal_path_and_three_second_errors_keep_prefix(tmp_path):
+def test_settled_gap_keeps_prefix_when_search_is_inconclusive(tmp_path):
     store=Store(tmp_path);manager,board=record(store,Settings(),'e4 e5 Nf3 Nc6')
     now=[0.];manager._clock=lambda:now[0]
-    gid=manager.current_id
+    gid=manager.current_id;prefix=manager.rec.verified[:]
     for san in 'Bc4 Bc5 d3'.split():board.push_san(san)
     obs=Observation.from_board(board)
-    # Force an unresolved normal search to exercise the non-exhaustive fallback.
     from chessstream.reconstruction import ReconstructionUpdate
     manager.rec.observe=lambda obs:ReconstructionUpdate(status='search limit • evidence retained')
     manager.process(obs);now[0]=2.;manager.process(obs)
-    assert manager.rec.board.board_fen()==board.board_fen()
-    assert manager.current_id==gid and 'Inferred:' in store.game(gid)['pgn']
-    prefix=manager.rec.verified[:]
-    wrong=board.copy();wrong.remove_piece_at(chess.E1)
-    now[0]=3.;manager.process(Observation.from_board(wrong))
-    now[0]=6.;manager.process(Observation.from_board(wrong))
-    assert 'Recovery error' in manager.last_message and manager.rec.verified==prefix
-    assert manager.current_id==gid
-    manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(wrong))
-    assert manager._settled_since is None  # Invalid boards stay quarantined, outside move acceptance.
+    # A stable board does NOT make first_shortest guesses historical truth.
+    assert manager.rec.verified==prefix
+    assert manager.current_id==gid and len(store.games())==1
+    assert 'Bc4' not in [node.san() for node in chess.pgn.read_game(io.StringIO(store.game(gid)['pgn'])).mainline()]
+    invalid=board.copy();invalid.remove_piece_at(chess.E1)
+    now[0]=3.;manager.process(Observation.from_board(invalid))
+    now[0]=6.;manager.process(Observation.from_board(invalid))
+    assert manager.rec.verified==prefix and manager.current_id==gid
+    manager.reset_settling();now[0]=20.;manager.process(Observation.from_board(invalid))
+    assert manager._settled_since is None
     store.close()
 
 
@@ -361,7 +368,7 @@ def test_half_second_counts_from_first_frame_before_worker_animation_gate(tmp_pa
 CLARIFIED_OPENING='e4 c5 d3 Nc6 c3 d5 f3 e5 Ne2 Nf6 g3 c4 dxc4 dxe4 Qxd8+ Nxd8 fxe4 Nxe4'
 
 
-def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(tmp_path):
+def test_reported_skipped_moves_hold_unproven_routes_and_allow_manual_verified_line(tmp_path):
     for skip in (False,True):
         store=Store(tmp_path/str(skip));manager,board=record(store,Settings(),CLARIFIED_OPENING)
         gid=manager.current_id;now=[0.];manager._clock=lambda:now[0];manager.reset_settling()
@@ -371,7 +378,6 @@ def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(
             now[0]+=5. if skip else 1.
             obs=Observation.from_board(board)
             if san=='Nd3':
-                # The reported screenshot flags the now-empty c5 at 74.9%.
                 obs.probabilities[chess.C5]=0
                 obs.probabilities[chess.C5,0]=.749
                 obs.probabilities[chess.C5,8]=.251
@@ -379,10 +385,23 @@ def test_reported_nxe4_bg2_nc5_continuation_survives_skipped_moves_and_castling(
             now[0]+=.5;manager.process(obs)
         game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
         sans=[node.san() for node in game.mainline()]
-        assert sans[-5:]==['Nxe4','Bg2','Nc5','O-O','Nd3']
+        assert not game.errors
         assert 'Rb8' not in sans and 'Ra8' not in sans
-        assert game.end().board().fen()==board.fen()
         assert manager.current_id==gid and len(store.games())==1
+        # The previous behavior forced a guessed skipped-move path after 0.5s.
+        # When the original video supplies the exact SAN, it can be supplied
+        # as a non-destructive, explicit correction.
+        if game.end().board().board_fen()!=board.board_fen():
+            expected=(CLARIFIED_OPENING+' Bg2 Nc5 O-O Nd3').split()
+            assert sans==expected[:len(sans)],('Existing PGN diverged',sans)
+            remaining=expected[len(sans):]
+            assert remaining
+            manager.correct_line(' '.join(remaining))
+        game=chess.pgn.read_game(io.StringIO(store.game(gid)['pgn']))
+        assert not game.errors
+        assert [node.san() for node in game.mainline()][-5:]==[
+            'Nxe4','Bg2','Nc5','O-O','Nd3']
+        assert game.end().board().board_fen()==board.board_fen()
         store.close()
 
 

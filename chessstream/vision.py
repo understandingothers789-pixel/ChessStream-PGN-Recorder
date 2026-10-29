@@ -259,6 +259,7 @@ class OnnxRecognizer:
             import onnxruntime as ort
         except ImportError as e:
             raise RuntimeError("Install the 'onnx' extra to use an ONNX model") from e
+        ort.disable_telemetry_events()
         path = validate_custom_model(path, trusted_root)
         options = ort.SessionOptions()
         options.intra_op_num_threads = 2
@@ -297,6 +298,7 @@ class ScreenshotRecognizer:
 
     def __init__(self):
         import onnxruntime as ort
+        ort.disable_telemetry_events()
         options = ort.SessionOptions()
         options.intra_op_num_threads = 2
         options.inter_op_num_threads = 1

@@ -1,34 +1,102 @@
 # Known limitations and validation status
 
-This is implemented desktop software with a working capture/vision/chess/storage pipeline and measured browser-image tests. It has not undergone Windows 11 runtime acceptance testing or long-duration testing on arbitrary YouTube streams. Tagged releases are published only after Windows CI passes source tests, packaged neural inference, GUI startup and the command launcher. Physical Windows capture and display-scaling acceptance remain separate.
+This document describes the current development branch. Automated Linux and
+Windows checks do not establish accuracy on arbitrary YouTube streams. See the
+[October 24 comprehensive check](COMPREHENSIVE-CHECK-2026-10-24.md) for the current
+measurements, fixes and boundaries of validation.
 
-1. **Recognition remains fallible.** Version 1.1 bundles a pretrained screenshot CNN instead of the original narrow template matcher. It is tested on the supplied browser captures and additional textures/styles. Very small boards, untested sets, heavy compression, full overlays, perspective pieces and unsupported animations can still fail. An uncertain root is rejected rather than silently turned into a midgame. Calibrated templates are an explicit fallback, not the default.
-2. **Scores are not accuracy percentages.** The UI reports the weakest per-square classifier score and identifies uncertain squares. A model can still be confidently wrong. Inspect the preview before unattended use; legal chess consistency alone cannot prove that a recognized midgame contains all the actual pieces.
-3. **Capture requires visibility.** MSS captures the displayed pixels, including other windows over a browser. Minimized windows, DRM-protected output, virtual desktops not currently shown and a browser hidden behind this app are not captured. Use a second monitor, split-screen or position the recorder away from the board. There is no Windows Graphics Capture occlusion-independent backend in this version.
-4. **Layout recovery is bounded.** Tracked application windows follow client position/size. Windows drawn regions remember their containing window and attempt full-window reacquisition on loss. Tight static regions on non-Windows hosts require adjustment if the board moves outside them. Changes in monitor DPI, HWND replacement and fullscreen transitions need Windows hardware validation. Cross-monitor region drawing is intentionally limited to one monitor per selection.
-5. **Missing moves have information limits.** The search finds legal alternatives at the shortest matching depth, up to configured time, node and ply limits. There can be other longer histories, particularly unseen reversible moves. A repeated identical position gives no evidence of unseen cycles. When equal shortest move orders reach the same observed position, the recorder chooses one repeatably: same-square recaptures, consecutive captures, capture count, then stable UCI order. The PGN labels the choice as inferred; the preference is not proof of what was played. Distinct starting positions remain separate hypotheses.
-6. **Held pieces require later evidence.** Time alone cannot distinguish a legal hover from a dropped move. The amber preview ranks candidates by square-level classifier likelihood; recent active-clock movement can break close ties. Neither changes the verified move list or confirms the PGN without an opponent response, explicit confirmation, or supported game-ending message. The final move (including mate) may require one click. Stop, export and restart do not override this rule. Disabling the protection removes it. Fast bullet can still exceed adaptive sampling and bounded search; arbitrary drag/analysis behavior cannot be guaranteed from pixels alone.
-7. **Midgame state is partly invisible.** Earlier moves are unavailable. Turn is inferred from the next shortest legal transition; castling rights and en passant are conservatively unset unless supplied through an exact initial FEN. Halfmove counters/history and threefold/fifty-move claims cannot be reconstructed from a single midgame board. An initial PGN before side-to-move inference is provisional and explicitly annotated.
-8. **Live play versus review can be indistinguishable.** The lifecycle gate combines repeated names, clocks and board history and blocks uncertain move assignment. Identical rematches and opening replays with missing/static metadata cannot always be distinguished from pixels. Board-only splits after a sustained unmatched position are bounded heuristics, not proofs. Use the live Game menu to select New game, Continue or Analysis and to undo a split. See GAME_LIFECYCLE.md for representative test coverage and physical Windows limitations.
-9. **Board-only results are limited.** Checkmate, stalemate and board-provable outcomes can be set automatically. Visible English result messages can identify resignation, timeout or a draw; unsupported/hidden text and unidentified winner colors still need editing. Repeated visible names around the board can populate headers; hidden identities remain Unknown. Imported variations/comments survive ordinary header edits.
-10. **Distribution and Windows coverage.** The portable ZIP uses official app-local runtime binaries and requires no admin install. Windows CI tests packaged neural inference and GUI startup before tagged releases. Physical Windows 11 capture, display scaling, hotkeys, fullscreen transitions and security policies still require hardware acceptance testing. The command launcher and package are unsigned.
-11. **Position screenshots depend on recognition.** Duplicate recognized placements are skipped across the recording session, even if a temporary hidden/unrecognized frame or game reassociation intervenes; interval mode also skips repeated recognized placements. Different arrow patterns are not all preserved; a provisional held-piece position can still be saved for review. A misclassified position can create an extra image. This policy never deletes existing images. Interval mode still stores unmatched views.
-12. **FEN recovery creates a new PGN segment.** A clear board differing on at least four squares and not reachable from saved history starts a separate FEN game after five stable seconds by default. Other unmatched positions use the configured timeout (15 seconds by default). Missed moves are absent from both PGNs; the old verified PGN is retained. Longer reviews beyond bounded search may be mistaken for a new game. Turn is inferred later; castling rights and en passant are unset unless supplied through a full FEN.
-13. **Scheduled deletion needs the app running.** Overdue jobs run on next launch. The app does not install a Windows background service or wake a sleeping computer. Deletion is permanent after confirmation. External exports are outside screenshot deletion; independent game deletion removes internal PGN autosaves only.
-14. **Model coverage is finite.** The pinned fenshot model and ONNX Runtime are bundled for offline CPU use. Its upstream training coverage is not this project’s measured accuracy. The additional model-path setting is only for a compatible custom RGB/logit model, whose contract differs from the bundled grayscale/probability model.
+1. **Recognition is fallible.** The bundled screenshot CNN and offline text
+   models cover a finite set of piece styles and English horizontal text. Small
+   boards, video compression, arrows, drags, overlays and unfamiliar themes can
+   fail. Classifier scores are not measured accuracy percentages; a high score
+   can still be wrong. The current changes do not retrain either model.
+2. **Capture needs visible pixels.** MSS sees windows covering the board.
+   Minimized, hidden, DRM-protected and off-desktop boards cannot be recovered
+   by the capture backend. Tracked windows can reacquire changed geometry, but
+   fullscreen, replacement window handles, mixed DPI and multi-monitor behavior
+   still require physical Windows acceptance.
+3. **Moves need evidence.** Search considers shortest legal histories within
+   time, node and depth limits. A unique complete explanation can be inferred;
+   equal alternatives stay pending, with only their supported shared prefix
+   exported. Capture/recapture and pawn preferences order searches and displayed
+   choices; they do not prove an unobserved order. Repeated unseen non-pawn
+   excursions require explicit confirmation. A witnessed intermediate board
+   separates capture gaps; it must not be treated as another unseen move.
+4. **Stable images cannot resolve ambiguity.** The default 0.5-second settling
+   rule can accept a complete unique non-speculative hypothesis. It cannot
+   establish which of several transposed histories occurred, or prove that a
+   held piece was dropped. Opponent replies, visible clocks and game-ending
+   messages provide additional bounded evidence. A final move may still need
+   confirmation, and premoves are excluded until supported.
+5. **Openings are bounded.** By default up to three opening plies can be inferred from the standard start.
+   A small three-ply startup transposition can select an explicitly inferred
+   order and retain the equal alternative as a PGN variation. This exception
+   does not resolve ambiguous gaps in an ongoing game. Longer unseen opening inference is
+   opt-in and still requires completed unique evidence. Actual unobserved order
+   may remain unknown. Imported or explicitly configured FENs retain their
+   supplied history fields; an image-derived midgame has unknown turn, castling
+   rights and en passant history and may need a provisional FEN start.
+6. **Game identity can be ambiguous.** Names, clocks, results, witnessed resets
+   and known positions help separate new games from review. A missing link alone
+   does not prove a new game: forward-compatible gaps may remain unresolved
+   while deeper recovery runs. Identical rematches and replays with hidden
+   metadata can be indistinguishable. Manual New game, Continue and Analysis
+   controls remain available. Ordinary opening similarity does not select an
+   arbitrary archived game.
+7. **Recovery is finite.** Twelve changed downscaled images and 96 coalesced
+   stable position observations are retained in RAM. Deeper background searches
+   have bounded budgets, at most three unchanged-evidence retries and bounded
+   catch-up. Long jumps, noisy endpoints and missing intermediate boards may
+   remain unresolved. The recorder retries only a temporary checkpoint's
+   recorded parent automatically; manual joining can consider older PGNs.
+   Combined records preserve their original sources.
+8. **Review is separate from play.** Observed legal alternatives can be stored
+   as PGN variations linked to witnessed positions. Unknown analysis jumps may
+   require manual linkage. Rewinding should preserve the played mainline rather
+   than fabricate forward shuffles; some review/rematch distinctions remain
+   impossible without additional identity or clock evidence.
+9. **Results and clocks have limits.** Board-provable outcomes and supported
+   English result overlays can be detected. Relative You Won/Lost messages need
+   the correct configured account color. Hidden results, languages outside the
+   OCR corpus and unidentified winners may need editing. Clocks are sampled
+   observations, not exact release times; unseen intermediate moves may have no
+   clock comment. Names require nearby clock evidence and repeated scans.
+10. **Continuity correction is conservative.** At most two weak unchanged
+    squares may be carried through a short continuation when the previous label
+    retains classifier support. Strong contradictions, hidden move endpoints,
+    incorrect roots and larger recognition errors are not repaired arbitrarily.
+11. **Screenshots are optional.** Saving is off by default; inference and PGN
+    recovery use RAM observations. Enabling saving uses the chosen position or
+    interval policy. Recognized duplicate positions are skipped, including across
+    layout changes. A recognition mistake can still create an extra screenshot.
+    Image deletion leaves game records intact. Saved images remain until the
+    user deletes them or enables retention; scheduled jobs require the app to
+    run and catch up on the next launch.
+12. **Diagnostics have privacy and growth implications.** The board trace keeps
+    the latest 10,000 diagnostic transitions, coalescing exact consecutive
+    payload repeats. This is an internal cap, not a user-adjustable setting.
+    Exported diagnostics include player names, settings, hypotheses, PGNs and
+    logs, without screenshots or the live database. Observation and audit tables
+    are separate from this cap and can grow during long use. There is no current
+    one-hour/long-duration memory or storage acceptance measurement.
+13. **Local files still require trust.** Bundled model hashes, bounded decoding,
+    non-pickle templates and trusted custom-model directories reduce risk.
+    Selecting a custom ONNX model remains a trust decision. Python package
+    advisory scans do not audit every native library embedded in binary wheels.
+    Build hashes record inputs, but the distribution is unsigned and does not
+    provide a fully hash-locked transitive supply chain. ONNX telemetry is
+    explicitly disabled; Python-level offline tests do not monitor every native
+    Windows operating-system event.
+14. **Distribution checks have boundaries.** Windows CI validates source tests,
+    packaged inference, offline OCR, GUI startup, the command launcher and
+    shortcut artwork. Physical Windows 11 display scaling, hotkeys, unattended
+    multi-game streams, disk-full behavior and long-running performance still
+    require hardware acceptance. The optional NSIS installer is separate from
+    the portable ZIP; a portable CI pass is not an installer/uninstaller test.
 
-The controlled browser fixture results in `evaluation.json` are not a statistical study of chess streams, compression, piece themes or machines. Windows CPU/GPU utilization and long-running live memory use remain unmeasured.
+The retained browser PNG corpus is useful regression evidence, not a statistical
+study of arbitrary live streams. A passing suite does not mean all bugs or all
+security vulnerabilities have been eliminated.
 
-22. **Continuity recovery is a bounded assumption.** Version 1.6.4 can carry at most two uncertain unchanged squares across a one- or two-ply continuation when the previous legal label still has classifier support. It compares a short continuation with uncertainty before accepting longer exact-label detours. It does not override a conflicting score of 0.90 or higher, fill a move's hidden source/destination, repair an arbitrary initial board, or establish which of several unobserved histories actually happened. Affected squares appear in the UI/log and affected verified moves receive PGN comments. Multiple competing interpretations, larger disruptions and resource limits can leave the frame unresolved. The bundled classifier and its raw recognition accuracy are unchanged; `recognition-continuity-v1.6.4.json` distinguishes real-image regression results from controlled score faults.
-
-23. **Opening starts and prefixes use an explicit guess policy.** The initial short search considers up to six plies and permits up to two uncertain unchanged squares. A clear opening with at least 30 pieces can use a separate bounded search up to 14 plies and two captures, including castling. This can recover an omitted opening but cannot establish the actual order of moves never observed; the selected legal line is labeled guessed and the last move keeps reply protection. Positions outside these limits may still begin from a visible FEN. An explicitly configured initial FEN disables opening inference. Automatic recording can be turned off in Settings. A resumed application-created early FEN segment may be rebased to the normal start with its guessed prefix and recorded continuation retained.
-
-20. **Damaged settings are recovered field by field.** Invalid numeric ranges fall back to safe defaults; invalid saved FENs and capture regions are ignored. This keeps the application launchable and retains unrelated preferences, but a malformed preference may need to be selected again in Settings.
-
-15. **Text recognition and clock coverage are bounded.** The offline English-horizontal-text adapter is tested on four retained native Chess.com browser captures, including a genuine abort and a named-winner resignation. This is a controlled corpus, not a stream accuracy benchmark. Small/compressed text, unsupported languages, unusual clock placement and multiple result panels can fail. Automatic context adds a configurable nearby margin to tight board selections. Names/clocks beyond that margin, beyond the desktop, obscured by other windows, or not present in the video remain unavailable. Clocks are sampled observations, not exact release times; skipped positions can lack clock comments. No time control or increment is inferred from a single reading. Names require an adjacent detected clock and three consistent scans.
-16. **Relative results need an account color.** You Won/Lost uses the configured color, defaulting to the bottom color when recording starts and remembering it across flips. Starting on an already flipped board can make that assumption wrong; choose the actual account color or Unknown in Settings. Explicit scores, White/Black Won and a winner matched to observed names are stronger evidence. Aborted/unknown-winner games retain `*`. A result message confirms only a unique one-ply candidate whose changed squares are visible.
-17. **Post-game analysis is bounded.** The default two-minute review window anchors to known played positions and saves verified alternatives without changing the played main line. Initial-position reviews can look like new games. Unrecognized jumps cannot be linked into analysis automatically; users can add a legal variation manually. A review annotation cannot extend the actual final move without an earlier branching point.
-
-18. **Automatic margins use visible screen pixels.** Default padding is 18% on each side and is sampled at most once per second. It follows the board coordinates supplied by existing source tracking, not hidden/minimized browser content. Physical Windows scaling/fullscreen acceptance is still required. `context-v1.5.json` records an actual X11/MSS check at two moved/resized window sizes. The user-linked YouTube video could not be opened in the execution environment and its first game has not been validated end to end.
-19. **The reconstructed board does not copy the source site theme.** It uses ChessStream's own square colors and vector pieces, even when the captured board uses Chess.com or Lichess styling. A future theme matcher can infer a likely site/profile from nearby UI text and board colors, then let the user override it. Custom themes and ambiguous layouts make visual auto-detection uncertain; board orientation and move position are handled separately.
-21. **Shortest gap reconstruction is an inference.** On startup or before creating a FEN segment, ChessStream checks recent recorded endpoints and bounded legal continuations. Clear divergent openings also compare the current and two recent saved PGNs before splitting. The image does not always reveal turn, castling/en-passant state or counters; known history is retained. A selected legal sequence can differ from the actual unobserved moves, especially when reversible cycles occurred. Inferred moves and deterministic tie choices are labeled, and searches remain bounded. The library can export selected fragments as a joined PGN but preserves their originals. An unseen analysis line that diverges from recent game history can still resemble a new game.
+15. **Playback audio is optional evidence.** Built-in fingerprints cover default Chess.com and Lichess sounds, not all themes or playback speeds. Other apps on the output device and commentary can cause false/missed cues. Audio never proves an unseen move order; physical loopback acceptance remains outstanding.
+16. **Integrity checks detect contradictions.** Legal replay catches illegal accepted moves or a mismatch with the reconstructed board, and can restore a validated checkpoint. It cannot prove that a consistently misrecognized legal position actually appeared. Checks now run under the manager lock and precede invalid-frame error snapshots.

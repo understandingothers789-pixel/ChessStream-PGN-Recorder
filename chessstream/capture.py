@@ -174,17 +174,80 @@ class RecordingWorker(QThread):
         self.stopping=threading.Event()
         self.paused=threading.Event()
         self.commands=queue.SimpleQueue()
-        from .recovery import RecentFrames
+        from .recovery import RecentFrames,PositionHistory
         self.recent_frames=RecentFrames(12)
+        self.position_history=PositionHistory(96)
+        self._processed_frames=0;self._late_capture_slots=0
+        self.audio=None
+        self.audio_info={"status":"Audio cues off","count":0}
+        self._audio_enabled=False
+        from .audio import AudioBoardEvidence
+        self.audio_board=AudioBoardEvidence()
+
+    def audio_failed(self,exc):
+        logging.warning('Optional audio failed; visual recording continues: %s',exc,exc_info=True)
+        audio=self.audio;self.audio=None;self.manager._audio_evidence=None
+        self.audio_board.reset()
+        if audio:
+            try:audio.stop()
+            except Exception:logging.exception('Failed to close optional audio')
+        self.audio_info={'status':'Audio unavailable; visual recording continues: '+str(exc),'count':0,'available':False}
+
+    def poll_audio(self,discard=False):
+        if not self.audio:return []
+        try:
+            events,self.audio_info=self.audio.poll(discard=discard)
+            return events
+        except Exception as exc:
+            self.audio_failed(exc);return []
 
     def layout_changed(self):
         """Invalidate geometry-dependent evidence, retaining the game identity."""
+        self.manager._audio_evidence=None
+        self.audio_board.reset()
+        if self.audio:self.poll_audio(discard=True)
+        self.manager.cancel_background_recovery()
+        self.manager.cancel_saved_join()
+        self.manager._evidence_revision+=1
         self.manager.clear_position_recovery();self.manager.reset_settling()
         self._text_detector.invalidate_layout();self._context_stabilizer.reset_candidates()
 
     def process_observation(self, obs, stable_count):
         """Arm preview at startup and switch to recording on a supported opening."""
+        # Validate shared recording state before any error path renders it.
+        if not self.manager.check_recording_integrity():
+            return {**self.manager.snapshot(),'pipeline_health':{'pgn':'checkpoint restored'}}
+        from .integrity import observation_error
+        error=observation_error(obs)
+        if error:
+            self.audio_board.reset()
+            self.manager._audio_evidence=None;self.manager.reset_settling()
+            self.manager.cancel_background_recovery();self.manager.cancel_saved_join()
+            self.manager._evidence_revision+=1
+            return {**self.manager.snapshot(),'status':'Recognition error • '+error+'; PGN preserved',
+                    'pipeline_health':{'vision':'invalid output','pgn':'preserved'},'audio_cues':self.audio_info}
+        audio=getattr(self,'audio',None)
+        if audio:
+            discard=self.paused.is_set() or self.preview_only
+            events=self.poll_audio(discard=discard)
+            rec=self.manager.rec
+            review=bool(self.manager.rewind_state or self.manager.lifecycle.phase=='analysis / replay'
+                or (rec and obs.placement() in rec.history[:-1] and obs.placement()!=rec.board.board_fen()))
+            usable=not discard and bool(self.audio) and obs.confidence>=.8 and not obs.uncertain_squares(self.manager.settings.min_confidence)
+            at,hint=self.audio_board.observe(self.manager.current_id,obs.placement(),events,time.monotonic(),
+                review=review,usable=usable)
+            self.audio_info['board_hint']=hint
+            if at is not None:
+                self.manager._audio_evidence=(self.manager.current_id,obs.placement(),at)
+            elif review or not usable:
+                self.manager._audio_evidence=None
         self.manager.observe_frame(obs)
+        self.manager.poll_saved_join()
+        usable=(not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
+            and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games','analysis / replay'))
+        if stable_count>=2 and usable:
+            self.position_history.add(obs,self.manager.current_id,max(.8,self.manager.settings.min_confidence))
+        evidence=self.position_history.observations(self.manager.current_id)
         automatic=False
         if (self.preview_only and stable_count>=2 and self.manager.settings.auto_record_opening
                 and self.manager.opening_ready(obs)):
@@ -197,12 +260,15 @@ class RecordingWorker(QThread):
             logging.info('Automatic recording started after a supported opening move appeared')
         if stable_count>=2 and not self.preview_only:
             if self.manager.lifecycle_gate(obs):
+                if self.manager.lifecycle.phase=='unresolved move gap':
+                    self.manager.background_recovery(obs,evidence)
                 snapshot=self.manager.lifecycle_snapshot(obs)
-            elif self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id)):
-                snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues'}
+            elif self.manager.background_recovery(obs,evidence):
+                snapshot={**self.manager.snapshot(),'status':'Recovering a legal gap in background • capture continues',
+                          'preview_fen':obs.placement()+' w - - 0 1','preview_moves':[],'preview_last_move':None}
             else:
                 snapshot=self.manager.process(obs)
-                self.manager.background_recovery(obs,self.recent_frames.observations(self.manager.current_id))
+                self.manager.background_recovery(obs,evidence)
         else:
             snapshot={**self.manager.snapshot(),'status':'Waiting for position to settle'}
         if self.preview_only:
@@ -211,7 +277,14 @@ class RecordingWorker(QThread):
             snapshot.update(status=status,preview_fen=obs.placement()+' w - - 0 1',preview_moves=[])
         self.recent_frames.mark(self.manager.current_id,not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
             and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games'))
+        if (stable_count>=2 and not self.manager.premove_state and not self.manager.rewind_state and not self.manager.terminal_message
+                and self.manager.lifecycle.phase not in ('uncertain transition','temporarily uncertain','between games','analysis / replay')):
+            self.position_history.add(obs,self.manager.current_id,max(.8,self.manager.settings.min_confidence))
+        if stable_count>=2 and not self.preview_only:self.manager.queue_checkpoint_join()
+        snapshot['audio_cues']=getattr(self,'audio_info',{'status':'Audio cues off','count':0})
+        snapshot['buffered_positions']=len(self.position_history.positions)
         if automatic:snapshot['recording_started_automatically']=True
+        self.manager.trace_frame(obs,stable_count,snapshot)
         return snapshot
 
     def scan_context(self,image,rect,obs):
@@ -223,12 +296,18 @@ class RecordingWorker(QThread):
         before=self._text_detector.last_scan
         try:
             if rect:self._text_board_rect=rect
-            message=self._text_detector.scan(image,self.manager.result_player(),rect or getattr(self,'_text_board_rect',None),self.manager.observed_names)
+            orientation=obs.orientation if obs else (self.manager.last_observation.orientation if self.manager.last_observation else None)
+            message=self._text_detector.scan(image,self.manager.result_player(),rect or getattr(self,'_text_board_rect',None),self.manager.observed_names,orientation=orientation)
             if self._text_detector.last_scan!=before:
-                if settings.read_context:
-                    orientation=obs.orientation if obs else (self.manager.last_observation.orientation if self.manager.last_observation else None)
+                if (settings.read_context and obs is not None
+                        and obs.confidence>=max(.80,settings.min_confidence)
+                        and len(obs.uncertain_squares(max(.80,settings.min_confidence)))<=2
+                        and rect is not None):
+                    # An obscured or absent board can leave a stale rectangle
+                    # pointing at a different tab/overlay. OCR results from
+                    # that view must never mutate player IDs or game identity.
                     context=self._context_stabilizer.observe(extract_context(self._text_detector.last_lines,rect,orientation))
-                    self.manager.observe_context(context,obs.timestamp if obs else utcnow())
+                    self.manager.observe_context(context,obs.timestamp)
                     if context.get('clocks') or context.get('names'):
                         logging.info('Visible game context %s',context)
                 if message and settings.detect_results:self.manager.declare_end(message,obs)
@@ -263,6 +342,22 @@ class RecordingWorker(QThread):
                 while not self.stopping.is_set():
                     tick=time.monotonic()
                     settings=self.manager.settings
+                    if settings.audio_cues!=self._audio_enabled:
+                        if self.audio:
+                            try:self.audio.stop()
+                            except Exception as exc:self.audio_failed(exc)
+                        self.audio=None;self._audio_enabled=settings.audio_cues
+                        self.audio_board.reset()
+                        self.manager._audio_evidence=None
+                        self.audio_info={'status':'Audio cues off','count':0}
+                        if settings.audio_cues:
+                            from .audio import AudioListener
+                            try:
+                                self.audio=AudioListener(store.root/'audio-cues.json');self.audio.start()
+                            except Exception as exc:self.audio_failed(exc)
+                    if self.audio and self.paused.is_set():
+                        self.audio_board.reset()
+                        self.poll_audio(discard=True);self.manager._audio_evidence=None
                     while not self.commands.empty():
                         action,value=self.commands.get()
                         try:
@@ -278,7 +373,7 @@ class RecordingWorker(QThread):
                                 if self.manager.current_id!=value[0]:raise ValueError('The active game changed. Select the split move again.')
                                 self.manager.split_game_at(value[1])
                             elif action=="repair":self.manager.repair_current()
-                            elif action=="join_previous":self.manager.join_previous_recording()
+                            elif action=="join_previous":self.manager.join_previous_recording(background=True)
                             elif action=="correct":
                                 if isinstance(value,tuple):self.manager.correct_line(*value)
                                 else:self.manager.correct_line(value)
@@ -374,14 +469,22 @@ class RecordingWorker(QThread):
                         changed=last_pixels is None or not np.array_equal(board_image,last_pixels)
                         if changed or last_obs is None:
                             obs=recognizer.recognize(board_image)
-                            if settings.orientation=="auto":
-                                obs=choose_orientation(obs,self.manager.rec.board if self.manager.rec else None)
-                            elif settings.orientation=="black":
-                                obs=obs.flipped()
+                            from .integrity import observation_error
+                            if not observation_error(obs):
+                                if settings.orientation=="auto":
+                                    obs=choose_orientation(obs,self.manager.rec.board if self.manager.rec else None)
+                                elif settings.orientation=="black":
+                                    obs=obs.flipped()
                             last_pixels=board_image.copy();last_obs=obs
                         else:
                             from .domain import Observation
                             obs=Observation(last_obs.probabilities.copy(),orientation=last_obs.orientation,quality=last_obs.quality)
+                        from .integrity import observation_error
+                        if observation_error(obs):
+                            self.update.emit(self.process_observation(obs,0))
+                            last_pixels=None;last_obs=None;stable_key=None;stable_count=0
+                            self.stopping.wait(recognition_period(settings))
+                            continue
                         obs.timestamp=timestamp
                         self.scan_context(context_image,context_rect,obs)
                         if settings.detect_board and obs.confidence<.6 and tick-last_detect>2:
@@ -434,19 +537,41 @@ class RecordingWorker(QThread):
                             ply=snapshot.get("plies",0),deduplicate=settings.deduplicate,
                             deduplicate_position=bool(obs is not None and stable_count>=2))
                         next_saved=tick+settings.interval
+                    if self.audio and obs is None:
+                        self.audio_board.reset();self.manager._audio_evidence=None
+                        self.poll_audio(discard=True)
+                    snapshot['audio_cues']=self.audio_info
                     snapshot["buffered_frames"]=len(self.recent_frames.frames)
                     snapshot["buffered_bytes"]=sum(frame["image"].nbytes for frame in self.recent_frames.frames)
-                    snapshot["processing_ms"]=round((time.monotonic()-tick)*1000)
+                    elapsed=time.monotonic()-tick
+                    period=recognition_period(settings)
+                    self._processed_frames+=1
+                    # Estimated missed scheduling slots, not unseen source
+                    # video frames. The video frame rate is not observable.
+                    self._late_capture_slots+=max(0,int(elapsed/period))
+                    snapshot["processing_ms"]=round(elapsed*1000)
+                    snapshot["capture_metrics"]={'processed_frames':self._processed_frames,
+                        'estimated_late_slots':self._late_capture_slots,'period_ms':round(period*1000)}
                     snapshot["saved_count"]=store.deletion_estimate({"session_id":self.manager.session_id})["count"]
                     self.update.emit(snapshot)
-                    period=recognition_period(settings)
                     self.stopping.wait(max(.005,period-(time.monotonic()-tick)))
         except Exception as e:
-            import logging
             logging.exception("Recording worker failed")
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
+            if self.audio:
+                try:self.audio.stop()
+                except Exception as exc:self.audio_failed(exc)
+            self.audio=None
+            # OCR owns native inference sessions. Release worker-created
+            # sessions here, rather than later when Qt deletes this object
+            # on the GUI thread during restart.
+            recognizer=None
+            self._text_detector=None
+            self._context_stabilizer=None
+            self.manager._audio_evidence=None
             self.manager.cancel_background_recovery()
+            self.manager.cancel_saved_join()
             try:
                 if not self.preview_only:
                     self.manager.finish()
@@ -454,5 +579,4 @@ class RecordingWorker(QThread):
                 elif not self.manager.rec:
                     store.finish_session(self.manager.session_id)
             except Exception:
-                import logging
                 logging.exception("Could not finalize recording")

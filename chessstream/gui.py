@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import sys
+import threading
 import chess
 import chess.pgn
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QSize, QDateTime
@@ -29,7 +30,9 @@ from .widgets import STYLE, Card, ImageView, BoardView, DrawOverlay, RegionEdito
 from .review_ui import ReviewTools
 from .hotkeys import GlobalHotkeys
 from .model_security import import_custom_model, validate_custom_model
-from .gap_join import join_recordings
+from .gap_join import join_recordings, AmbiguousGapError
+from .notation_view import NotationView
+from .pgn_tools import node_at
 
 
 def human_bytes(n):
@@ -68,6 +71,7 @@ class MainWindow(ReviewTools,QMainWindow):
         super().__init__();self.root=root;self.settings=Settings.load(root/"settings.json")
         self.store=Store(root);self.manager=GameManager(self.store,self.settings)
         self.worker=None;self._preview_active=False;self.tasks=[];self.overlays=[];self.latest_image=None;self.snapshot={}
+        self._worker_stopping=False;self._restart_requested=False
         self._live_review=None
         self.retention_task=None;self._closing=False
         self.region=Region(**self.settings.region) if self.settings.region else None
@@ -86,14 +90,14 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.23"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev19"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
         self.build_live();self.build_library();self.build_screenshots();self.build_settings()
         self.navigate(0);self.install_hotkeys()
         if sys.platform=='win32':QTimer.singleShot(250,self.refresh_desktop_shortcut)
-        self.statusBar().showMessage("Ready • screenshots kept until you delete them")
+        self.statusBar().showMessage("Ready • "+("screenshot saving is on" if self.settings.save_screenshots else "screenshot saving is off"))
         # Prefer the best visible YouTube window at every launch, including
         # over a stale saved source. If none is available, retain the saved
         # source while briefly retrying in case the browser is still opening.
@@ -154,11 +158,20 @@ class MainWindow(ReviewTools,QMainWindow):
             action.setStyleSheet("padding:7px 4px;font-size:11px")
             pgn_actions.addWidget(action)
         moves_card.box.addLayout(pgn_actions)
+        self.follow_live_button=button('Following latest',self.return_to_live_board)
+        self.follow_live_button.setCheckable(True);self.follow_live_button.setChecked(True)
+        self.follow_live_button.setToolTip('Resume following the newest position. Clicking the latest PGN move or stepping to the end also resumes live following.')
+        moves_card.box.addWidget(self.follow_live_button)
         self.game_identity_button=button('Game: waiting ▾',self.game_controls_menu)
         self.game_identity_button.setStyleSheet('padding:6px;font-size:11px')
         moves_card.box.addWidget(self.game_identity_button)
         self.move_table=MoveTableWidget(0,3);self.move_table.setHorizontalHeaderLabels(["#","White","Black"]);self.move_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.move_table.verticalHeader().hide();self.move_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.move_table.setMinimumWidth(220);self.move_table.setContextMenuPolicy(Qt.CustomContextMenu);self.move_table.customContextMenuRequested.connect(self.live_moves_context_menu);self.move_table.step_move.connect(self.navigate_live_move);self.move_table.setToolTip('Click a move to review it. Use the left and right arrow keys to step through moves in order.');moves_card.box.addWidget(self.move_table,1)
         self.move_table.itemClicked.connect(self.review_live_move)
+        self.move_table.hide()
+        self.live_notation=NotationView();moves_card.box.addWidget(self.live_notation,1)
+        self.live_notation.move_selected.connect(self.review_notation_move)
+        self.live_notation.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.live_notation.customContextMenuRequested.connect(self.live_moves_context_menu)
         self.uncertain_label=muted('UNVERIFIED POSSIBILITIES • excluded from PGN');self.uncertain_label.setStyleSheet('color:#f4c17a');self.uncertain_label.hide();moves_card.box.addWidget(self.uncertain_label)
         self.alternatives=QComboBox();self.alternatives.setVisible(False);self.alternatives.setStyleSheet('border-color:#c49151;color:#f4d6aa');moves_card.box.addWidget(self.alternatives)
         self.choose_path=button("Confirm selected sequence",self.choose_sequence);self.choose_path.hide();moves_card.box.addWidget(self.choose_path)
@@ -173,20 +186,30 @@ class MainWindow(ReviewTools,QMainWindow):
             repair_actions.addWidget(action,1)
         moves_card.box.addLayout(repair_actions)
         for card in [capture_card,internal,moves_card]:splitter.addWidget(card)
-        splitter.setSizes([430,430,265]);box.addWidget(splitter,1)
+        splitter.setSizes([430,430,265])
+        audio_row=QHBoxLayout()
+        self.audio_toggle=QCheckBox('Audio move cues (experimental)');self.audio_toggle.setChecked(self.settings.audio_cues)
+        self.audio_toggle.setToolTip('Listen locally to all sound on the default Windows output device. No microphone or audio recordings. Built-in Chess.com and Lichess default sounds; no learning required.')
+        self.audio_toggle.toggled.connect(self.set_audio_cues);audio_row.addWidget(self.audio_toggle)
+        audio_row.addStretch();box.addLayout(audio_row)
+        self.audio_status=muted('Audio cues off');self.audio_status.setWordWrap(True);box.addWidget(self.audio_status);box.addWidget(splitter,1)
         self.recording_status=QLabel("●  Ready to record");self.recording_status.setWordWrap(True);self.recording_status.setStyleSheet("color:#8ee3ce;font-weight:600;padding:8px;");box.addWidget(self.recording_status)
         self.recovery=muted("Search uses the shortest legal gap. Unseen repetitions and identical transpositions may need review.");box.addWidget(self.recovery)
         footer=QHBoxLayout();footer.addWidget(button("Flip orientation",self.flip_orientation));footer.addWidget(button("Calibrate piece set…",self.calibrate));footer.addStretch();self.delay_label=muted("All processing stays on this computer");footer.addWidget(self.delay_label);box.addLayout(footer)
 
+    def set_audio_cues(self,enabled):
+        self.settings.audio_cues=enabled;self.settings.save(self.root/'settings.json')
+        self.audio_status.setText('Starting playback listener…' if enabled else 'Audio cues off')
+
     def live_moves_context_menu(self,position):
-        menu=QMenu(self.move_table)
+        menu=QMenu(self.live_notation)
         copy=menu.addAction("Copy current PGN")
         export=menu.addAction("Export current PGN…")
         menu.addSeparator()
         fen=menu.addAction("Copy visible FEN")
         menu.addSeparator()
         manual=menu.addAction("Edit moves manually…")
-        selected=menu.exec(self.move_table.viewport().mapToGlobal(position))
+        selected=menu.exec(self.live_notation.viewport().mapToGlobal(position))
         if selected==copy:self.copy_current()
         elif selected==export:self.export_current()
         elif selected==fen:self.copy_visible_fen()
@@ -199,8 +222,8 @@ class MainWindow(ReviewTools,QMainWindow):
                           ('Undo last game switch','undo')]:
             action=menu.addAction(text,lambda checked=False,value=mode:self.run_game_control(value))
             if mode=='undo':action.setEnabled(bool(self.snapshot.get('lifecycle',{}).get('can_undo')))
-        menu.addSeparator();selected=self.move_table.currentItem()
-        ply=selected.data(Qt.UserRole) if selected else None
+        menu.addSeparator();selected_path=self.live_notation.selected
+        ply=len(selected_path) if selected_path and not any(selected_path) else None
         action=menu.addAction('Split PGN after selected move',lambda:self.run_game_control('split',ply))
         action.setEnabled(bool(ply and 0<ply<len(self.snapshot.get('moves',[]))))
         menu.exec(self.game_identity_button.mapToGlobal(self.game_identity_button.rect().bottomLeft()))
@@ -223,7 +246,14 @@ class MainWindow(ReviewTools,QMainWindow):
             self.recording_status.setText('Checking PGN…')
             return
         if action=='repair':self.manager.repair_current()
-        else:self.manager.join_previous_recording()
+        else:
+            self.manager.join_previous_recording(background=True)
+            def poll_join():
+                if self._closing:return
+                self.manager.poll_saved_join()
+                self.on_update(self.manager.snapshot())
+                if self.manager._saved_join_future:QTimer.singleShot(100,poll_join)
+            QTimer.singleShot(100,poll_join)
         self.on_update(self.manager.snapshot())
 
     def region_text(self):
@@ -248,6 +278,14 @@ class MainWindow(ReviewTools,QMainWindow):
                 'Permanent screenshots: at the selected interval. Analysis frames stay temporary.')
 
     def toggle_start(self):
+        if self._closing:return
+        if self._worker_stopping or (self.worker and not self.worker.isRunning()):
+            self._restart_requested=True
+            logging.info('Recording restart requested; waiting for previous capture worker to join')
+            self.start_button.setEnabled(False)
+            self.recording_status.setText('Waiting for capture shutdown before restarting…')
+            if self.worker:self._retire_worker(self.worker)
+            return
         if self.worker and self.worker.isRunning():
             if self._preview_active:
                 self.worker.commands.put(("record",None));self._preview_active=False
@@ -255,7 +293,7 @@ class MainWindow(ReviewTools,QMainWindow):
                 self.recording_status.setText("●  Starting recording from the live preview")
             else:self.pause()
             return
-        if self._auto_window_enabled and not self._auto_select_youtube_window():
+        if self._auto_window_enabled and not self._auto_select_youtube_window(start_preview=False):
             # Freeze the fallback region before the user starts recording.
             self._auto_window_enabled=False;self.auto_window_timer.stop()
         if not self.region:self.draw_region();return
@@ -269,22 +307,43 @@ class MainWindow(ReviewTools,QMainWindow):
         self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True);self.recording_status.setText("●  Capturing • waiting for a stable board")
 
     def pause(self):
-        if not self.worker or not self.worker.isRunning():return
+        if self._worker_stopping or not self.worker or not self.worker.isRunning():return
         if self.worker.paused.is_set():self.worker.paused.clear();self.pause_button.setText("Pause")
         else:self.worker.paused.set();self.pause_button.setText("Resume");self.recording_status.setText("Ⅱ  Paused • PGN and screenshots preserved")
 
     def stop(self):
         if self.worker and self.worker.isRunning():
-            self.worker.stop();self.stop_button.setEnabled(False);self.recording_status.setText("Saving recording…")
+            self._worker_stopping=True;self._restart_requested=False
+            logging.info('Recording stop requested; saving and shutting down capture worker')
+            self.worker.stop();self.start_button.setEnabled(False);self.pause_button.setEnabled(False)
+            self.stop_button.setEnabled(False);self.recording_status.setText("Saving recording…")
 
     def worker_finished(self):
+        worker=self.sender()
+        if worker is not self.worker or self._closing:return
+        self._retire_worker(worker)
+
+    def _retire_worker(self,worker):
+        if self._closing or worker is not self.worker:return
+        # finished/isRunning alone do not join thread-local/native teardown.
+        # Keep the QThread alive and poll without blocking the GUI.
+        if not worker.wait(0):
+            self._worker_stopping=True
+            self.start_button.setEnabled(False);self.pause_button.setEnabled(False)
+            QTimer.singleShot(20,lambda:self._retire_worker(worker));return
+        self.worker=None;self._worker_stopping=False
+        logging.info('Capture worker joined; restart is safe')
+        worker.deleteLater()
         was_preview=self._preview_active;self._preview_active=False
         self.start_button.setEnabled(True);self.pause_button.setEnabled(False);self.pause_button.setText("Pause");self.stop_button.setEnabled(False)
         self.recording_status.setText("■  Preview stopped" if was_preview else "■  Stopped • verified PGN saved");self.refresh_usage()
+        if self._restart_requested:
+            self._restart_requested=False
+            QTimer.singleShot(0,self.toggle_start)
 
     def start_preview(self):
         """Show the selected board and recognition result without saving data."""
-        if not self.region or (self.worker and self.worker.isRunning()):return
+        if self._closing or not self.region or self.worker is not None:return
         self._preview_active=True
         self.worker=RecordingWorker(self.manager,self.region,preview_only=True)
         self.worker.frame.connect(self.on_frame);self.worker.update.connect(self.on_update)
@@ -295,26 +354,55 @@ class MainWindow(ReviewTools,QMainWindow):
                                      '◉  Live preview • click Start recording when ready')
 
     def on_frame(self,image):
+        if self._closing or self._worker_stopping or self._stale_worker_signal():return
         self.latest_image=image;self.live_image.set_array(image)
 
+    def _stale_worker_signal(self):
+        sender=self.sender()
+        return isinstance(sender,RecordingWorker) and sender is not self.worker
+
     def on_update(self,snap):
+        if self._closing or self._stale_worker_signal():return
+        if self._worker_stopping and isinstance(self.sender(),RecordingWorker):return
         self.snapshot=snap
+        notation_key=(snap.get('recorded_pgn',''),snap.get('initial_fen',chess.STARTING_FEN),tuple(snap.get('moves',[])))
+        if notation_key!=getattr(self,'_notation_document_key',None):
+            self._notation_document_key=notation_key
+            document=chess.pgn.read_game(io.StringIO(notation_key[0]))
+            if document is None:
+                document=chess.pgn.Game();document.setup(chess.Board(notation_key[1]));node=document
+                for san in notation_key[2]:node=node.add_main_variation(node.board().parse_san(san))
+            self._live_document=document
+        audio=snap.get('audio_cues')
+        if audio:
+            self.audio_status.setText(f"Audio • {audio['status']} • {audio.get('count',0)} cues"+
+                (f" • {audio['board_hint']}" if audio.get('board_hint') else '')+
+                (f" • {audio['device']}" if audio.get('device') else '')+
+                (f" • {audio['dropped_blocks']} interrupted blocks" if audio.get('dropped_blocks') else ''))
         lifecycle=snap.get('lifecycle',{})
         self.game_identity_button.setText('Game: '+lifecycle.get('state','waiting for a game')+' ▾')
         self.game_identity_button.setToolTip('White: '+snap.get('players',{}).get('white','Unknown')+'\nBlack: '+snap.get('players',{}).get('black','Unknown')+
+            '\nGame ID: '+str(snap.get('game_id') or 'waiting')+'\nAccepted plies: '+str(snap.get('plies',0))+
+            '\nPending histories: '+str(snap.get('pending_hypotheses',0))+
             '\nIdentity: '+lifecycle.get('identity','pending')+'\n'+lifecycle.get('reason','')+'\nClick to correct game detection or split a PGN.')
         if self._live_review:
             line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
             review=self._live_review
+            if 'path' in review:
+                try:valid=node_at(self._live_document,review['path']).board().fen()==review['fen']
+                except IndexError:valid=False
+            else:valid=tuple(line[:review['ply']])==review['prefix']
             if (review['game_id']!=snap.get('game_id') or review['initial_fen']!=snap.get('initial_fen',chess.STARTING_FEN)
-                    or tuple(line[:review['ply']])!=review['prefix']):self._live_review=None
+                    or not valid):self._live_review=None
         self.return_live_button.setVisible(self._live_review is not None)
+        self.follow_live_button.setChecked(self._live_review is None)
+        self.follow_live_button.setText('Following latest' if self._live_review is None else 'Follow latest')
         if snap.get('recording_started_automatically'):
             self._preview_active=False
             self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True)
         diagnostic_key=(snap.get('game_id'),snap.get('status'),tuple(snap.get('uncertain_squares',[])),snap.get('plies'))
         if diagnostic_key!=getattr(self,'_last_diagnostic',None):
-            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks','players','lifecycle']}))
+            logging.info('Live display %s',json.dumps({key:snap.get(key) for key in ['game_id','status','plies','weakest_confidence','uncertain_squares','orientation','result','clocks','players','lifecycle','evidence_revision','pending_hypotheses','recovery_tasks','processing_ms','capture_metrics']}))
             self._last_diagnostic=diagnostic_key
         if not self.worker or not self.worker.paused.is_set() or getattr(self,'_pgn_action_pending',False):
             self._pgn_action_pending=False
@@ -359,6 +447,8 @@ class MainWindow(ReviewTools,QMainWindow):
         pending=snap.get('pending_moves',[]) if snap.get('provisional') else []
         guessed=snap.get('guessed_plies',[])
         self.update_move_table(moves,snap.get('initial_fen',chess.STARTING_FEN),pending,guessed)
+        selected=tuple(self._live_review.get('path',(0,)*self._live_review['ply'])) if self._live_review else (0,)*len(moves)
+        self.live_notation.show_game(self._live_document,selected,follow=self._live_review is None,pending=pending)
         if preview_active:
             option=f" • candidate 1 of {candidates}" if candidates>1 else ""
             suffix=" • final confirmation needed" if snap.get('pending_terminal') else " • not yet in PGN"
@@ -404,6 +494,8 @@ class MainWindow(ReviewTools,QMainWindow):
         ply=item.data(Qt.UserRole)
         if not ply:return
         snap=self.snapshot;line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
+        if ply>=len(snap.get('moves',[])):
+            self.return_to_live_board();return
         initial=snap.get('initial_fen',chess.STARTING_FEN);board=chess.Board(initial)
         try:
             for san in line[:ply]:board.push_san(san)
@@ -412,14 +504,25 @@ class MainWindow(ReviewTools,QMainWindow):
             'prefix':tuple(line[:ply]),'fen':board.fen(),'last_move':board.peek().uci()}
         self.on_update(snap)
 
+    def review_notation_move(self,path):
+        path=tuple(path)
+        if path==(0,)*len(self.snapshot.get('moves',[])):
+            self.return_to_live_board();return
+        try:node=node_at(self._live_document,path)
+        except (IndexError,AttributeError):return
+        board=node.board();prefix=[];cursor=node
+        while cursor.parent is not None:prefix.append(cursor.san());cursor=cursor.parent
+        self._live_review={'game_id':self.snapshot.get('game_id'),'initial_fen':self._live_document.board().fen(),
+            'ply':len(path),'path':path,'prefix':tuple(reversed(prefix)) or ('Starting position',),
+            'fen':board.fen(),'last_move':node.move.uci() if node.move else None}
+        self.on_update(self.snapshot)
+
     def navigate_live_move(self,direction):
         snap=self.snapshot
         line=snap.get('moves',[])+(snap.get('pending_moves',[]) if snap.get('provisional') else [])
         if not line:return
-        selected=self.move_table.currentItem()
-        current=(self._live_review.get('ply') if self._live_review else
-                 selected.data(Qt.UserRole) if selected and selected.data(Qt.UserRole) else None)
-        target=max(1,min(len(line),(current if current is not None else (0 if direction>0 else len(line)+1))+direction))
+        current=self._live_review['ply'] if self._live_review else max(1,len(snap.get('moves',[])))
+        target=max(1,min(len(line),current+direction))
         initial=chess.Board(snap.get('initial_fen',chess.STARTING_FEN))
         table_index=target-1+(1 if not initial.turn else 0)
         item=self.move_table.item(table_index//2,1+table_index%2)
@@ -472,6 +575,7 @@ class MainWindow(ReviewTools,QMainWindow):
         if not self.worker or not self.worker.isRunning():self.start_preview()
 
     def auto_region(self,region):
+        if self._closing or self._worker_stopping or self._stale_worker_signal():return
         self.region=region;self.settings.region=asdict(region);self.settings.save(self.root/'settings.json');self.source_label.setText(self.region_text()+' • reacquired after layout change')
 
     def choose_monitor(self):
@@ -490,7 +594,7 @@ class MainWindow(ReviewTools,QMainWindow):
             if ok:self.region_selected(window_client(options[names.index(name)][0]))
         except Exception as e:self.error(str(e))
 
-    def _auto_select_youtube_window(self):
+    def _auto_select_youtube_window(self,*,start_preview=True):
         """Select the most chess-relevant visible YouTube browser window."""
         if not self._auto_window_enabled:
             self.auto_window_timer.stop();return bool(self.region)
@@ -508,7 +612,7 @@ class MainWindow(ReviewTools,QMainWindow):
                 self.statusBar().showMessage(f"Auto-selected YouTube window: {title} • "+
                     ('armed to record the first opening move' if self.settings.auto_record_opening else 'click Start recording when ready'),10000)
             logging.info("Automatically selected YouTube capture window hwnd=%s title=%r",hwnd,title)
-            self.start_preview()
+            if start_preview:self.start_preview()
             return True
         return False
 
@@ -574,14 +678,14 @@ class MainWindow(ReviewTools,QMainWindow):
         bar=QHBoxLayout()
         for name,fn in [("Combine selected PGNs",self.join_selected),("Export selected",self.export_selected),("Export entire session",self.export_session),("Export all",self.export_all),("Open PGN…",self.import_pgn),("Refresh",self.refresh_library)]:bar.addWidget(button(name,fn))
         bar.addStretch();box.addLayout(bar)
-        self.game_table=QTableWidget(0,6);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
+        self.game_table=QTableWidget(0,7);self.game_table.setHorizontalHeaderLabels(["Game","Date","Duration","Plies","Status","Result","Saved .pgn"]);self.game_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);self.game_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.game_table.setSelectionBehavior(QAbstractItemView.SelectRows);self.game_table.setSelectionMode(QAbstractItemView.ExtendedSelection);self.game_table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.game_table.verticalHeader().hide();self.game_table.itemSelectionChanged.connect(self.show_game);self.game_table.setContextMenuPolicy(Qt.CustomContextMenu);self.game_table.customContextMenuRequested.connect(self.game_context_menu)
         box.addWidget(self.game_table,2)
         detail=QSplitter(Qt.Horizontal);self.library_board=BoardView();detail.addWidget(self.library_board);detail.addWidget(self.make_review_tabs());detail.setSizes([350,650]);box.addWidget(detail,2)
         timeline=QHBoxLayout();timeline.addWidget(QLabel("Review ply"));self.review_slider=QSlider(Qt.Horizontal);self.review_slider.valueChanged.connect(self.review_game);timeline.addWidget(self.review_slider,1);self.review_label=muted("0");timeline.addWidget(self.review_label);box.addLayout(timeline)
         actions=QHBoxLayout()
         for name,fn in [("Rename / edit headers",self.edit_game),("Copy PGN",self.copy_selected),("Resume recording",self.resume_game),("Screenshots",self.game_screenshots)]:actions.addWidget(button(name,fn))
-        actions.addWidget(button("Delete saved PGN files…",self.delete_saved_pgns,danger=True))
-        actions.addStretch();actions.addWidget(button("Delete game data…",self.delete_games,danger=True));box.addLayout(actions)
+        actions.addWidget(button("Remove saved .pgn copies…",self.delete_saved_pgns,danger=True))
+        actions.addStretch();actions.addWidget(button("Delete from library…",self.delete_games,danger=True));box.addLayout(actions)
         variations=QHBoxLayout()
         for label,fn in [('Add alternative line…',self.add_review_variation),('Edit comment…',self.edit_review_comment),('Remove alternative line',self.delete_review_variation)]:variations.addWidget(button(label,fn))
         variations.addWidget(muted('Select a position before an existing move; alternatives are saved in exported PGNs.'));box.addLayout(variations)
@@ -593,7 +697,7 @@ class MainWindow(ReviewTools,QMainWindow):
             duration='—'
             if g['ended']:
                 seconds=max(0,int((datetime.fromisoformat(g['ended'])-datetime.fromisoformat(g['started'])).total_seconds()));duration=f"{seconds//60}:{seconds%60:02d}"
-            values=[g['name'],local_time(g['started']),duration,str(g['plies']),g['status'],json.loads(g['headers']).get('Result','*')]
+            values=[g['name'],local_time(g['started']),duration,str(g['plies']),g['status'],json.loads(g['headers']).get('Result','*'),('Yes' if (self.store.root/'pgn'/(g['id']+'.pgn')).is_file() else 'No')]
             for col,value in enumerate(values):self.game_table.setItem(row,col,QTableWidgetItem(value))
 
     def selected_games(self):
@@ -617,7 +721,8 @@ class MainWindow(ReviewTools,QMainWindow):
         action=menu.addAction("Join selected recordings…",self.join_selected)
         action.setEnabled(len(self.selected_games())>=2)
         menu.addSeparator()
-        menu.addAction("Delete saved PGN file(s)…",self.delete_saved_pgns)
+        menu.addAction("Remove saved .pgn copies…",self.delete_saved_pgns)
+        menu.addAction("Delete game(s) from library…",self.delete_games)
         return menu
 
     def show_game(self):
@@ -673,6 +778,7 @@ class MainWindow(ReviewTools,QMainWindow):
             self.store.delete_game(g['id'])
             if g['id']==self.manager.current_id:self.manager=GameManager(self.store,self.settings)
         self.refresh_library()
+        self.statusBar().showMessage(f"Deleted {len(selected)} game(s) from the library; screenshots kept.",10000)
 
     def delete_saved_pgns(self):
         selected=self.selected_games()
@@ -688,7 +794,8 @@ class MainWindow(ReviewTools,QMainWindow):
                 QMessageBox.Yes|QMessageBox.Cancel)!=QMessageBox.Yes:return
         try:
             deleted=self.store.delete_pgn_files([g['id'] for g in selected],self.settings.export_dir)
-            self.statusBar().showMessage(f"Deleted {len(deleted)} saved PGN file(s); game records kept",8000)
+            self.refresh_library()
+            self.statusBar().showMessage(f"Removed {len(deleted)} saved .pgn file(s). Game entries remain; choose Delete from library to remove entries.",15000)
         except Exception as e:self.error(str(e))
 
     def write_export(self,rows):
@@ -708,15 +815,79 @@ class MainWindow(ReviewTools,QMainWindow):
         capture_running=bool(self.worker and self.worker.isRunning())
         if capture_running and any(g['id']==self.manager.current_id for g in selected):
             self.error('The active PGN is still changing. Select older saved PGNs to combine while recording continues.');return
+        if getattr(self,'_library_join_cancel',None) and not self._library_join_cancel.is_set():
+            self.statusBar().showMessage('A saved-PGN join is already running',6000);return
+        self._library_join_cancel=threading.Event()
+        cancelled=self._library_join_cancel
+        original_manager=self.manager
+        original_game=self.manager.current_id
+        revision=self.manager._evidence_revision
         def saved(pgn):
-            self.manager.combine_games(selected,pgn,activate=not capture_running)
+            cancelled.set()
+            running=bool(self.worker and self.worker.isRunning())
+            for source in selected:
+                latest=self.store.game(source['id'])
+                if not latest or latest['pgn']!=source['pgn']:
+                    self.error('A source PGN changed during the join; originals preserved. Please retry.');return
+            if running and any(g['id']==self.manager.current_id for g in selected):
+                self.error('A selected PGN is now recording. Stop capture before combining it.');return
+            activate=(not running and not capture_running and self.manager is original_manager
+                      and self.manager.current_id==original_game and self.manager._evidence_revision==revision)
+            self.manager.combine_games(selected,pgn,activate=activate)
             self.refresh_library()
-            if capture_running:
+            if not activate:
                 self.statusBar().showMessage('Older PGNs combined • live recording continues unchanged',8000)
             else:
                 self.on_update(self.manager.snapshot())
                 self.navigate(0)
-        self.background(lambda:join_recordings(selected,self.manager.searcher()),saved)
+        def search(confirmed):
+            try:
+                return {'pgn':join_recordings(selected,original_manager.searcher(),confirmed,cancelled=cancelled.is_set)}
+            except AmbiguousGapError as error:
+                return {'ambiguous':error}
+            except ValueError as error:
+                return {'error':str(error)}
+
+        def result(outcome,confirmed=None):
+            if self._closing:return
+            # Older UI/test callbacks pass the completed PGN directly.
+            if isinstance(outcome,str):
+                saved(outcome)
+                return
+            if 'pgn' in outcome:
+                saved(outcome['pgn'])
+                return
+            if 'error' in outcome:
+                cancelled.set();self.error(outcome['error']);return
+            error=outcome['ambiguous']
+            if not error.source_fen or error.later_id is None or len(error.alternatives)>32:
+                cancelled.set()
+                self.error(str(error)+' Too many choices to safely display; originals kept.')
+                return
+            options=[]
+            for path in error.alternatives:
+                board=chess.Board(error.source_fen)
+                names=[]
+                for uci in path:
+                    move=chess.Move.from_uci(uci)
+                    names.append(board.san(move))
+                    board.push(move)
+                options.append(' '.join(names) or '(no missing moves)')
+            labels=[f"{i+1}. {name}" for i,name in enumerate(options)]
+            answer,ok=QInputDialog.getItem(self,'Verify unobserved chess moves',
+                'This unobserved gap needs verification. Only select a line '
+                'if you can verify its moves from the video. Cancel to preserve both PGNs.',
+                labels,0,False)
+            if not ok:
+                cancelled.set()
+                self.statusBar().showMessage('PGN join canceled • original recordings retained',8000)
+                return
+            selection=labels.index(answer)
+            overrides=dict(confirmed or {})
+            overrides[error.later_id]=error.alternatives[selection]
+            self.background(lambda:search(overrides),lambda next_result:result(next_result,overrides))
+
+        self.background(lambda:search({}),result)
     def export_all(self):self.write_export(list(reversed(self.store.games())))
     def export_session(self):
         selected=self.selected_games()
@@ -877,7 +1048,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.auto_record_opening=QCheckBox('Start recording automatically when an opening move appears')
         self.auto_record_opening.setChecked(self.settings.auto_record_opening)
         capture.addRow('Automatic recording',self.auto_record_opening)
-        self.infer_unseen_opening=QCheckBox('Recover unseen opening moves as labeled guesses')
+        self.infer_unseen_opening=QCheckBox('Recover unseen opening only when its move order is unique')
         self.infer_unseen_opening.setChecked(self.settings.infer_unseen_opening)
         capture.addRow('Unseen opening',self.infer_unseen_opening)
         self.settings_interval=QDoubleSpinBox();self.settings_interval.setRange(.1,60);self.settings_interval.setValue(self.settings.interval);self.settings_interval.setSuffix(' seconds');capture.addRow('Permanent screenshot interval',self.settings_interval)
@@ -1002,6 +1173,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.retention_task=self.background(lambda:self.store.run_retention(self.settings.retention_days),lambda _:self.refresh_usage())
 
     def error(self,text):
+        if self._closing or self._stale_worker_signal():return
         logging.warning('User-visible error: %s',text)
         self.statusBar().showMessage(text,15000);QMessageBox.warning(self,'ChessStream',text)
 
@@ -1010,6 +1182,9 @@ class MainWindow(ReviewTools,QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(guide)))
 
     def closeEvent(self,event):
+        if getattr(self,'_library_join_cancel',None):self._library_join_cancel.set()
+        self.manager.cancel_saved_join()
+        self.manager.cancel_background_recovery()
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             if not self.worker.wait(12000):

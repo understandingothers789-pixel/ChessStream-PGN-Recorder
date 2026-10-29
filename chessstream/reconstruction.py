@@ -12,6 +12,10 @@ from time import perf_counter
 import chess
 import numpy as np
 from .domain import Observation, board_labels
+from .commitment import speculative_detour
+from .reachability import TravelBound
+
+ANY_EP = object()
 
 
 @dataclass
@@ -22,6 +26,7 @@ class SearchResult:
     elapsed_ms: float = 0
     depth: int = 0
     shortest_proven: bool = False
+    stop_reason: str = ''
 
 
 def capture_path_rank(board: chess.Board, path: tuple[chess.Move, ...] | list[chess.Move]):
@@ -82,23 +87,36 @@ def select_capture_path(board: chess.Board, paths):
 
 
 class LegalSearcher:
-    def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128):
+    def __init__(self, max_plies=4, node_limit=60000, time_limit_ms=350, threshold=.70, path_limit=128, *, travel_bound=True,cancelled=None):
         self.max_plies = max_plies
         self.node_limit = node_limit
         self.time_limit_ms = time_limit_ms
         self.threshold = threshold
         self.path_limit = path_limit
+        self.travel_bound = travel_bound
+        self.cancelled = cancelled
 
     def search(self, board: chess.Board, observed: Observation, *, target_turn: bool | None = None,
-               first_shortest: bool = False, pawn_first: bool = False) -> SearchResult:
+               first_shortest: bool = False, pawn_first: bool = False,
+               target_castling_rights: int | None = None, cancelled=None,
+               target_ep_square=ANY_EP) -> SearchResult:
         result = SearchResult()
         start = perf_counter()
+        cancelled=cancelled or self.cancelled
+        if cancelled and cancelled():
+            result.exhaustive = False
+            result.stop_reason = 'canceled'
+            return result
         target = observed.labels.tolist()
         mask = observed.probabilities.max(axis=1) >= self.threshold
         if mask.sum() < 60:
             result.exhaustive = False
             return result
-        if observed.matches(board, self.threshold) and (target_turn is None or board.turn==target_turn):
+        if (observed.matches(board, self.threshold)
+                and (target_turn is None or board.turn == target_turn)
+                and (target_castling_rights is None or board.castling_rights == target_castling_rights)
+                and (target_ep_square is ANY_EP or
+                     (board.ep_square if board.has_legal_en_passant() else None)==target_ep_square)):
             result.paths = [()]
             result.shortest_proven = True
             return result
@@ -114,6 +132,8 @@ class LegalSearcher:
             if label <= 6:wanted_white |= bit
             else:wanted_black |= bit
         min_white, min_black = wanted_white.bit_count(), wanted_black.bit_count()
+        travel=(TravelBound(chess.Board(f'{observed.placement()} w - - 0 1'))
+                if self.travel_bound and self.max_plies>=5 and mask.all() else None)
         # Pawns cannot move backward or be recreated by promotion. This cheap
         # reachability proof rejects new-game resets and unrelated openings
         # before traversing a tree of impossible continuations.
@@ -148,16 +168,22 @@ class LegalSearcher:
                     return 1
             return 0
 
-        def dfs(state: chess.Board, remaining: int):
+        def dfs(state: chess.Board, remaining: int, previous_capture_square=None):
             nonlocal abort
             result.nodes += 1
-            if result.nodes > self.node_limit or (result.nodes % 64 == 0 and (perf_counter()-start)*1000 > self.time_limit_ms):
+            if (result.nodes > self.node_limit
+                    or (result.nodes % 64 == 0 and (perf_counter()-start)*1000 > self.time_limit_ms)
+                    or (result.nodes % 64 == 0 and cancelled and cancelled())):
                 abort = True
                 result.exhaustive = False
+                result.stop_reason = ('canceled' if cancelled and cancelled() else
+                                      'node limit' if result.nodes > self.node_limit else 'time limit')
                 return False
             white,black = state.occupied_co[chess.WHITE],state.occupied_co[chess.BLACK]
             # Captured material cannot reappear; promotions preserve piece count.
             if white.bit_count() < min_white or black.bit_count() < min_black:
+                return False
+            if target_castling_rights is not None and (target_castling_rights & ~state.castling_rights):
                 return False
             mismatch = ((state.pawns ^ wanted[1]) | (state.knights ^ wanted[2]) |
                         (state.bishops ^ wanted[3]) | (state.rooks ^ wanted[4]) |
@@ -168,12 +194,17 @@ class LegalSearcher:
                            (state.bishops ^ initial[2]) | (state.rooks ^ initial[3]) |
                            (state.queens ^ initial[4]) | (state.kings ^ initial[5]) |
                            (white ^ initial[6]))
-                if mismatch == 0 and not changed & ~known and (target_turn is None or state.turn==target_turn):
+                if (mismatch == 0 and not changed & ~known
+                        and (target_turn is None or state.turn == target_turn)
+                        and (target_castling_rights is None or state.castling_rights == target_castling_rights)
+                        and (target_ep_square is ANY_EP or
+                             (state.ep_square if state.has_legal_en_passant() else None)==target_ep_square)):
                     result.paths.append(tuple(path))
                     result.shortest_proven = True
                     if first_shortest or len(result.paths) >= self.path_limit:
                         abort = True
                         result.exhaustive = False
+                        result.stop_reason = 'first match' if first_shortest else 'path limit'
                     return True
                 return False
             if mismatch.bit_count() > 4 * remaining:
@@ -183,34 +214,81 @@ class LegalSearcher:
             white_turns = (remaining + int(state.turn == chess.WHITE)) // 2
             black_turns = remaining - white_turns
             white_needed=mismatch & wanted_white;black_needed=mismatch & wanted_black
-            if (white_needed.bit_count() > white_turns + (castle_target_bonus(state,chess.WHITE,white_needed) if white_turns else 0)
-                    or black_needed.bit_count() > black_turns + (castle_target_bonus(state,chess.BLACK,black_needed) if black_turns else 0)):
+            white_deficit=white_needed.bit_count()-white_turns
+            black_deficit=black_needed.bit_count()-black_turns
+            if ((white_deficit>0 and (white_deficit>1 or not white_turns or not castle_target_bonus(state,chess.WHITE,white_needed)))
+                    or (black_deficit>0 and (black_deficit>1 or not black_turns or not castle_target_bonus(state,chess.BLACK,black_needed)))):
                 return False
             key = (state.pawns,state.knights,state.bishops,state.rooks,state.queens,
                    state.kings,white,black,state.turn,state.castling_rights,state.ep_square,remaining)
             if key in dead:return False
+            if travel and remaining>=3 and not travel.possible(state,white_turns,black_turns):
+                return False
 
-            def priority(move):
-                label = (move.promotion or state.piece_type_at(move.from_square)) + (0 if state.turn else 6)
-                return (4 * (target[move.to_square] == label) +
-                        2 * bool(mismatch & chess.BB_SQUARES[move.from_square]) +
-                        bool(mismatch & chess.BB_SQUARES[move.to_square]))
+            def move_order(move):
+                piece=state.piece_type_at(move.from_square)
+                label=(move.promotion or piece) + (0 if state.turn else 6)
+                capture=state.is_capture(move)
+                preference=(0 if capture and move.to_square==previous_capture_square else
+                            1 if capture else 2 if piece==chess.PAWN and abs(move.to_square-move.from_square)==16 else
+                            3 if piece==chess.PAWN else 4)
+                progress=(4 * (target[move.to_square] == label) +
+                          2 * bool(mismatch & chess.BB_SQUARES[move.from_square]) +
+                          bool(mismatch & chess.BB_SQUARES[move.to_square]))
+                return preference,-progress,abs(3.5-chess.square_file(move.to_square)),move.uci()
 
             # Apply the same preference to quick first-match searches and to
             # exhaustive tie-breaking: captures, double pawn pushes, single
             # pawn pushes, then pieces. Target progress breaks remaining ties.
-            previous_capture_square=None
-            if path:
-                last=path[-1]
-                state.pop()
-                was_capture=state.is_capture(last)
-                state.push(last)
-                if was_capture:previous_capture_square=last.to_square
-            moves=sorted(state.legal_moves,key=lambda move:(
-                guess_move_priority(state,move,previous_capture_square),
-                -priority(move),abs(3.5-chess.square_file(move.to_square)),move.uci()))
+            # Once the opponent has exactly the material required by the
+            # observation, another capture cannot possibly reach that target.
+            # Exclude it before legal generation and board allocation. En
+            # passant needs a separate check because its destination is empty.
+            captures_forbidden=(black.bit_count()==min_black if state.turn else white.bit_count()==min_white)
+            to_mask=chess.BB_ALL
+            if captures_forbidden:to_mask &= ~(black if state.turn else white)
+            if remaining == 1:
+                # An ordinary final move must leave its own piece on a known
+                # target square and vacate a mismatched origin. Filter during
+                # legal generation, before sorting or pushing doomed moves.
+                # Castling is exceptional: python-chess may encode its target
+                # as the rook origin (Chess960), and a king may stay put.
+                from_mask=mismatch | state.kings
+                final_destinations=wanted_white if state.turn else wanted_black
+                if state.castling_rights & state.occupied_co[state.turn]:
+                    rank=0 if state.turn else 7
+                    final_destinations |= state.castling_rights | chess.BB_SQUARES[chess.square(2,rank)] | chess.BB_SQUARES[chess.square(6,rank)]
+                to_mask &= final_destinations
+                def final_candidates():
+                    for move in state.generate_legal_moves(from_mask=from_mask,to_mask=to_mask):
+                        if not state.is_castling(move):
+                            # A non-castling move vacates its origin and places
+                            # exactly this piece at its destination. Captures,
+                            # en passant and underpromotions follow that rule.
+                            label=(move.promotion or state.piece_type_at(move.from_square)) + (0 if state.turn else 6)
+                            if target[move.from_square] or target[move.to_square]!=label:continue
+                        yield move
+                candidates=final_candidates()
+            else:
+                from_mask=chess.BB_ALL
+                if remaining == 2:
+                    # This is the mover's last turn, too: the opponent cannot
+                    # restore one of its pieces or fill its missing targets.
+                    # With no missing target, allow sacrifices anywhere; the
+                    # opponent's final move might capture that extra piece.
+                    from_mask=mismatch | state.kings
+                    needed=white_needed if state.turn else black_needed
+                    if needed:
+                        destinations=needed
+                        if state.castling_rights & state.occupied_co[state.turn]:
+                            rank=0 if state.turn else 7
+                            destinations |= state.castling_rights | chess.BB_SQUARES[chess.square(2,rank)] | chess.BB_SQUARES[chess.square(6,rank)]
+                        to_mask &= destinations
+                candidates=state.generate_legal_moves(from_mask=from_mask,to_mask=to_mask)
+            moves=sorted(candidates,key=move_order)
             found = False
             for move in moves:
+                if captures_forbidden and state.ep_square is not None and state.is_en_passant(move):continue
                 if remaining == 1:
                     changed = chess.BB_SQUARES[move.from_square] | chess.BB_SQUARES[move.to_square]
                     if state.is_en_passant(move):
@@ -222,9 +300,10 @@ class LegalSearcher:
                         changed |= chess.BB_SQUARES[chess.square(5 if kingside else 3, rank)]
                     if mismatch & ~changed:
                         continue
+                capture_square=move.to_square if state.is_capture(move) else None
                 state.push(move)
                 path.append(move)
-                try:found = dfs(state, remaining-1) or found
+                try:found = dfs(state, remaining-1,capture_square) or found
                 finally:path.pop();state.pop()
                 if abort:return found
             # Only cache exhausted failures. Caching successes would hide
@@ -232,13 +311,14 @@ class LegalSearcher:
             if not found:dead.add(key)
             return found
 
-        # Normal searches enumerate shortest alternatives; quick guesses stop at the first match.
+        # Evidence searches enumerate alternatives; classification probes may stop early.
         state = board.copy(stack=False)
         for depth in range(1, self.max_plies+1):
             if target_turn is not None and (board.turn ^ bool(depth & 1))!=target_turn:continue
             result.depth = depth
             if (perf_counter()-start)*1000 > self.time_limit_ms:
                 result.exhaustive = False
+                result.stop_reason = 'time limit'
                 break
             dfs(state, depth)
             if abort or result.paths:
@@ -251,6 +331,12 @@ class LegalSearcher:
 class Branch:
     root_fen: str
     moves: tuple[str, ...]
+    requires_confirmation: bool | None = None
+
+    def __post_init__(self):
+        if self.requires_confirmation is None:
+            self.requires_confirmation=bool(self.moves) and speculative_detour(chess.Board(self.root_fen),
+                [chess.Move.from_uci(uci) for uci in self.moves])
 
     def board(self) -> chess.Board:
         b = chess.Board(self.root_fen)
@@ -282,6 +368,10 @@ class Reconstructor:
         self.status = "recording" if len(self.branches) == 1 else "awaiting side to move"
         self.incomplete = False
         self.confirmation_plies = confirmation_plies
+        self.history_unknown = bool(roots)
+        # Repeated unobserved piece excursions are not proof of actual moves.
+        # Retain such paths as hypotheses until explicit user confirmation.
+        self.gap_requires_confirmation = False
 
     def _recover_provisional(self, observed, update):
         """Replace an unconfirmed hover or unsupported reversible detour.
@@ -298,7 +388,7 @@ class Reconstructor:
             return None
         direct = LegalSearcher(self.searcher.max_plies, self.searcher.node_limit,
                                self.searcher.time_limit_ms * .7, self.searcher.threshold,
-                               self.searcher.path_limit).search(self.board, observed)
+                               self.searcher.path_limit,cancelled=self.searcher.cancelled).search(self.board, observed)
         update.nodes += direct.nodes;update.search_ms += direct.elapsed_ms
         if not direct.exhaustive or not direct.paths:
             return None
@@ -311,7 +401,16 @@ class Reconstructor:
             return None
         old = {(b.root_fen, b.moves) for b in self.branches}
         root = self.board.fen()
-        result = [Branch(root,p) for p in candidates]
+        result=[]
+        for p in candidates:
+            prior=[branch for branch in self.branches if p[:len(branch.moves)]==branch.moves]
+            # A witnessed intermediate board separates gaps. Replaying the
+            # entire pending suffix would misclassify an observed Bg4 followed
+            # by dxe5 Bxf3 as an entirely unseen bishop excursion.
+            requires=(any(branch.requires_confirmation or speculative_detour(branch.board(),
+                [chess.Move.from_uci(uci) for uci in p[len(branch.moves):]]) for branch in prior)
+                if prior else speculative_detour(self.board,[chess.Move.from_uci(uci) for uci in p]))
+            result.append(Branch(root,p,requires))
         update.recovered = any((root,p) not in old for p in candidates) and not compatible
         # A shorter supported line also removes unverified reversible cycles.
         update.recovered |= any(len(b.moves)>len(paths[0]) for b in self.branches)
@@ -325,7 +424,7 @@ class Reconstructor:
             # with short continuations that leave that square uncertain.
             probe=Reconstructor.restore(self.serialize(),LegalSearcher(2,
                 min(8000,self.searcher.node_limit),min(50.,self.searcher.time_limit_ms),
-                self.searcher.threshold,self.searcher.path_limit))
+                self.searcher.threshold,self.searcher.path_limit,cancelled=self.searcher.cancelled))
             short=probe._observe_exact(observed)
             if short.status=='unmatched position • recording continues':
                 retry=self._retry_noisy_squares(observed,short,candidates)
@@ -354,7 +453,7 @@ class Reconstructor:
         return tuple(sorted(candidates)) if len(candidates)<=4 else ()
 
     def _adopt_probe(self, probe):
-        for name in ('initial_fen','board','branches','verified','history','incomplete','status'):
+        for name in ('initial_fen','board','branches','verified','history','incomplete','status','gap_requires_confirmation','history_unknown'):
             setattr(self,name,getattr(probe,name))
 
     def _retry_noisy_squares(self, observed, original_update, candidates):
@@ -380,7 +479,7 @@ class Reconstructor:
                 remaining_ms=time_budget-(perf_counter()-started)*1000
                 if remaining_nodes<1 or remaining_ms<=0:return original_update
                 searcher=LegalSearcher(min(2,self.searcher.max_plies),remaining_nodes,
-                    remaining_ms,self.searcher.threshold,self.searcher.path_limit)
+                    remaining_ms,self.searcher.threshold,self.searcher.path_limit,cancelled=self.searcher.cancelled)
                 probe=Reconstructor.restore(state,searcher)
                 evidence=observed.with_unknown(squares)
                 retry=probe._observe_exact(evidence)
@@ -435,14 +534,24 @@ class Reconstructor:
                     if remaining_nodes<=0 or remaining_ms<=0:
                         all_complete=False
                         break
-                    searcher=LegalSearcher(depth,remaining_nodes,remaining_ms,self.searcher.threshold,self.searcher.path_limit)
+                    searcher=LegalSearcher(depth,remaining_nodes,remaining_ms,self.searcher.threshold,self.searcher.path_limit,
+                                           cancelled=self.searcher.cancelled)
                     result=searcher.search(state,observed)
                     cache[key]=result
                     update.nodes += result.nodes
                     update.search_ms += result.elapsed_ms
                 all_complete &= result.exhaustive
                 for path in result.paths:
-                    survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path)))
+                    if len(branch.moves)+len(path)>min(128,max(32,self.searcher.max_plies*4)):
+                        all_complete=False
+                        break
+                    survivors.append(Branch(branch.root_fen, branch.moves+tuple(m.uci() for m in path),
+                        branch.requires_confirmation or speculative_detour(state,path)))
+                    if len(survivors) > self.searcher.path_limit:
+                        all_complete = False
+                        break
+                if not all_complete:
+                    break
             if survivors or not all_complete:
                 break
         if not all_complete:
@@ -460,21 +569,15 @@ class Reconstructor:
             return update
         self.incomplete = False
         unique = {(b.root_fen, b.moves): b for b in survivors}
-        # When several shortest move orders explain the same observed endpoint,
-        # prefer a natural capture/recapture sequence and keep one stable line.
-        # Distinct starting roots remain separate hypotheses.
-        grouped = {}
-        for branch in unique.values():
-            endpoint = branch.board().board_fen()
-            grouped.setdefault((branch.root_fen, endpoint), []).append(branch)
-        self.branches = []
-        for (root_fen, _), branches in grouped.items():
-            root = chess.Board(root_fen)
-            update.tie_broken |= len(branches) > 1
-            selected = select_capture_path(root, [tuple(chess.Move.from_uci(m) for m in b.moves)
-                                                    for b in branches])[0]
-            selected_uci = tuple(m.uci() for m in selected)
-            self.branches.append(next(b for b in branches if b.moves == selected_uci))
+        # A plausible-looking capture heuristic is not evidence for move order.
+        # Keep EVERY exhausted shortest alternative pending so subsequent board
+        # frames can eliminate hypotheses. Only their shared legal prefix may
+        # enter the authoritative PGN, and user selection remains available.
+        self.branches = list(unique.values())
+        # Recompute from surviving pending hypotheses on EVERY completed
+        # observation. A discarded queen excursion cannot poison future
+        # ordinary moves, and rejected/incomplete searches must not set flags.
+        self.gap_requires_confirmation = any(branch.requires_confirmation for branch in self.branches)
         roots = {b.root_fen for b in self.branches}
         if len(roots) == 1 and not self.verified:
             self.initial_fen = self.branches[0].root_fen
@@ -488,6 +591,10 @@ class Reconstructor:
                 prefix = i
                 break
         common = self.branches[0].moves[:prefix]
+        if self.gap_requires_confirmation:
+            # Subsequent identical frames cannot corroborate an unseen order.
+            # Do not silently confirm a speculative reversible reconstruction.
+            common = ()
         if self.confirmation_plies:
             # Repetition or elapsed time cannot prove a piece was dropped.
             # The opponent's reply confirms the preceding move, while the last
@@ -505,8 +612,10 @@ class Reconstructor:
             update.verified.append(uci)
         if common:
             root = self.board.fen()
-            self.branches = [Branch(root, b.moves[len(common):]) for b in self.branches]
-        if self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
+            self.branches = [Branch(root, b.moves[len(common):],b.requires_confirmation) for b in self.branches]
+        if self.gap_requires_confirmation:
+            self.status = "possible invented move detour • confirm sequence"
+        elif self.confirmation_plies and len(self.branches)==1 and len(self.branches[0].moves)==1:
             self.status = "provisional move • waiting for opponent response"
         else:
             self.status = "uncertain • choose a legal sequence" if any(b.moves for b in self.branches) or len(self.branches)>1 else "recording"
@@ -518,8 +627,8 @@ class Reconstructor:
         """Atomically attach the shortest legal continuation from the saved prefix.
 
         Pending hovers are hypotheses, so search again from the verified board.
-        Equal shortest paths to the same endpoint are resolved by capture
-        continuity, then stable UCI ordering. A limited search changes nothing.
+        Equal shortest paths are kept as unresolved alternatives. A limited
+        search changes nothing; only their common prefix can be committed.
         """
         searcher = searcher or self.searcher
         if observed.uncertain_squares(max(.8, searcher.threshold)):
@@ -539,6 +648,8 @@ class Reconstructor:
             self.verified.append(uci)
             self.history.append(self.board.board_fen())
         self.branches = probe.branches
+        self.history_unknown |= probe.history_unknown
+        self.gap_requires_confirmation = probe.gap_requires_confirmation
         self.incomplete = False
         self.status = probe.status
         return update
@@ -576,13 +687,16 @@ class Reconstructor:
             self.verified.append(uci)
             self.history.append(self.board.board_fen())
         self.branches = [Branch(self.board.fen(), ())]
+        self.gap_requires_confirmation = False
         self.status = "recording • sequence confirmed manually"
         return moves
 
     def serialize(self) -> dict:
         return {"initial_fen":self.initial_fen,"verified":list(self.verified),
-                "branches":[{"root_fen":b.root_fen,"moves":list(b.moves)} for b in self.branches],
-                "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies}
+                "branches":[{"root_fen":b.root_fen,"moves":list(b.moves),
+                             "requires_confirmation":b.requires_confirmation} for b in self.branches],
+                "status":self.status,"incomplete":self.incomplete,"confirmation_plies":self.confirmation_plies,
+                "gap_requires_confirmation":self.gap_requires_confirmation,"history_unknown":self.history_unknown}
 
     @classmethod
     def restore(cls, data: dict, searcher: LegalSearcher | None = None) -> Reconstructor:
@@ -591,8 +705,12 @@ class Reconstructor:
             r.board.push_uci(uci)
             r.history.append(r.board.board_fen())
         r.verified = list(data["verified"])
-        r.branches = [Branch(b["root_fen"], tuple(b["moves"])) for b in data["branches"]]
+        r.branches = [Branch(b["root_fen"], tuple(b["moves"]),b.get("requires_confirmation"))
+                      for b in data["branches"]]
         r.status = data.get("status", "recovered")
         r.incomplete = data.get("incomplete",False)
         r.confirmation_plies = data.get("confirmation_plies",0)
+        r.gap_requires_confirmation = data.get("gap_requires_confirmation",False) or any(
+            branch.requires_confirmation for branch in r.branches)
+        r.history_unknown = data.get("history_unknown",False)
         return r

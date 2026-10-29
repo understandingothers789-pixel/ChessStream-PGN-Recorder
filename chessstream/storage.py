@@ -47,6 +47,10 @@ class Store:
         CREATE TABLE IF NOT EXISTS deletion_jobs(
           id INTEGER PRIMARY KEY, due TEXT NOT NULL, scope TEXT NOT NULL, completed TEXT, error TEXT);
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, timestamp TEXT, action TEXT, detail TEXT);
+        CREATE TABLE IF NOT EXISTS board_trace(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, game_id TEXT,
+          first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, comparisons INTEGER NOT NULL,
+          detail TEXT NOT NULL);
         """)
         self.db.commit()
 
@@ -91,6 +95,22 @@ class Store:
         with self.transaction() as db:
             db.execute("INSERT INTO observations(session_id,game_id,timestamp,placement,confidence,status,evidence) VALUES(?,?,?,?,?,?,?)",
                        (sid,gid,obs.timestamp,obs.placement(),obs.confidence,status,json.dumps(evidence) if evidence else None))
+
+    def trace_board(self,sid,gid,timestamp,detail):
+        """Bounded metadata only: coalesce repeats, retain 10,000 transitions.
+
+        IDs intentionally survive game deletion. This diagnostic history can
+        explain a wrong game selection without keeping screenshot pixels.
+        """
+        payload=json.dumps(detail,sort_keys=True,separators=(',',':'))
+        with self.transaction() as db:
+            last=db.execute('SELECT id,session_id,game_id,detail FROM board_trace ORDER BY id DESC LIMIT 1').fetchone()
+            if last and last['session_id']==sid and last['game_id']==gid and last['detail']==payload:
+                db.execute('UPDATE board_trace SET last_seen=?,comparisons=comparisons+1 WHERE id=?',(timestamp,last['id']))
+                return
+            cursor=db.execute('INSERT INTO board_trace(session_id,game_id,first_seen,last_seen,comparisons,detail) VALUES(?,?,?,?,1,?)',
+                             (sid,gid,timestamp,timestamp,payload))
+            db.execute('DELETE FROM board_trace WHERE id<=?',(cursor.lastrowid-10_000,))
 
     def associate_screenshots(self, sid, gid, since=None, initial_placement=None):
         clauses=['session_id=?'];args=[sid]

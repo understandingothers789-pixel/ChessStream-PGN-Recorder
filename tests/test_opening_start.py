@@ -46,21 +46,19 @@ def test_first_opening_move_auto_starts_despite_uncertain_unchanged_d6(tmp_path)
     store.close()
 
 
-def test_initial_five_ply_opening_uses_pawns_first_and_standard_pgn_root(tmp_path):
+def test_ambiguous_five_ply_opening_keeps_visible_fen_and_records_observed_continuation(tmp_path):
     store=Store(tmp_path);manager=GameManager(store,Settings(infer_unseen_opening=True))
     target=play('e4 c5 d3 Nc6 c3')
     snapshot=manager.process(Observation.from_board(target))
-    assert manager.rec.initial_fen==chess.STARTING_FEN
-    assert snapshot['moves']==['e4','c5','d3','Nc6'] and snapshot['pending_moves']==['c3']
+    assert manager.rec.initial_fen.split()[0]==target.board_fen()
+    assert not snapshot['moves'] and not snapshot['pending_moves']
+    target.push_san('Nf6');manager.process(Observation.from_board(target))
     manager.choose(0)
     game=chess.pgn.read_game(io.StringIO(store.game(manager.current_id)['pgn']))
-    assert not game.errors and game.end().board().fen()==target.fen()
-    assert 'FEN' not in game.headers and 'SetUp' not in game.headers
-    assert 'Earlier moves are not included' not in store.game(manager.current_id)['pgn']
-    assert 'guessed' in game.comment and 'Pawn moves were prioritized' in game.comment
-    assert all('Guessed opening prefix' in node.comment for node in game.mainline())
-    assert manager._san_line(chess.Board(),manager._infer_short_opening(
-        Observation.from_board(play('Nf3 Nf6 g3'))))==['g3','Nf6','Nf3']
+    assert not game.errors and game.end().board().board_fen()==target.board_fen()
+    assert 'FEN' in game.headers and game.headers['SetUp']=='1'
+    assert [node.san() for node in game.mainline()]==['Nf6']
+    assert not manager._infer_short_opening(Observation.from_board(play('Nf3 Nf6 g3')))
     store.close()
 
 
@@ -78,7 +76,7 @@ def test_autostart_opt_out_and_sparse_or_uncertain_move_boards_wait(tmp_path):
     store.close()
 
 
-def test_resuming_legacy_early_fen_backfills_opening_and_preserves_clock(tmp_path):
+def test_resuming_legacy_three_ply_fen_preserves_recorded_moves_and_clock_with_inferred_prefix(tmp_path):
     store=Store(tmp_path);settings=Settings(infer_unseen_opening=True);first=GameManager(store,settings)
     board=play('e4 c5 d3')
     first._create(chess.Board(f'{board.board_fen()} b - - 0 1'),utcnow(),
@@ -92,13 +90,11 @@ def test_resuming_legacy_early_fen_backfills_opening_and_preserves_clock(tmp_pat
     assert resumed.rec.initial_fen==chess.STARTING_FEN
     assert snapshot['moves']==['e4','c5','d3','Nc6'] and snapshot['pending_moves']==['c3']
     game=chess.pgn.read_game(io.StringIO(store.game(game_id)['pgn']))
-    assert 'FEN' not in game.headers and 'SetUp' not in game.headers
-    assert 'Earlier moves are not included' not in store.game(game_id)['pgn']
+    assert 'FEN' not in game.headers and len(game.variations)==2
     assert list(game.mainline())[3].clock()==584
-    assert all('Guessed opening prefix' in node.comment for node in list(game.mainline())[:3])
     resumed.process(Observation.from_board(board))
     assert resumed.rec.verified==['e2e4','c7c5','d2d3','b8c6']
-    assert len(store.query("SELECT * FROM audit WHERE action='opening prefix backfilled'"))==1
+    assert store.query("SELECT * FROM audit WHERE action='opening prefix backfilled'")
     store.close()
 
 

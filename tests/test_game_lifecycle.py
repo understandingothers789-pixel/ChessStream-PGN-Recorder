@@ -359,3 +359,126 @@ def test_explicit_analysis_mode_preserves_the_played_result(tmp_path):
     assert not manager.declare_end(EndMessage('1-0','checkmate','Checkmate',.99),Observation.from_board(manager.rec.board))
     assert manager.current_id==old and manager.headers['Result']=='*' and manager.terminal_message is None
     store.close()
+
+
+def test_hikaru_opening_e4_kept_after_name_ocr_typo_and_continuation(tmp_path):
+    """Observed 2026-10-20 bug: e4 was saved; OCR typo triggered a new FEN PGN.
+
+    Input was white DoingMyBest, black Builtifferent / BuiltDifferent,
+    then 1.e4 c5 2.Nf3 Nc6 with Black shown at the bottom.
+    """
+    from chessstream.lifecycle import probable_ocr_variant
+    assert probable_ocr_variant('Builtifferent','BuiltDifferent')
+    assert probable_ocr_variant('BulltDifferent','BuiltDifferent')
+    assert not probable_ocr_variant('OpponentA','OpponentB')
+    assert not probable_ocr_variant('Alice123','Alice124')
+    store=Store(tmp_path);manager=GameManager(store,Settings())
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4')
+    manager.observe_context({'names':{'white':'DoingMyBest','black':'Builtifferent'},
+                             'names_stable':True,'clocks':{'white':599,'black':593}},'opening-1')
+    first=manager.current_id
+    assert store.game(first) and '1. e4' in store.game(first)['pgn']
+    board=board_after('e4 c5')
+    for i in range(8):
+        manager.observe_context({'names':{'white':'DoingMyBest','black':'BuiltDifferent'},
+                                 'names_stable':True,'clocks':{'white':599,'black':593-i}},
+                                f'opening-variant-{i}')
+        manager.process(Observation.from_board(board))
+    assert manager.current_id==first
+    assert len(store.games())==1
+    assert '1. e4' in store.game(first)['pgn']
+    assert not manager.lifecycle.changed_names(manager,raw=True)
+    store.close()
+
+
+def test_false_overlay_names_do_not_trigger_a_game_boundary():
+    board=(100,120,700,700)
+    false=[
+        ('YouTube Chess Recording',.99,(160,80,410,100)),
+        ('Copy FEN',.99,(160,855,270,880)),
+        ('Flip',.99,(160,855,220,880)),
+        ('www.youtube.com',.99,(160,82,320,105)),
+    ]
+    context=extract_context(false,board,'white')
+    assert not context['names'] and not context['clocks']
+    real=[
+        ('DoingMyBest (1673)',.97,(160,80,340,101)),
+        ('BuiltDifferent (1671)',.97,(160,855,360,880)),
+    ]
+    context=extract_context(false+real,board,'white')
+    assert context['names']=={'black':'DoingMyBest','white':'BuiltDifferent'}
+
+
+def test_slowkaru_video_seek_over_same_opponents_never_creates_three_games(tmp_path):
+    """Real October 20 stream: older e4 position reappeared, then checkmate.
+
+    A finite search is not a game-boundary detector, even when the stable
+    screenshot is >4 plies from the current PGN and the stream clocks jump.
+    """
+    store=Store(tmp_path)
+    manager=GameManager(store,Settings())
+    now=[100.]
+    manager._clock=lambda:now[0]
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4 c5 Nf3 Nc6 c4 g6 b3 Bg7')
+    pair={'white':'DoingMyBest','black':'BuiltDifferent'}
+    manager.observe_context({'names':pair,'raw_names':pair,'names_stable':True,
+                             'clocks':{'white':510,'black':523}},'before-seek')
+    gid=manager.current_id
+    verified=list(manager.rec.verified)
+    far=board_after('e4 c5 Nf3 Nc6 c4 g6 b3 Bg7 d4 Nxd4 Nxd4 Bxd4 Qf3 Bxa1 Na3 d6 e5 Bxe5 Nb5 Nf6 Bf4')
+    for i in range(12):
+        snapshot=frame(manager,now,far,pair,{'white':509-i*.2,'black':522-i*.2})
+        assert manager.current_id==gid and len(store.games())==1
+        assert manager.rec.verified==verified
+    assert 'PGN protected' in snapshot['status']
+    # The video jumps back to its earlier e4-only position with the clocks
+    # again near 10 minutes, then forward to the later chess position.
+    early=board_after('e4')
+    for i in range(4):
+        frame(manager,now,early,pair,{'white':597,'black':588})
+        assert manager.current_id==gid
+    for i in range(8):
+        frame(manager,now,far,pair,{'white':503-i*.2,'black':520-i*.2})
+        assert manager.current_id==gid and len(store.games())==1
+    assert manager.rec.verified==verified
+    assert '1. e4' in store.game(gid)['pgn']
+    store.close()
+
+
+def test_same_names_without_clock_reset_and_large_gap_quarantines_without_splitting(tmp_path):
+    store,manager,now=setup(tmp_path)
+    gid=manager.current_id
+    original=list(manager.rec.verified)
+    far=board_after('d4 d5 c4 e6 Nc3 Nf6 Bg5 Be7 e3 O-O Nf3 h6 Bh4 b6 cxd5 exd5')
+    for i in range(10):
+        frame(manager,now,far,NAMES,{'white':40-i*.1,'black':76-i*.1})
+        assert manager.current_id==gid
+    assert len(store.games())==1
+    assert manager.rec.verified==original
+    assert manager.lifecycle.summary(manager)['state']=='unresolved move gap'
+    store.close()
+
+
+def test_active_game_cannot_return_to_archived_false_draw_even_when_position_matches(tmp_path):
+    """An earlier false 'draw' ended the six-ply game during a live broadcast.
+
+    Reusing the same data folder must not auto-resume that terminal record,
+    leaving the active recorder trapped in review-only mode.
+    """
+    store,manager,now=setup(tmp_path)
+    old_id=manager.current_id
+    old_position=manager.rec.board.copy()
+    assert manager.declare_end(EndMessage('1/2-1/2','game ended','Draw',.99))
+    assert store.game(old_id)['headers'] and manager.headers['Result']=='1/2-1/2'
+    manager._create(chess.Board(),utcnow())
+    manager.correct_line('e4 e5 Nf3 Nc6')
+    manager.observe_context({'names':NAMES,'names_stable':True},'current')
+    fresh_id=manager.current_id
+    assert manager.headers.get('Result','*')=='*'
+    # Identical people and exact archived endpoint do not constitute
+    # evidence that the live, ongoing game has already ended.
+    assert manager.lifecycle._return_game(manager,Observation.from_board(old_position)) is None
+    assert manager.current_id==fresh_id!=old_id
+    store.close()
