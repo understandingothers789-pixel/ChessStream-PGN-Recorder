@@ -74,3 +74,26 @@ def test_finished_from_old_worker_does_not_reset_new_worker_controls(tmp_path,mo
     assert win.pause_button.isEnabled() and win.region is None
     assert win.snapshot.get('game_id')!='obsolete'
     win.worker=None;win.close();win.deleteLater();app.processEvents()
+
+
+def test_native_ocr_owner_is_released_inside_capture_thread(tmp_path,monkeypatch):
+    import contextlib
+    import mss
+    import chessstream.capture as capture
+    from chessstream.games import GameManager
+    from chessstream.domain import Settings
+    from chessstream.storage import Store
+    app=QApplication.instance() or QApplication([])
+    created=[];released=[]
+    class Detector:
+        def __init__(self):created.append(threading.get_ident())
+        def __del__(self):released.append(threading.get_ident())
+    monkeypatch.setattr(capture,'EndMessageDetector',Detector)
+    monkeypatch.setattr(mss,'mss',lambda:contextlib.nullcontext(object()))
+    store=Store(tmp_path);manager=GameManager(store,Settings())
+    worker=RecordingWorker(manager,Region(0,0,100,100),preview_only=True)
+    worker.stop();worker.start()
+    assert worker.wait(4000)
+    assert created and released==created and created[0]!=threading.get_ident()
+    assert worker._text_detector is None and worker.audio is None
+    store.close()

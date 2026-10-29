@@ -562,6 +562,13 @@ class RecordingWorker(QThread):
             if self.audio:
                 try:self.audio.stop()
                 except Exception as exc:self.audio_failed(exc)
+            self.audio=None
+            # OCR owns native inference sessions. Release worker-created
+            # sessions here, rather than later when Qt deletes this object
+            # on the GUI thread during restart.
+            recognizer=None
+            self._text_detector=None
+            self._context_stabilizer=None
             self.manager._audio_evidence=None
             self.manager.cancel_background_recovery()
             self.manager.cancel_saved_join()

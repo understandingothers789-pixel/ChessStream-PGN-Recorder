@@ -24,3 +24,16 @@ notification, repeated Start requests, stale update/region/finished signals and
 PGN persistence before restart. Physical Windows capture/audio shutdown remains
 untested here. Without the original crash report, this fixes a verified unsafe
 restart path but does not establish that it caused every reported crash.
+
+## Native session teardown — dev17
+
+The supplied pythonw.exe dialog reports an access violation but does not name the
+faulting module. A further lifecycle review found that the worker retained its
+OCR detector (which owns native inference sessions) after run() returned. Qt could
+then destroy those sessions on the GUI thread. Cleanup now explicitly releases
+the recognizer, OCR detector, context stabilizer and stopped audio listener before
+capture-thread exit. This complements dev16's join-before-restart protection.
+A real QThread regression verifies that detector construction and destruction
+occur on the same capture thread, not the GUI thread. This does not reproduce or
+prove the cause of the reported Windows access violation; physical Windows
+inference/capture restart testing remains outstanding.
