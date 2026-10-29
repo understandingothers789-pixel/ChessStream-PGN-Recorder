@@ -556,7 +556,6 @@ class RecordingWorker(QThread):
                     self.update.emit(snapshot)
                     self.stopping.wait(max(.005,period-(time.monotonic()-tick)))
         except Exception as e:
-            import logging
             logging.exception("Recording worker failed")
             self.problem.emit(f"Recording stopped: {e}. Verified PGN remains saved.")
         finally:
@@ -573,5 +572,4 @@ class RecordingWorker(QThread):
                 elif not self.manager.rec:
                     store.finish_session(self.manager.session_id)
             except Exception:
-                import logging
                 logging.exception("Could not finalize recording")

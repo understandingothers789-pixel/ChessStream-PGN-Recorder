@@ -71,6 +71,7 @@ class MainWindow(ReviewTools,QMainWindow):
         super().__init__();self.root=root;self.settings=Settings.load(root/"settings.json")
         self.store=Store(root);self.manager=GameManager(self.store,self.settings)
         self.worker=None;self._preview_active=False;self.tasks=[];self.overlays=[];self.latest_image=None;self.snapshot={}
+        self._worker_stopping=False;self._restart_requested=False
         self._live_review=None
         self.retention_task=None;self._closing=False
         self.region=Region(**self.settings.region) if self.settings.region else None
@@ -89,7 +90,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.stack=QStackedWidget();self.nav=[];self.nav_group=QButtonGroup(self)
         for i,name in enumerate(["◉   Live recording","▦   Game library","▧   Screenshots","⚙   Settings"]):
             b=button(name,lambda checked=False,n=i:self.navigate(n));b.setObjectName("nav");b.setCheckable(True);self.nav_group.addButton(b,i);sidebar.addWidget(b);self.nav.append(b)
-        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev15"))
+        sidebar.addStretch();sidebar.addWidget(muted("Local recognition\nNo accounts or paid APIs\n\nv1.6.24-dev16"))
         sidebar.addWidget(button("Open user guide",self.open_guide))
         sidebar.addWidget(button("Diagnostics / logs",self.show_diagnostics))
         layout.addWidget(side);layout.addWidget(self.stack,1)
@@ -277,6 +278,14 @@ class MainWindow(ReviewTools,QMainWindow):
                 'Permanent screenshots: at the selected interval. Analysis frames stay temporary.')
 
     def toggle_start(self):
+        if self._closing:return
+        if self._worker_stopping or (self.worker and not self.worker.isRunning()):
+            self._restart_requested=True
+            logging.info('Recording restart requested; waiting for previous capture worker to join')
+            self.start_button.setEnabled(False)
+            self.recording_status.setText('Waiting for capture shutdown before restarting…')
+            if self.worker:self._retire_worker(self.worker)
+            return
         if self.worker and self.worker.isRunning():
             if self._preview_active:
                 self.worker.commands.put(("record",None));self._preview_active=False
@@ -298,22 +307,43 @@ class MainWindow(ReviewTools,QMainWindow):
         self.start_button.setEnabled(False);self.pause_button.setEnabled(True);self.stop_button.setEnabled(True);self.recording_status.setText("●  Capturing • waiting for a stable board")
 
     def pause(self):
-        if not self.worker or not self.worker.isRunning():return
+        if self._worker_stopping or not self.worker or not self.worker.isRunning():return
         if self.worker.paused.is_set():self.worker.paused.clear();self.pause_button.setText("Pause")
         else:self.worker.paused.set();self.pause_button.setText("Resume");self.recording_status.setText("Ⅱ  Paused • PGN and screenshots preserved")
 
     def stop(self):
         if self.worker and self.worker.isRunning():
-            self.worker.stop();self.stop_button.setEnabled(False);self.recording_status.setText("Saving recording…")
+            self._worker_stopping=True;self._restart_requested=False
+            logging.info('Recording stop requested; saving and shutting down capture worker')
+            self.worker.stop();self.start_button.setEnabled(False);self.pause_button.setEnabled(False)
+            self.stop_button.setEnabled(False);self.recording_status.setText("Saving recording…")
 
     def worker_finished(self):
+        worker=self.sender()
+        if worker is not self.worker or self._closing:return
+        self._retire_worker(worker)
+
+    def _retire_worker(self,worker):
+        if self._closing or worker is not self.worker:return
+        # finished/isRunning alone do not join thread-local/native teardown.
+        # Keep the QThread alive and poll without blocking the GUI.
+        if not worker.wait(0):
+            self._worker_stopping=True
+            self.start_button.setEnabled(False);self.pause_button.setEnabled(False)
+            QTimer.singleShot(20,lambda:self._retire_worker(worker));return
+        self.worker=None;self._worker_stopping=False
+        logging.info('Capture worker joined; restart is safe')
+        worker.deleteLater()
         was_preview=self._preview_active;self._preview_active=False
         self.start_button.setEnabled(True);self.pause_button.setEnabled(False);self.pause_button.setText("Pause");self.stop_button.setEnabled(False)
         self.recording_status.setText("■  Preview stopped" if was_preview else "■  Stopped • verified PGN saved");self.refresh_usage()
+        if self._restart_requested:
+            self._restart_requested=False
+            QTimer.singleShot(0,self.toggle_start)
 
     def start_preview(self):
         """Show the selected board and recognition result without saving data."""
-        if not self.region or (self.worker and self.worker.isRunning()):return
+        if self._closing or not self.region or self.worker is not None:return
         self._preview_active=True
         self.worker=RecordingWorker(self.manager,self.region,preview_only=True)
         self.worker.frame.connect(self.on_frame);self.worker.update.connect(self.on_update)
@@ -324,9 +354,16 @@ class MainWindow(ReviewTools,QMainWindow):
                                      '◉  Live preview • click Start recording when ready')
 
     def on_frame(self,image):
+        if self._closing or self._worker_stopping or self._stale_worker_signal():return
         self.latest_image=image;self.live_image.set_array(image)
 
+    def _stale_worker_signal(self):
+        sender=self.sender()
+        return isinstance(sender,RecordingWorker) and sender is not self.worker
+
     def on_update(self,snap):
+        if self._closing or self._stale_worker_signal():return
+        if self._worker_stopping and isinstance(self.sender(),RecordingWorker):return
         self.snapshot=snap
         notation_key=(snap.get('recorded_pgn',''),snap.get('initial_fen',chess.STARTING_FEN),tuple(snap.get('moves',[])))
         if notation_key!=getattr(self,'_notation_document_key',None):
@@ -538,6 +575,7 @@ class MainWindow(ReviewTools,QMainWindow):
         if not self.worker or not self.worker.isRunning():self.start_preview()
 
     def auto_region(self,region):
+        if self._closing or self._worker_stopping or self._stale_worker_signal():return
         self.region=region;self.settings.region=asdict(region);self.settings.save(self.root/'settings.json');self.source_label.setText(self.region_text()+' • reacquired after layout change')
 
     def choose_monitor(self):
@@ -1135,6 +1173,7 @@ class MainWindow(ReviewTools,QMainWindow):
         self.retention_task=self.background(lambda:self.store.run_retention(self.settings.retention_days),lambda _:self.refresh_usage())
 
     def error(self,text):
+        if self._closing or self._stale_worker_signal():return
         logging.warning('User-visible error: %s',text)
         self.statusBar().showMessage(text,15000);QMessageBox.warning(self,'ChessStream',text)
 
