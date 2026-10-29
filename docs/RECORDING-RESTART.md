@@ -37,3 +37,14 @@ A real QThread regression verifies that detector construction and destruction
 occur on the same capture thread, not the GUI thread. This does not reproduce or
 prove the cause of the reported Windows access violation; physical Windows
 inference/capture restart testing remains outstanding.
+
+## Native crash evidence — dev18
+
+A repeated user report arrived while the dev17 portable workflow was still
+running; the installed version was not established. Do not treat that report as
+proof either that dev17 fixes the crash or that the user tested dev17.
+Native faulthandler stacks are now written to native-crash.log and included in
+exported diagnostic bundles. One previous log is retained after the current file
+exceeds 2 MB at startup. Capture is best effort: some native failures or external
+termination cannot produce Python stacks. A subprocess test exercises the open
+descriptor and diagnostic ZIP export without executing a destructive payload.
